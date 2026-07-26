@@ -1,0 +1,307 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+// App struct
+type App struct {
+	ctx      context.Context
+	dataFile string
+	syncDir  string
+	mu       sync.Mutex
+}
+
+// NewApp creates a new App application struct
+func NewApp() *App {
+	return &App{}
+}
+
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = "."
+	}
+	dataDir := filepath.Join(dir, "apitool")
+	_ = os.MkdirAll(dataDir, 0o755)
+	a.dataFile = filepath.Join(dataDir, "data.json")
+	a.syncDir = filepath.Join(dataDir, "syncserver")
+}
+
+func defaultData() AppData {
+	return AppData{
+		Projects: []Project{
+			{
+				ID:        "default",
+				Name:      "默认项目",
+				Dirs:      []Directory{},
+				Apis:      []ApiInfo{},
+				Environments: []Environment{},
+				UpdatedAt: time.Now().Format(time.RFC3339),
+			},
+		},
+		CurrentProjectID: "default",
+		Settings: Settings{
+			AIBaseURL:  "https://api.openai.com/v1",
+			AIModel:    "gpt-4o-mini",
+			TimeoutSec: 30,
+		},
+	}
+}
+
+func (a *App) readData() AppData {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	data := defaultData()
+	b, err := os.ReadFile(a.dataFile)
+	if err != nil {
+		return data
+	}
+	_ = json.Unmarshal(b, &data)
+	if data.Settings.TimeoutSec <= 0 {
+		data.Settings.TimeoutSec = 30
+	}
+	// 兼容旧版本（无 projects，仅有 dirs/apis/environments）的迁移
+	if len(data.Projects) == 0 {
+		proj := Project{ID: "default", Name: "默认项目", UpdatedAt: time.Now().Format(time.RFC3339)}
+		// 旧字段可能存在于反序列化失败，但通过额外解析处理
+		if migrated := a.migrateLegacy(b, &proj); migrated {
+			data.Projects = []Project{proj}
+			data.CurrentProjectID = proj.ID
+		}
+	}
+	if len(data.Projects) == 0 {
+		data = defaultData()
+	}
+	if data.CurrentProjectID == "" || !hasProject(data, data.CurrentProjectID) {
+		data.CurrentProjectID = data.Projects[0].ID
+	}
+	return data
+}
+
+// migrateLegacy 兼容旧版数据（顶层 dirs/apis/environments）
+func (a *App) migrateLegacy(b []byte, proj *Project) bool {
+	var legacy struct {
+		Dirs        []Directory   `json:"dirs"`
+		Apis        []ApiInfo     `json:"apis"`
+		Environments []Environment `json:"environments"`
+		ActiveEnvID string        `json:"activeEnvId"`
+	}
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		return false
+	}
+	if len(legacy.Dirs) == 0 && len(legacy.Apis) == 0 && len(legacy.Environments) == 0 {
+		return false
+	}
+	proj.Dirs = legacy.Dirs
+	proj.Apis = legacy.Apis
+	proj.Environments = legacy.Environments
+	proj.ActiveEnvID = legacy.ActiveEnvID
+	return true
+}
+
+func hasProject(data AppData, id string) bool {
+	for _, p := range data.Projects {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadData 加载全部数据（上次保存的接口信息）
+func (a *App) LoadData() AppData {
+	return a.readData()
+}
+
+// SaveData 保存全部数据
+func (a *App) SaveData(data AppData) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := a.dataFile + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, a.dataFile)
+}
+
+// GetDataFilePath 返回数据文件路径
+func (a *App) GetDataFilePath() string {
+	return a.dataFile
+}
+
+// CopyToClipboard 复制文本到剪贴板
+func (a *App) CopyToClipboard(text string) error {
+	return runtime.ClipboardSetText(a.ctx, text)
+}
+
+// OpenInBrowser 使用系统浏览器打开
+func (a *App) OpenInBrowser(url string) {
+	runtime.BrowserOpenURL(a.ctx, url)
+}
+
+// activeProjectIndex 返回当前项目的索引（无效时回退到第一个）
+func activeProjectIndex(data AppData) int {
+	for i, p := range data.Projects {
+		if p.ID == data.CurrentProjectID {
+			return i
+		}
+	}
+	if len(data.Projects) > 0 {
+		return 0
+	}
+	return -1
+}
+
+// collectScope 计算导出范围内的目录与接口（限定当前项目）
+func (a *App) collectScope(data AppData, dirID string, apiID string) (title string, dirs []Directory, apis []ApiInfo) {
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return "接口文档", nil, nil
+	}
+	proj := data.Projects[idx]
+	if apiID != "" {
+		for _, api := range proj.Apis {
+			if api.ID == apiID {
+				return api.Name, nil, []ApiInfo{api}
+			}
+		}
+		return "接口文档", nil, nil
+	}
+	if dirID == "" {
+		return "接口文档", proj.Dirs, proj.Apis
+	}
+	// 收集 dirID 的整个子树
+	include := map[string]bool{dirID: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, d := range proj.Dirs {
+			if include[d.ParentID] && !include[d.ID] {
+				include[d.ID] = true
+				changed = true
+			}
+		}
+	}
+	title = "接口文档"
+	for _, d := range proj.Dirs {
+		if d.ID == dirID {
+			title = d.Name
+		}
+		if include[d.ID] {
+			dirs = append(dirs, d)
+		}
+	}
+	for _, api := range proj.Apis {
+		if include[api.DirID] {
+			apis = append(apis, api)
+		}
+	}
+	return title, dirs, apis
+}
+
+func (a *App) buildDocContent(dirID, apiID, format string) (content string, title string, err error) {
+	data := a.readData()
+	title, dirs, apis := a.collectScope(data, dirID, apiID)
+	if len(apis) == 0 {
+		return "", "", fmt.Errorf("所选范围内没有接口")
+	}
+	rootID := ""
+	if apiID == "" {
+		rootID = dirID
+	}
+	switch format {
+	case "markdown":
+		content = buildMarkdown(title, rootID, dirs, apis)
+	case "html", "word":
+		content = buildHTML(title, rootID, dirs, apis)
+	case "openapi":
+		content, err = buildOpenAPI(title, apis)
+	default:
+		return "", "", fmt.Errorf("不支持的格式: %s", format)
+	}
+	return content, title, err
+}
+
+// ExportDoc 导出文档，返回保存路径
+func (a *App) ExportDoc(dirID string, apiID string, format string) (string, error) {
+	content, title, err := a.buildDocContent(dirID, apiID, format)
+	if err != nil {
+		return "", err
+	}
+	ext, filter := ".md", "Markdown (*.md)|*.md"
+	switch format {
+	case "html":
+		ext, filter = ".html", "HTML (*.html)|*.html"
+	case "word":
+		ext, filter = ".doc", "Word (*.doc)|*.doc"
+	case "openapi":
+		ext, filter = ".json", "OpenAPI JSON (*.json)|*.json"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出接口文档",
+		DefaultFilename: sanitizeFilename(title) + ext,
+		Filters: []runtime.FileFilter{
+			{DisplayName: filter, Pattern: "*" + ext},
+		},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）
+func (a *App) ShareDoc(dirID string, apiID string) (string, error) {
+	content, title, err := a.buildDocContent(dirID, apiID, "html")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(os.TempDir(), "apitool-share-"+sanitizeFilename(title)+".html")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	runtime.BrowserOpenURL(a.ctx, "file:///"+filepath.ToSlash(path))
+	return path, nil
+}
+
+// CopyDocMarkdown 复制 Markdown 文档到剪贴板（用于快速分享）
+func (a *App) CopyDocMarkdown(dirID string, apiID string) error {
+	content, _, err := a.buildDocContent(dirID, apiID, "markdown")
+	if err != nil {
+		return err
+	}
+	return runtime.ClipboardSetText(a.ctx, content)
+}
+
+func sanitizeFilename(s string) string {
+	out := []rune{}
+	for _, r := range s {
+		switch r {
+		case '\\', '/', ':', '*', '?', '"', '<', '>', '|':
+			out = append(out, '_')
+		default:
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 {
+		return "api-doc"
+	}
+	return string(out)
+}
