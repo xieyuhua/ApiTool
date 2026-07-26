@@ -2,9 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, OpenInBrowser } from '../../wailsjs/go/main/App'
-import { store, saveNow, scheduleAutoSync, currentProject, checkUpdate } from '../store'
+import { store, saveNow, scheduleAutoSync, checkUpdate } from '../store'
 import CloudSync from './CloudSync.vue'
-import KVEditor from './KVEditor.vue'
 
 const dataPath = ref('')
 const cloudVisible = ref(false)
@@ -113,21 +112,6 @@ async function toggleSync() {
             <el-input-number v-model="store.data.settings.timeoutSec" :min="1" :max="600" />
           </el-form-item>
         </el-form>
-      </div>
-
-      <div class="card">
-        <div class="card-title">公共参数（对所有接口的请求自动附加）</div>
-        <div style="font-size:12px;color:#86909c;margin-bottom:10px">
-          设置后，本项目所有接口发送请求时会自动带上这些 Header / Query；接口自身已设置的同名参数优先（接口覆盖公共）。
-        </div>
-        <el-tabs>
-          <el-tab-pane label="公共 Header">
-            <KVEditor :items="currentProject().common.headers" key-placeholder="Header 名" />
-          </el-tab-pane>
-          <el-tab-pane label="公共 Query">
-            <KVEditor :items="currentProject().common.query" key-placeholder="参数名" />
-          </el-tab-pane>
-        </el-tabs>
       </div>
 
       <div class="card">

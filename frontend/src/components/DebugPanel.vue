@@ -6,6 +6,7 @@ import { store, saveNow, activeEnvVars, currentProject, uid } from '../store'
 import { runScript } from '../script'
 import KVEditor from './KVEditor.vue'
 import EnvManager from './EnvManager.vue'
+import CommonParams from './CommonParams.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
 
@@ -14,6 +15,7 @@ const reqTab = ref('query')
 const respTab = ref('body')
 const sending = ref(false)
 const envVisible = ref(false)
+const commonVisible = ref(false)
 
 const contentTypeOptions = [
   'application/json',
@@ -232,7 +234,8 @@ function fmtSize(n) {
           <el-option label="无环境" value="" />
           <el-option v-for="e in currentProject().environments" :key="e.id" :label="e.name" :value="e.id" />
         </el-select>
-        <el-button size="large" title="管理环境" @click="envVisible = true">⚙</el-button>
+        <el-button size="large" title="管理环境" @click="envVisible = true">⚙ 环境</el-button>
+        <el-button size="large" title="公共参数（对所有接口自动附加）" @click="commonVisible = true">☰ 公共参数</el-button>
         <el-button type="primary" size="large" :loading="sending" style="width:100px" @click="send">
           发 送
         </el-button>
@@ -298,6 +301,7 @@ function fmtSize(n) {
     </div>
 
     <EnvManager v-model:visible="envVisible" />
+    <CommonParams v-model:visible="commonVisible" />
 
     <!-- 响应区 -->
     <div class="card">
@@ -322,16 +326,6 @@ function fmtSize(n) {
         <el-tabs v-model="respTab">
           <el-tab-pane label="响应体" name="body">
             <pre class="resp-body">{{ resp.body }}</pre>
-          </el-tab-pane>
-          <el-tab-pane label="响应头" name="headers">
-            <table class="field-table">
-              <thead><tr><th style="width:30%">Header</th><th>值</th></tr></thead>
-              <tbody>
-                <tr v-for="(v, k) in resp.headers" :key="k">
-                  <td style="font-family:Consolas,monospace">{{ k }}</td><td>{{ v }}</td>
-                </tr>
-              </tbody>
-            </table>
           </el-tab-pane>
         </el-tabs>
       </template>

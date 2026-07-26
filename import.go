@@ -83,6 +83,9 @@ func (a *App) ImportDoc() (string, error) {
 		}
 	}
 
+	// 剪枝：删除没有任何接口（含后代）的空目录，避免导入后产生大量无用的空文件夹
+	dirs = pruneEmptyDirs(dirs, apis)
+
 	data := a.readData()
 	idx := activeProjectIndex(data)
 	if idx < 0 {
@@ -200,6 +203,36 @@ func ensureTagPath(tagPath string, dirs *[]Directory, tagDir map[string]string) 
 		parent = id
 	}
 	return parent
+}
+
+// pruneEmptyDirs 删除没有任何接口（含后代接口）归属的空目录。
+// 保留规则：一个目录被保留，当且仅当它本身直接挂载了接口，或它的某个后代目录被保留。
+func pruneEmptyDirs(dirs []Directory, apis []ApiInfo) []Directory {
+	// 收集所有“被接口直接使用”的目录 ID
+	used := map[string]bool{}
+	for _, a := range apis {
+		if a.DirID != "" {
+			used[a.DirID] = true
+		}
+	}
+	// 由子到父传递“被使用”标记
+	changed := true
+	for changed {
+		changed = false
+		for _, d := range dirs {
+			if used[d.ID] && d.ParentID != "" && !used[d.ParentID] {
+				used[d.ParentID] = true
+				changed = true
+			}
+		}
+	}
+	out := dirs[:0]
+	for _, d := range dirs {
+		if used[d.ID] {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func joinURL(base, p string) string {
