@@ -400,6 +400,7 @@ export namespace main {
 	
 	export class ShareBackend {
 	    url: string;
+	    publicUrl: string;
 	    token: string;
 	    running: boolean;
 	
@@ -410,6 +411,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
+	        this.publicUrl = source["publicUrl"];
 	        this.token = source["token"];
 	        this.running = source["running"];
 	    }

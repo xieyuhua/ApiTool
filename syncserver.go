@@ -51,7 +51,7 @@ func (a *App) StartSyncServer(addr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("启动同步服务失败: %v", err)
 	}
-	srv := &http.Server{Handler: s.Handler()}
+	srv := &http.Server{Addr: ln.Addr().String(), Handler: s.Handler()}
 	syncSrv = srv
 	go func() {
 		_ = srv.Serve(ln)
@@ -88,22 +88,35 @@ func (a *App) SyncServerURL() string {
 	if host == "" || host == "0.0.0.0" || host == "[::]" || host == "::" {
 		host = localIP()
 	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
 	return fmt.Sprintf("http://%s:%s", host, port)
 }
 
 // ShareBackend 描述用于托管分享文档的内置同步服务
 type ShareBackend struct {
-	URL     string `json:"url"`
-	Token   string `json:"token"`
-	Running bool   `json:"running"`
+	URL       string `json:"url"`       // 本机回环地址（http://127.0.0.1:port），前端 fetch 用，不受防火墙拦截
+	PublicURL string `json:"publicUrl"` // 对外地址（http://局域网IP:port），供他人在浏览器打开 /s/ 链接
+	Token     string `json:"token"`
+	Running   bool   `json:"running"`
 }
 
 // SyncShareBackend 返回内置同步服务作为分享后端的地址与 token（仅在其运行时有效）。
-// 前端分享文档可优先托管到该服务（同一 8080 端口），启动内部服务后即可多端共享，
-// 无需再到「云同步」填写地址并登录。
+// URL 使用 127.0.0.1 回环，避免前端 webview 以局域网 IP fetch 时被本机防火墙拦截；
+// PublicURL 使用局域网 IP，便于复制给同网段其他设备打开。无需再到「云同步」填写地址并登录。
 func (a *App) SyncShareBackend() ShareBackend {
 	if syncSrv == nil {
 		return ShareBackend{}
 	}
-	return ShareBackend{URL: a.SyncServerURL(), Token: syncShareToken, Running: true}
+	_, port, err := net.SplitHostPort(syncSrv.Addr)
+	if err != nil {
+		port = "8080"
+	}
+	return ShareBackend{
+		URL:       "http://127.0.0.1:" + port,
+		PublicURL: a.SyncServerURL(),
+		Token:     syncShareToken,
+		Running:   true,
+	}
 }

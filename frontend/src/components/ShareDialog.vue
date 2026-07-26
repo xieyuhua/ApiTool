@@ -75,9 +75,9 @@ async function refresh() {
   shares.value = []
   try {
     const sb = syncShare.value
-    let base = '', token = ''
-    if (sb.running && sb.url) { base = sb.url; token = sb.token }
-    else if (cloudReady.value) { base = cloudBase(); token = settings.cloudToken }
+    let base = '', token = '', pub = ''
+    if (sb.running && sb.url) { base = sb.url; token = sb.token; pub = sb.publicUrl }
+    else if (cloudReady.value) { base = cloudBase(); token = settings.cloudToken; pub = cloudBase() }
     if (base) {
       const r = await fetch(base + '/api/share', {
         headers: { Authorization: 'Bearer ' + token },
@@ -89,7 +89,7 @@ async function refresh() {
           title: s.title,
           hasPassword: s.hasPassword,
           expireAt: s.expireAt,
-          link: base + '/s/' + s.token,
+          link: pub + '/s/' + s.token,
         }))
       }
     } else {
@@ -126,7 +126,7 @@ async function create() {
       const b = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(b.error || ('分享失败 ' + r.status))
       resultToken.value = b.token
-      result.value = sb.url + '/s/' + b.token
+      result.value = sb.publicUrl + '/s/' + b.token
     } else if (cloudReady.value) {
       const r = await fetch(cloudBase() + '/api/share', {
         method: 'POST',
@@ -208,7 +208,7 @@ function fmtExpire(exp) {
       <el-tab-pane label="在线链接" name="link">
         <el-alert v-if="syncShare.running" type="success" :closable="false" show-icon
           style="margin-bottom:14px"
-          :title="'内置同步服务托管（局域网多端共享）：' + syncShare.url"
+          :title="'内置同步服务托管（局域网多端共享）：' + syncShare.publicUrl"
           description="文档由本工具内置同步服务（:8080）托管，同一局域网内的其他设备可直接打开下方链接。公网访问请先在「设置 → 云同步」填写云服务器地址并登录。" />
         <el-alert v-else-if="cloudReady" type="success" :closable="false" show-icon
           style="margin-bottom:14px"
