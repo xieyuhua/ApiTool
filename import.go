@@ -388,16 +388,21 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 			base = strVal(s["url"])
 		}
 	}
+	// 目录：优先用顶层 tags 声明；兼容 Apipost 等「接口自带 tags 但未在顶层声明」的导出，
+	// 在遍历接口时若遇到未声明的 tag 也补建目录，保证按目录分组。
 	tagDir := map[string]string{}
+	addTag := func(name string) {
+		if name == "" || tagDir[name] != "" {
+			return
+		}
+		id := genID()
+		dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
+		tagDir[name] = id
+	}
 	if tl, ok := doc["tags"].([]interface{}); ok {
 		for _, t := range tl {
 			if tm, ok := t.(map[string]interface{}); ok {
-				name := strVal(tm["name"])
-				if name != "" {
-					id := genID()
-					dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
-					tagDir[name] = id
-				}
+				addTag(strVal(tm["name"]))
 			}
 		}
 	}
@@ -425,9 +430,12 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 				api.Name = method + " " + path
 			}
 			if tl, ok := op["tags"].([]interface{}); ok && len(tl) > 0 {
-				if t, ok := tl[0].(string); ok {
-					if id, ok2 := tagDir[t]; ok2 {
-						api.DirID = id
+				for _, t := range tl {
+					if name, ok := t.(string); ok {
+						addTag(name) // 接口引用的 tag 即使未声明也建目录
+						if id, ok2 := tagDir[name]; ok2 {
+							api.DirID = id
+						}
 					}
 				}
 			}
@@ -502,15 +510,18 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 	}
 
 	tagDir := map[string]string{}
+	addTag := func(name string) {
+		if name == "" || tagDir[name] != "" {
+			return
+		}
+		id := genID()
+		dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
+		tagDir[name] = id
+	}
 	if tl, ok := doc["tags"].([]interface{}); ok {
 		for _, t := range tl {
 			if tm, ok := t.(map[string]interface{}); ok {
-				name := strVal(tm["name"])
-				if name != "" {
-					id := genID()
-					dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
-					tagDir[name] = id
-				}
+				addTag(strVal(tm["name"]))
 			}
 		}
 	}
@@ -538,9 +549,12 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 				api.Name = method + " " + path
 			}
 			if tl, ok := op["tags"].([]interface{}); ok && len(tl) > 0 {
-				if t, ok := tl[0].(string); ok {
-					if id, ok2 := tagDir[t]; ok2 {
-						api.DirID = id
+				for _, t := range tl {
+					if name, ok := t.(string); ok {
+						addTag(name)
+						if id, ok2 := tagDir[name]; ok2 {
+							api.DirID = id
+						}
 					}
 				}
 			}
