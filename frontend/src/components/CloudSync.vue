@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { store, currentProject, saveNow, uid } from '../store'
+import { store, currentProject, saveNow, scheduleAutoSync, cloudBase } from '../store'
 
 const visible = defineModel('visible')
 const username = ref('')
@@ -13,15 +13,8 @@ const settings = store.data.settings
 const loggedIn = computed(() => !!settings.cloudToken)
 const proj = computed(() => currentProject())
 
-function baseURL() {
-  let u = (settings.cloudURL || '').trim()
-  if (!u) return ''
-  if (!/^https?:\/\//.test(u)) u = 'http://' + u
-  return u.replace(/\/+$/, '')
-}
-
 async function api(path, opts = {}) {
-  const url = baseURL() + path
+  const url = cloudBase() + path
   opts.headers = opts.headers || {}
   if (settings.cloudToken) opts.headers['Authorization'] = 'Bearer ' + settings.cloudToken
   opts.headers['Content-Type'] = 'application/json'
@@ -35,7 +28,7 @@ async function api(path, opts = {}) {
 }
 
 async function doLogin() {
-  if (!baseURL()) { ElMessage.warning('请先填写云服务器地址'); return }
+  if (!cloudBase()) { ElMessage.warning('请先填写云服务器地址'); return }
   if (!username.value || !password.value) { ElMessage.warning('请输入账号和密码'); return }
   busy.value = true
   try {
@@ -54,7 +47,7 @@ async function doLogin() {
 }
 
 async function doRegister() {
-  if (!baseURL()) { ElMessage.warning('请先填写云服务器地址'); return }
+  if (!cloudBase()) { ElMessage.warning('请先填写云服务器地址'); return }
   if (!username.value || !password.value) { ElMessage.warning('请输入账号和密码'); return }
   busy.value = true
   try {
@@ -78,6 +71,16 @@ function logout() {
   saveNow()
   cloudProjects.value = []
   ElMessage.success('已退出登录')
+}
+
+function onAutoSyncChange(val) {
+  saveNow()
+  if (val) {
+    scheduleAutoSync()
+    ElMessage.success('已开启自动同步')
+  } else {
+    ElMessage.info('已关闭自动同步')
+  }
 }
 
 async function refreshList() {
@@ -163,7 +166,11 @@ watch(visible, v => { if (v && loggedIn.value) refreshList() })
     <div v-else>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px">
         <span>已登录：<b>{{ settings.cloudUser }}</b></span>
-        <el-button size="small" @click="logout">退出登录</el-button>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span style="font-size:12px;color:#86909c">自动同步</span>
+          <el-switch v-model="settings.autoSync" @change="onAutoSyncChange" />
+          <el-button size="small" @click="logout">退出登录</el-button>
+        </div>
       </div>
 
       <div class="sync-card">
@@ -174,6 +181,9 @@ watch(visible, v => { if (v && loggedIn.value) refreshList() })
 
       <div class="sync-card">
         <div class="sync-card-title">云端项目（点击拉取到本地并切换）</div>
+        <div style="font-size:12px;color:#86909c;margin-bottom:8px">
+          用途：①多设备同步（公司推、家里拉）；②本地数据丢失后从云端恢复；③拿别人共享的项目。开启「自动同步」后日常无需手动拉取。
+        </div>
         <div v-if="!cloudProjects.length" class="sync-empty">云端暂无项目，先推送当前项目</div>
         <div v-for="c in cloudProjects" :key="c.id" class="cloud-row">
           <span class="cloud-name">{{ c.name }}</span>

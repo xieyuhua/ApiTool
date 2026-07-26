@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -30,6 +31,16 @@ type CloudProject struct {
 	Owner     string          `json:"owner"`
 	UpdatedAt string          `json:"updatedAt"`
 	Data      json.RawMessage `json:"data"`
+}
+
+// ShareDoc 公开分享的接口文档（可匿名访问，可选密码）
+type ShareDoc struct {
+	Token     string    `json:"token"`
+	Title     string    `json:"title"`
+	HTML      string    `json:"html"`
+	Password  string    `json:"password"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpireAt  time.Time `json:"expireAt"`
 }
 
 type Store struct {
@@ -109,7 +120,160 @@ func (s *Store) Handler() http.Handler {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/projects", s.handleProjectsListCreate)
 	mux.HandleFunc("/api/projects/", s.handleProjectByID)
+	mux.HandleFunc("/api/share", s.handleShare)       // 创建(poster)/列出(getter)，需登录
+	mux.HandleFunc("/api/share/", s.handleShareToken) // 删除，需登录
+	mux.HandleFunc("/s/", s.handleShareView)          // 公开访问查看，无需登录
 	return cors(mux)
+}
+
+func (s *Store) shareFile(token string) string {
+	return filepath.Join(s.dir, "shares", token+".json")
+}
+
+func (s *Store) saveShare(doc *ShareDoc) error {
+	dir := filepath.Join(s.dir, "shares")
+	_ = os.MkdirAll(dir, 0o755)
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.shareFile(doc.Token), b, 0o644)
+}
+
+func (s *Store) loadShare(token string) (*ShareDoc, error) {
+	b, err := os.ReadFile(s.shareFile(token))
+	if err != nil {
+		return nil, err
+	}
+	var d ShareDoc
+	if err := json.Unmarshal(b, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (s *Store) listShares() []ShareDoc {
+	files, _ := filepath.Glob(filepath.Join(s.dir, "shares", "*.json"))
+	var out []ShareDoc
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var d ShareDoc
+		if json.Unmarshal(b, &d) != nil {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// handleShare 创建分享文档（POST，需登录）或列出分享（GET，需登录）
+func (s *Store) handleShare(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.auth(r)
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "未授权"})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var body struct {
+			Title         string `json:"title"`
+			HTML          string `json:"html"`
+			Password      string `json:"password"`
+			ExpireMinutes int    `json:"expireMinutes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.HTML == "" {
+			writeJSON(w, 400, map[string]string{"error": "请求格式错误，缺少 html"})
+			return
+		}
+		token := newToken()
+		expire := time.Time{}
+		if body.ExpireMinutes > 0 {
+			expire = time.Now().Add(time.Duration(body.ExpireMinutes) * time.Minute)
+		}
+		doc := &ShareDoc{
+			Token:     token,
+			Title:     body.Title,
+			HTML:      body.HTML,
+			Password:  strings.TrimSpace(body.Password),
+			CreatedAt: time.Now(),
+			ExpireAt:  expire,
+		}
+		if err := s.saveShare(doc); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]string{"token": token, "owner": u.Username})
+		return
+	}
+	if r.Method == http.MethodGet {
+		var list []map[string]interface{}
+		for _, d := range s.listShares() {
+			exp := int64(0)
+			if !d.ExpireAt.IsZero() {
+				exp = d.ExpireAt.Unix()
+			}
+			list = append(list, map[string]interface{}{
+				"token":      d.Token,
+				"title":      d.Title,
+				"hasPassword": d.Password != "",
+				"expireAt":   exp,
+				"createdAt":  d.CreatedAt.Unix(),
+			})
+		}
+		writeJSON(w, 200, list)
+		return
+	}
+	writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+}
+
+// handleShareToken 删除指定分享（DELETE，需登录）
+func (s *Store) handleShareToken(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.auth(r); !ok {
+		writeJSON(w, 401, map[string]string{"error": "未授权"})
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/share/"), "/")
+	if token == "" {
+		writeJSON(w, 400, map[string]string{"error": "缺少分享 token"})
+		return
+	}
+	_ = os.Remove(s.shareFile(token))
+	writeJSON(w, 200, map[string]string{"ok": "1"})
+}
+
+// handleShareView 公开查看分享文档（GET，无需登录，可选 Basic Auth 密码）
+func (s *Store) handleShareView(w http.ResponseWriter, r *http.Request) {
+	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/s/"), "/")
+	if token == "" {
+		http.Error(w, "缺少分享标识", http.StatusBadRequest)
+		return
+	}
+	doc, err := s.loadShare(token)
+	if err != nil {
+		http.Error(w, "链接无效或已失效", http.StatusNotFound)
+		return
+	}
+	if !doc.ExpireAt.IsZero() && time.Now().After(doc.ExpireAt) {
+		_ = os.Remove(s.shareFile(token))
+		http.Error(w, "链接已过期", http.StatusGone)
+		return
+	}
+	if doc.Password != "" {
+		_, pass, ok := r.BasicAuth()
+		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(doc.Password)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="ApiTool 分享文档"`)
+			http.Error(w, "需要访问密码", http.StatusUnauthorized)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(doc.HTML))
 }
 
 func cors(next http.Handler) http.Handler {

@@ -50,7 +50,7 @@ export const store = reactive({
       { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '' },
     ],
     currentProjectId: 'default',
-    settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '' },
+    settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false },
   },
 })
 
@@ -66,9 +66,29 @@ function scheduleSave() {
   saveTimer = setTimeout(saveNow, 500)
 }
 
+// Wails 桥接（window.go）由桌面运行时注入，可能晚于 Vue 挂载；
+// 浏览器预览（npm run dev）下不存在，此时退回内存数据，避免崩溃。
+function hasGoBridge() {
+  return !!(window.go && window.go.main && window.go.main.App)
+}
+
+function waitForGo(timeoutMs = 3000) {
+  return new Promise(resolve => {
+    if (hasGoBridge()) return resolve(true)
+    const t0 = Date.now()
+    const timer = setInterval(() => {
+      if (hasGoBridge() || Date.now() - t0 > timeoutMs) {
+        clearInterval(timer)
+        resolve(hasGoBridge())
+      }
+    }, 50)
+  })
+}
+
 export async function saveNow() {
   clearTimeout(saveTimer)
   if (!store.loaded) return
+  if (!hasGoBridge()) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
   } catch (e) {
@@ -77,6 +97,10 @@ export async function saveNow() {
 }
 
 async function loadInto() {
+  if (!hasGoBridge()) {
+    // 非 Wails 环境（如浏览器预览），保持内存中的默认数据
+    return
+  }
   const d = await LoadData()
   d.projects ||= []
   if (!d.projects.length) {
@@ -92,18 +116,24 @@ async function loadInto() {
     p.activeEnvId ||= ''
     p.apis.forEach(normalizeApi)
   }
-  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '' }
+  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false }
   store.data = d
 }
 
 export async function initStore() {
-  try {
-    await loadInto()
-  } catch (e) {
-    console.error('加载数据失败', e)
+  const ok = await waitForGo()
+  if (ok) {
+    try {
+      await loadInto()
+    } catch (e) {
+      console.error('加载数据失败', e)
+    }
+  } else {
+    console.warn('未检测到 Wails 桥接（window.go），使用内存数据（预览模式）')
   }
   store.loaded = true
-  watch(() => store.data, scheduleSave, { deep: true })
+  watch(() => store.data, () => { scheduleSave(); scheduleAutoSync() }, { deep: true })
+  if (ok) await autoPullOnStart()
 }
 
 export async function reloadStore() {
@@ -111,6 +141,94 @@ export async function reloadStore() {
     await loadInto()
   } catch (e) {
     console.error('重新加载数据失败', e)
+  }
+}
+
+// ---------------- 云同步（自动同步） ----------------
+
+export function cloudBase() {
+  let u = (store.data.settings.cloudURL || '').trim()
+  if (!u) return ''
+  if (!/^https?:\/\//.test(u)) u = 'http://' + u
+  return u.replace(/\/+$/, '')
+}
+
+export async function cloudApi(path, opts = {}) {
+  const url = cloudBase() + path
+  opts.headers = opts.headers || {}
+  const token = store.data.settings.cloudToken
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token
+  opts.headers['Content-Type'] = 'application/json'
+  const r = await fetch(url, opts)
+  let body = null
+  try { body = await r.json() } catch { /* ignore */ }
+  if (!r.ok) throw new Error((body && body.error) || ('请求失败 ' + r.status))
+  return body
+}
+
+// 自动同步是否启用（需开启开关且已登录且已配置地址）
+function autoSyncEnabled() {
+  const s = store.data.settings
+  return !!s.autoSync && !!s.cloudToken && !!s.cloudURL
+}
+
+let syncTimer = null
+// 编辑后防抖推送（默认 4 秒），避免频繁请求
+export function scheduleAutoSync() {
+  if (!autoSyncEnabled()) return
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(autoPushNow, 4000)
+}
+
+// 自动把所有项目推送到云端，云端有更新版本时先拉取，避免互相覆盖
+async function autoPushNow() {
+  if (!autoSyncEnabled()) return
+  const now = new Date().toISOString()
+  let conflictId = ''
+  for (const p of store.data.projects) {
+    p.updatedAt = now
+    try {
+      const b = await cloudApi('/api/projects/' + p.id, {
+        method: 'PUT',
+        body: JSON.stringify({ name: p.name, updatedAt: p.updatedAt, data: p }),
+      })
+      if (b && b.updatedAt) p.updatedAt = b.updatedAt
+    } catch (e) {
+      const msg = String(e)
+      if (msg.includes('409') || msg.includes('请先拉取')) conflictId = p.id
+      else console.warn('自动同步到云端失败', e)
+    }
+  }
+  saveNow()
+  if (conflictId) {
+    try { await autoPullProject(conflictId) } catch { /* ignore */ }
+  }
+}
+
+async function autoPullProject(id) {
+  const remote = await cloudApi('/api/projects/' + id)
+  const data = remote.data
+  if (!data) return
+  const i = store.data.projects.findIndex(x => x.id === data.id)
+  if (i >= 0) store.data.projects[i] = data
+  else store.data.projects.push(data)
+  saveNow()
+}
+
+// 启动应用时自动拉取云端「更新的」或「本地没有的」项目，实现多端同步
+export async function autoPullOnStart() {
+  if (!autoSyncEnabled()) return
+  try {
+    const list = await cloudApi('/api/projects')
+    if (!Array.isArray(list)) return
+    for (const c of list) {
+      const existing = store.data.projects.find(x => x.id === c.id)
+      if (!existing || (c.updatedAt && (!existing.updatedAt || c.updatedAt > existing.updatedAt))) {
+        await autoPullProject(c.id)
+      }
+    }
+  } catch (e) {
+    console.warn('启动自动拉取失败', e)
   }
 }
 

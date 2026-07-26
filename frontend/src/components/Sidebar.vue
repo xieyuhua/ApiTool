@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, reactive } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject } from '../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow } from '../store'
 
 const keyword = ref('')
 const treeRef = ref(null)
@@ -94,11 +94,26 @@ function duplicate(node) {
 }
 
 function handleCmd(cmd, node) {
-  if (cmd === 'addDir') addDir(node.id)
+  if (cmd === 'addDir') newDir(node.id)
   else if (cmd === 'addApi') openNewApi(node.id)
   else if (cmd === 'rename') rename(node)
   else if (cmd === 'delete') del(node)
   else if (cmd === 'duplicate') duplicate(node)
+}
+
+// 新增目录：弹窗输入名称
+async function newDir(parentId = '') {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入目录名称', '新建目录', {
+      inputValue: '新建目录', confirmButtonText: '创建', cancelButtonText: '取消',
+    })
+    const name = (value || '').trim()
+    if (!name) return
+    const d = addDir(parentId)
+    d.name = name
+    saveNow()
+    ElMessage.success('已创建目录：' + d.name)
+  } catch { /* 取消 */ }
 }
 
 // 右键菜单
@@ -126,6 +141,43 @@ async function newProject() {
     ElMessage.success('已创建项目：' + p.name)
   } catch { /* 取消 */ }
 }
+
+function onProjCmd(cmd) {
+  if (cmd === 'new') newProject()
+  else if (cmd === 'rename') renameProjectNow()
+  else if (cmd === 'delete') removeProjectNow()
+}
+
+// 重命名当前项目
+async function renameProjectNow() {
+  const p = currentProject()
+  try {
+    const { value } = await ElMessageBox.prompt('请输入项目名称', '重命名项目', {
+      inputValue: p.name, confirmButtonText: '确定', cancelButtonText: '取消',
+    })
+    const name = (value || '').trim()
+    if (!name) return
+    p.name = name
+    saveNow()
+    ElMessage.success('项目已重命名为：' + name)
+  } catch { /* 取消 */ }
+}
+
+// 删除当前项目（至少保留一个）
+async function removeProjectNow() {
+  if (store.data.projects.length <= 1) {
+    ElMessage.warning('至少需保留一个项目')
+    return
+  }
+  const p = currentProject()
+  try {
+    await ElMessageBox.confirm('确定删除项目「' + p.name + '」？该操作不可恢复。', '删除项目', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    })
+    removeProject(p.id)
+    ElMessage.success('已删除项目：' + p.name)
+  } catch { /* 取消 */ }
+}
 </script>
 
 <template>
@@ -135,11 +187,20 @@ async function newProject() {
         @change="switchProject" title="切换项目">
         <el-option v-for="p in store.data.projects" :key="p.id" :label="p.name" :value="p.id" />
       </el-select>
-      <el-button size="small" title="新建项目" @click="newProject">＋</el-button>
+      <el-dropdown trigger="click" @command="onProjCmd">
+        <el-button size="small" title="项目操作">⋯</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="new">新建项目</el-dropdown-item>
+            <el-dropdown-item command="rename">重命名当前项目</el-dropdown-item>
+            <el-dropdown-item command="delete" divided>删除当前项目</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
     <div class="sb-head">
       <el-input v-model="keyword" placeholder="搜索接口 / 目录" size="small" clearable @input="onKeyword" />
-      <el-button size="small" @click="addDir('')">+ 目录</el-button>
+      <el-button size="small" @click="newDir('')">+ 目录</el-button>
       <el-button size="small" type="primary" @click="openNewApi('')">+ 接口</el-button>
     </div>
     <div class="sb-tree" @contextmenu.prevent>

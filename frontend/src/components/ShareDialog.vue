@@ -1,10 +1,11 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   BuildSharedHTML, ExportDoc, ShareDoc,
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
 } from '../../wailsjs/go/main/App'
+import { store, cloudBase } from '../store'
 
 const props = defineProps({
   dirId: { type: String, default: '' },
@@ -46,6 +47,13 @@ async function preview() {
 }
 
 // ---------------- 在线链接 ----------------
+const settings = store.data.settings
+// 云分享：已配置云服务器地址且已登录，文档上传到云端，得到公网可访问链接
+const cloudReady = computed(() => {
+  const u = (settings.cloudURL || '').trim()
+  return !!u && !!settings.cloudToken
+})
+
 const password = ref('')
 const expire = ref(60)
 const expireOptions = [
@@ -56,21 +64,60 @@ const expireOptions = [
   { label: '不失效（长期有效）', value: 0 },
 ]
 const result = ref('')
+const resultToken = ref('')
 const shares = ref([])
 const busy = ref(false)
 
 async function refresh() {
-  try { shares.value = await ListShares() } catch { shares.value = [] }
+  shares.value = []
+  try {
+    if (cloudReady.value) {
+      const r = await fetch(cloudBase() + '/api/share', {
+        headers: { Authorization: 'Bearer ' + settings.cloudToken },
+      })
+      const list = await r.json().catch(() => [])
+      if (Array.isArray(list)) {
+        shares.value = list.map(s => ({
+          token: s.token,
+          title: s.title,
+          hasPassword: s.hasPassword,
+          expireAt: s.expireAt,
+          link: cloudBase() + '/s/' + s.token,
+        }))
+      }
+    } else {
+      shares.value = await ListShares()
+    }
+  } catch { shares.value = [] }
 }
 watch(visible, (v) => {
-  if (v) { result.value = ''; refresh(); buildCode() }
+  if (v) { result.value = ''; resultToken.value = ''; refresh(); buildCode() }
 })
+
+function tokenFromLink(link) {
+  const m = link.match(/[?&]t=([^&]+)/) || link.match(/\/s\/(.+)$/)
+  return m ? m[1] : ''
+}
 
 async function create() {
   busy.value = true
   try {
-    const link = await CreateShareLink(props.dirId, props.apiId, password.value, expire.value)
-    result.value = link
+    const html = await BuildSharedHTML(props.dirId, props.apiId)
+    if (cloudReady.value) {
+      const r = await fetch(cloudBase() + '/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.cloudToken },
+        body: JSON.stringify({ html, password: password.value, expireMinutes: expire.value }),
+      })
+      const b = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(b.error || ('云端分享失败 ' + r.status))
+      resultToken.value = b.token
+      result.value = cloudBase() + '/s/' + b.token
+    } else {
+      const link = await CreateShareLink(props.dirId, props.apiId, password.value, expire.value)
+      resultToken.value = tokenFromLink(link)
+      result.value = link
+    }
     ElMessage.success('分享链接已生成')
     refresh()
   } catch (e) {
@@ -78,8 +125,18 @@ async function create() {
   } finally { busy.value = false }
 }
 async function stop(token) {
-  try { await StopShare(token); ElMessage.success('已停止该分享'); refresh() }
-  catch (e) { ElMessage.error(String(e)) }
+  try {
+    if (cloudReady.value) {
+      await fetch(cloudBase() + '/api/share/' + token, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + settings.cloudToken },
+      })
+    } else {
+      await StopShare(token)
+    }
+    ElMessage.success('已停止该分享')
+    refresh()
+  } catch (e) { ElMessage.error(String(e)) }
 }
 async function copy(link) {
   try { await CopyToClipboard(link); ElMessage.success('链接已复制') } catch (e) { ElMessage.error(String(e)) }
@@ -119,9 +176,14 @@ function fmtExpire(exp) {
 
       <!-- 在线链接 -->
       <el-tab-pane label="在线链接" name="link">
-        <el-alert type="info" :closable="false" show-icon
+        <el-alert v-if="cloudReady" type="success" :closable="false" show-icon
           style="margin-bottom:14px"
-          title="说明：该链接由本工具内置本地服务托管，他人在浏览器打开即可查看（区别于「网页代码」）。分享期间请保持本程序运行；同一局域网可将 localhost 替换为你的 IP 访问。" />
+          :title="'云分享模式：文档将上传到云服务器 ' + cloudBase() + '，生成公网可访问的链接，任何人都可在浏览器打开（无需对方安装本程序）。'"
+          description="需先在「设置 → 云同步」填写云服务器地址并登录。" />
+        <el-alert v-else type="warning" :closable="false" show-icon
+          style="margin-bottom:14px"
+          title="本地分享模式（未配置云服务器）"
+          description="该链接由本工具内置本地服务托管，同一局域网内的他人可在浏览器打开（localhost 替换为你的局域网 IP）；公网访问请先在「设置 → 云同步」配置并登录云服务器。" />
 
         <el-form label-width="90px">
           <el-form-item label="访问密码">

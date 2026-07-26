@@ -54,6 +54,13 @@ func boolCN(b bool) string {
 	return "否"
 }
 
+// escAttr 用于 HTML 属性值转义（额外转义双引号）
+func escAttr(s string) string {
+	s = html.EscapeString(s)
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	return s
+}
+
 // ---------------- Markdown ----------------
 
 func mdFieldRows(sb *strings.Builder, fields []*Field, depth int) {
@@ -175,9 +182,10 @@ func htmlKVTable(sb *strings.Builder, title string, kvs []KV) {
 	sb.WriteString(`</tbody></table>`)
 }
 
-func htmlApi(sb *strings.Builder, api ApiInfo) {
+func htmlApi(sb *strings.Builder, api ApiInfo, dirName string) {
 	method := strings.ToUpper(api.Method)
-	sb.WriteString(fmt.Sprintf(`<div class="api" id="api-%s"><h3>%s</h3>`, api.ID, html.EscapeString(api.Name)))
+	sb.WriteString(fmt.Sprintf(`<div class="api" id="api-%s" data-name="%s" data-url="%s" data-dir="%s"><h3>%s</h3>`,
+		api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName), html.EscapeString(api.Name)))
 	sb.WriteString(fmt.Sprintf(`<div class="urlbar"><span class="method m-%s">%s</span><code>%s</code></div>`,
 		strings.ToLower(method), method, html.EscapeString(api.URL)))
 	if api.Description != "" {
@@ -200,34 +208,35 @@ func htmlApi(sb *strings.Builder, api ApiInfo) {
 	sb.WriteString(`</div>`)
 }
 
-func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int) {
+func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, dirName string) {
 	for _, api := range dirApis(apis, parentID) {
-		htmlApi(sb, api)
+		htmlApi(sb, api, dirName)
 	}
 	for _, d := range childDirs(dirs, parentID) {
-		sb.WriteString(fmt.Sprintf(`<h2 class="dir">%s</h2>`, html.EscapeString(d.Name)))
-		htmlDir(sb, dirs, apis, d.ID, level+1)
+		sb.WriteString(fmt.Sprintf(`<h2 class="dir" data-dir="%s">%s</h2>`, escAttr(d.Name), html.EscapeString(d.Name)))
+		htmlDir(sb, dirs, apis, d.ID, level+1, d.Name)
 	}
 }
 
-func htmlToc(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, depth int) {
+func htmlToc(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, depth int, dirName string) {
 	for _, api := range dirApis(apis, parentID) {
-		sb.WriteString(fmt.Sprintf(`<a class="toc-api" style="padding-left:%dpx" href="#api-%s"><span class="tm tm-%s">%s</span>%s</a>`,
-			12+depth*14, api.ID, strings.ToLower(api.Method), strings.ToUpper(api.Method), html.EscapeString(api.Name)))
+		sb.WriteString(fmt.Sprintf(`<a class="toc-api" style="padding-left:%dpx" href="#api-%s" data-name="%s" data-url="%s" data-dir="%s"><span class="tm tm-%s">%s</span>%s</a>`,
+			12+depth*14, api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName),
+			strings.ToLower(api.Method), strings.ToUpper(api.Method), html.EscapeString(api.Name)))
 	}
 	for _, d := range childDirs(dirs, parentID) {
-		sb.WriteString(fmt.Sprintf(`<div class="toc-dir" style="padding-left:%dpx">%s</div>`, 12+depth*14, html.EscapeString(d.Name)))
-		htmlToc(sb, dirs, apis, d.ID, depth+1)
+		sb.WriteString(fmt.Sprintf(`<div class="toc-dir" style="padding-left:%dpx" data-dir="%s">%s</div>`, 12+depth*14, escAttr(d.Name), html.EscapeString(d.Name)))
+		htmlToc(sb, dirs, apis, d.ID, depth+1, d.Name)
 	}
 }
 
 func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo) string {
 	var body, toc strings.Builder
 	if dirs == nil && len(apis) == 1 && rootID == "" {
-		htmlApi(&body, apis[0])
+		htmlApi(&body, apis[0], "")
 	} else {
-		htmlDir(&body, dirs, apis, rootID, 0)
-		htmlToc(&toc, dirs, apis, rootID, 0)
+		htmlDir(&body, dirs, apis, rootID, 0, "")
+		htmlToc(&toc, dirs, apis, rootID, 0, "")
 	}
 	tocHTML := ""
 	if toc.Len() > 0 {
@@ -244,8 +253,12 @@ func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo) string {
 .toc a:hover{background:#f2f3f5}
 .tm{display:inline-block;font-size:10px;font-weight:700;margin-right:6px;width:44px;text-align:center;border-radius:3px;padding:1px 0;color:#fff}
 main{flex:1;padding:32px 40px;min-width:0}
+.doc-head{margin:0}
 h1{font-size:26px;margin:0 0 4px}
-.meta{color:#86909c;font-size:13px;margin-bottom:28px}
+.meta{color:#86909c;font-size:13px;margin-bottom:18px}
+.doc-search{position:sticky;top:0;background:#f7f8fa;padding:6px 0 14px;z-index:5}
+.doc-search input{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #e5e6eb;border-radius:8px;font-size:14px;outline:none;background:#fff}
+.doc-search input:focus{border-color:#165dff;box-shadow:0 0 0 2px rgba(22,93,255,.12)}
 h2.dir{font-size:20px;margin:36px 0 8px;padding-bottom:8px;border-bottom:2px solid #e5e6eb}
 .api{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:20px 24px;margin:16px 0}
 .api h3{margin:0 0 12px;font-size:18px}
@@ -264,14 +277,31 @@ th{background:#f7f8fa;font-weight:600}
 .ftype{color:#165dff;font-size:12px}
 .fex{color:#86909c}
 pre{background:#1d2129;color:#e5e6eb;border-radius:8px;padding:14px;font-size:13px;overflow:auto;max-height:400px}
-@media print{.toc{display:none}}
+.empty-tip{color:#86909c;font-size:14px;padding:40px 0;text-align:center;display:none}
+@media print{.toc,.doc-search{display:none}}
 `
+	js := `
+<script>
+function apitoolMatch(q,hay){hay=(hay||'').toLowerCase();if(hay.indexOf(q)>=0)return true;var i=0;for(var j=0;j<hay.length&&i<q.length;j++){if(hay[j]===q[i])i++;}return i===q.length;}
+function apitoolFilter(){var box=document.getElementById('docSearch');var q=box?box.value.trim().toLowerCase():'';var apis=document.querySelectorAll('.api');var tocApis=document.querySelectorAll('.toc-api');var tocDirs=document.querySelectorAll('.toc-dir');var dirs=document.querySelectorAll('h2.dir');
+if(!q){apis.forEach(function(a){a.style.display='';});dirs.forEach(function(d){d.style.display='';});tocApis.forEach(function(a){a.style.display='';});tocDirs.forEach(function(d){d.style.display='';});var t=document.getElementById('docEmpty');if(t)t.style.display='none';return;}
+apis.forEach(function(a){var hay=(a.getAttribute('data-name')||'')+' '+(a.getAttribute('data-url')||'')+' '+(a.getAttribute('data-dir')||'');a.style.display=apitoolMatch(q,hay)?'':'none';});
+tocApis.forEach(function(a){var hay=(a.getAttribute('data-name')||'')+' '+(a.getAttribute('data-url')||'')+' '+(a.getAttribute('data-dir')||'');a.style.display=apitoolMatch(q,hay)?'':'none';});
+dirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCase();var any=false;document.querySelectorAll('.api').forEach(function(a){if((a.getAttribute('data-dir')||'')===(d.getAttribute('data-dir')||'')&&a.style.display!=='none')any=true;});d.style.display=(apitoolMatch(q,name)||any)?'':'none';});
+tocDirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCase();var any=false;document.querySelectorAll('.toc-api').forEach(function(a){if((a.getAttribute('data-dir')||'')===(d.getAttribute('data-dir')||'')&&a.style.display!=='none')any=true;});d.style.display=(apitoolMatch(q,name)||any)?'':'none';});
+var visible=0;apis.forEach(function(a){if(a.style.display!=='none')visible++;});var t=document.getElementById('docEmpty');if(t)t.style.display=visible?'none':'block';}
+</script>`
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s - 接口文档</title><style>%s</style></head>
-<body><div class="layout">%s<main><h1>%s</h1><div class="meta">共 %d 个接口 · 导出时间 %s · 由 ApiTool 生成</div>%s</main></div></body></html>`,
+<body><div class="layout">%s<main>
+<div class="doc-head"><h1>%s</h1><div class="meta">共 %d 个接口 · 导出时间 %s · 由 ApiTool 生成</div>
+<div class="doc-search"><input id="docSearch" type="search" placeholder="搜索目录 / 接口名称 / 接口地址" oninput="apitoolFilter()" autocomplete="off"></div></div>
+%s
+<div id="docEmpty" class="empty-tip">没有匹配的接口</div>
+</main></div>%s</body></html>`,
 		html.EscapeString(title), css, tocHTML, html.EscapeString(title), len(apis),
-		time.Now().Format("2006-01-02 15:04"), body.String())
+		time.Now().Format("2006-01-02 15:04"), body.String(), js)
 }
 
 // ---------------- OpenAPI ----------------

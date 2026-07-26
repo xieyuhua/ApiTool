@@ -1,19 +1,192 @@
-# README
+# ApiTool · 接口调试与文档工具
 
-## About
+本地优先的 API 接口调试、管理与文档生成工具。基于 **Wails + Vue + Go** 构建为桌面应用，
+同时内置可独立部署的**云同步/分享服务器**，实现「本地开发 + 云端分享」。
 
-This is the official Wails Vue template.
+- 本地数据自动保存，无需登录即可使用
+- 多项目 / 多目录 / 多接口管理
+- 环境变量、前后置脚本、AI 自动生成字段说明
+- 一键导出 Markdown / HTML / Word / OpenAPI 文档
+- 两种分享方式：**网页代码（独立 HTML）** 与 **在线链接（本地或云服务器）**
+- 云同步 / 多端共享：把项目推送到云端，其他设备拉取
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+---
 
-## Live Development
+## 一、功能一览
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+| 模块 | 功能 |
+| --- | --- |
+| 项目管理 | 新建、重命名、切换、删除项目（顶部「⋯」菜单） |
+| 接口 / 目录 | 新建目录（弹窗命名）、新建接口（支持从 URL 解析）、重命名、复制、删除 |
+| 接口调试 | 请求方法、URL、Query、Header、Body（JSON/表单/Raw）、前后置脚本 |
+| 环境变量 | 多套环境（如 开发/测试/生产），`{{变量}}` 在请求中自动替换 |
+| 文档中心 | 按目录范围导出 Markdown / HTML / Word / OpenAPI，复制 Markdown，导入外部文档 |
+| 文档预览 | 单接口实时文档预览（参数、示例、响应字段） |
+| 分享 | 网页代码（独立 HTML 源码，可复制/导出/预览）、在线链接（本地托管或云服务器） |
+| 云同步 | 登录云服务器后推送/拉取项目，实现多端共享 |
+| 内置同步 | 桌面端可一键启动内置同步服务，供局域网/公网连接 |
+| AI 配置 | 配置 OpenAI 兼容接口，自动生成字段描述 |
 
-## Building
+---
 
-To build a redistributable, production mode package, use `wails build`.
+## 二、安装与构建
+
+### 环境要求
+- Go 1.21+
+- Node.js 18+
+- Wails v2 CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+
+### 构建桌面应用
+```bash
+# 安装前端依赖并构建
+cd apitool
+wails build
+```
+产物位于 `build/bin/apitool.exe`（Windows）/ `build/bin/apitool`（macOS/Linux）。
+
+### 开发模式（热更新）
+```bash
+wails dev
+```
+会启动 Vite 开发服务器；也可在浏览器访问 `http://localhost:34115` 进行前端调试。
+
+### 构建云同步 / 分享服务器（独立部署到云）
+```bash
+go build -o build/bin/apitool-server.exe ./server/cmd
+```
+运行：
+```bash
+apitool-server.exe -addr :8080 -data apitool-server-data
+```
+- `-addr`：监听地址，如 `:8080` 或 `0.0.0.0:8080`
+- `-data`：数据存储目录（用户账号、项目、分享文档）
+
+---
+
+## 三、使用指南
+
+### 1. 项目与目录
+- 顶部项目下拉框右侧「⋯」菜单：**新建项目 / 重命名当前项目 / 删除当前项目**。
+- 侧边栏「+ 目录」与目录右键「新建子目录」会**弹窗输入名称**后创建。
+- 「+ 接口」支持直接粘贴带 Query 参数的完整 URL（自动解析地址与参数）。
+
+### 2. 调试接口
+- 在「调试」页填写方法、URL、参数、Header、Body。
+- **环境变量替换**：URL 与参数值中可用 `{{变量名}}` 引用当前激活环境的变量，
+  发送时自动替换为对应值（仅启用项生效）。
+- **前后置脚本**：支持在请求前/后执行脚本（可用于动态签名、取响应字段等）。
+
+### 3. 环境变量
+- 「环境变量」面板以横向环境芯片切换（开发/测试/生产…），编辑区占满宽度。
+- 每行变量：`启用 / 变量名 / 值 / 说明`，可任意增删。
+- 切换「当前激活环境」后，调试时 `{{变量}}` 即使用该环境的值。
+
+### 4. 文档中心（导出与导入）
+入口：顶部「📄 文档中心」。
+- **选择范围**：按目录层级选择要导出的接口范围。
+- **导出格式**：
+  - Markdown（`.md`）— 适合 Git 仓库、Wiki
+  - HTML（`.html`）— 带目录导航的网页文档
+  - Word（`.doc`）— 可用 Office / WPS 打开编辑
+  - OpenAPI 3.0（`.json`）— 可导入 Swagger、Postman、Apifox
+- **复制 Markdown**：直接复制到剪贴板。
+- **导入文档**：支持 OpenAPI 3.0 / Swagger 2.0 / Postman Collection（JSON 与 YAML），
+  导入内容归入独立目录。
+
+### 5. 分享文档
+在接口或目录的右键菜单 / 文档中心中打开「分享」对话框，提供两种方式：
+
+#### 方式 A：网页代码（独立 HTML，推荐）
+- 生成**完整且样式内联的 HTML 源码**，**不依赖任何服务端**。
+- 可「复制网页代码」「导出 .html 文件」「浏览器预览」。
+- 把文件发给任何人或部署到任意静态服务器，对方都能直接打开。
+
+#### 方式 B：在线链接
+- **云分享（已配置云服务器并登录）**：文档上传到云服务器，
+  生成公网链接 `https://你的云服务器/s/<token>`，任何人都可在浏览器打开（无需安装本程序）。
+  > 配置路径：设置 → 云同步，填写云服务器地址并登录。
+- **本地分享（未配置云服务器）**：由本工具内置本地服务托管，
+  同一局域网内他人可将 `localhost` 替换为你的局域网 IP 访问；公网访问需改用云分享。
+- 支持设置**访问密码**与**有效期**（10 分钟 / 1 小时 / 1 天 / 7 天 / 长期），
+  并可随时「停止」某个分享。
+
+### 6. 云同步 / 多端共享
+入口：设置 → 「☁ 云同步 / 多端共享」。
+- 填写云服务器地址，注册或登录账号。
+- **推送到云端**：按项目 ID 创建或覆盖云端同名项目。
+- **拉取**：点击云端项目即可拉取到本地并切换。
+
+### 7. 内置同步服务（可选）
+设置页可一键「启动服务」，桌面端同时作为同步服务器。
+其他人可将云服务器地址填为 `http://你的IP:端口` 来连接（适合局域网或配合公网映射使用）。
+
+### 8. AI 配置
+设置页填写 OpenAI 兼容接口地址、API Key、模型，
+用于自动生成字段描述（支持 OpenAI / DeepSeek / 通义千问 / 本地 Ollama 等）。
+
+---
+
+## 四、部署云分享服务器（公网访问文档）
+
+1. 在云服务器上构建并运行同步服务：
+   ```bash
+   go build -o apitool-server.exe ./server/cmd
+   apitool-server.exe -addr 0.0.0.0:8080 -data /var/lib/apitool
+   ```
+2. （建议）使用 Nginx 反代并配置 HTTPS 域名，例如 `https://api.your.com`。
+3. 桌面端：设置 → 云同步，云服务器地址填 `https://api.your.com`，注册/登录。
+4. 分享文档时选择「在线链接」，即得到 `https://api.your.com/s/<token>` 公网可访问链接。
+
+### 云服务器提供的接口
+| 方法 | 路径 | 说明 | 鉴权 |
+| --- | --- | --- | --- |
+| POST | `/api/register` | 注册账号，返回 token | 无 |
+| POST | `/api/login` | 登录，返回 token | 无 |
+| GET/POST | `/api/projects` | 列出 / 创建项目 | Bearer Token |
+| GET/PUT | `/api/projects/<id>` | 获取 / 更新项目 | Bearer Token |
+| POST/GET | `/api/share` | 创建 / 列出分享文档 | Bearer Token |
+| DELETE | `/api/share/<token>` | 删除分享文档 | Bearer Token |
+| GET | `/s/<token>` | 公开查看分享文档（可选 Basic Auth 密码） | 无 |
+
+---
+
+## 五、数据存储
+
+- 桌面端本地数据保存在用户配置目录（如 Windows：`%APPDATA%/apitool/data.json`），
+  所有接口信息（含最近一次请求与响应）自动保存。
+- 云服务器端数据保存在 `-data` 指定的目录（账号、项目、分享文档）。
+
+---
+
+## 六、常见问题
+
+**Q：分享的「在线链接」别人打不开？**
+A：未配置云服务器时为本地分享，仅同局域网可访问。要公网访问，请部署云同步服务器并在
+设置中登录，分享时即自动生成公网链接。
+
+**Q：环境变量 `{{变量}}` 没被替换？**
+A：请确认该变量所在环境为「当前激活环境」且「启用」开关已打开，变量名与 `{{ }}` 内一致。
+
+**Q：项目名称无法修改？**
+A：通过顶部项目下拉框右侧「⋯」→「重命名当前项目」修改。
+
+**Q：如何把他人发来的接口文档导入？**
+A：文档中心 → 导入，支持 OpenAPI / Swagger / Postman 的 JSON 或 YAML。
+
+---
+
+## 七、目录结构
+
+```
+apitool/
+├── main.go              # Wails 应用入口
+├── app.go               # 数据读写、文档生成、剪贴板/浏览器等后端方法
+├── share.go             # 本地分享服务（localhost 托管）
+├── syncserver.go        # 桌面端内置同步服务
+├── models.go            # 数据模型
+├── server/              # 可独立部署的云同步/分享服务器
+│   ├── server.go
+│   └── cmd/main.go
+└── frontend/            # Vue 前端
+    └── src/components/  # 各功能组件
+```

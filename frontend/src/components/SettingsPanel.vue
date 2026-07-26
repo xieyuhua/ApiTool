@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning } from '../../wailsjs/go/main/App'
-import { store, saveNow } from '../store'
+import { store, saveNow, scheduleAutoSync } from '../store'
 import CloudSync from './CloudSync.vue'
 
 const dataPath = ref('')
@@ -19,6 +19,16 @@ onMounted(async () => {
 async function save() {
   await saveNow()
   ElMessage.success('设置已保存')
+}
+
+async function onAutoSyncChange(val) {
+  await saveNow()
+  if (val) {
+    scheduleAutoSync()
+    ElMessage.success('已开启自动同步，正在备份到云端')
+  } else {
+    ElMessage.info('已关闭自动同步（仅手动推送/拉取）')
+  }
 }
 
 async function toggleSync() {
@@ -79,6 +89,14 @@ async function toggleSync() {
         <div style="font-size:13px; color:#4e5969; margin-bottom:12px">
           登录云账号后，可将项目推送到云端、从云端拉取到其他设备，实现多人/多端共享。
         </div>
+        <el-form label-width="120px" label-position="left" style="margin-bottom:12px">
+          <el-form-item label="自动同步云端">
+            <el-switch v-model="store.data.settings.autoSync" @change="onAutoSyncChange" />
+            <span style="font-size:12px;color:#86909c;margin-left:10px">
+              开启后：编辑自动推送到云端（防止本地丢失）；启动时自动拉取云端更新
+            </span>
+          </el-form-item>
+        </el-form>
         <el-button type="primary" @click="cloudVisible = true">☁ 云同步 / 多端共享</el-button>
       </div>
 
