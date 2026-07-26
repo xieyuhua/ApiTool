@@ -30,8 +30,8 @@ func NewApp() *App {
 // AppVersion 客户端版本号（用于升级检测与本地配置标记）
 const AppVersion = "1.0.0"
 
-// DefaultUpdateURL 默认升级服务地址（本地 8080 服务）
-const DefaultUpdateURL = "http://127.0.0.1:8080"
+// DefaultUpdateURL 默认升级服务地址（本地同步服务，端口与 defaultSyncAddr 一致）
+const DefaultUpdateURL = "http://127.0.0.1" + defaultSyncAddr
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -72,6 +72,8 @@ func defaultData() AppData {
 	}
 }
 
+// readData 从磁盘加载并反序列化全部数据，处理旧版本兼容与默认值补全。
+// 返回的是经过迁移/修正后的最新结构，调用方无需再处理兼容逻辑。
 func (a *App) readData() AppData {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -91,10 +93,10 @@ func (a *App) readData() AppData {
 	if data.Settings.UpdateURL == "" {
 		data.Settings.UpdateURL = DefaultUpdateURL
 	}
-	// 兼容旧版本（无 projects，仅有 dirs/apis/environments）的迁移
+	// 兼容旧版数据（顶层 dirs/apis/environments）：反序列化到新结构失败时，
+	// 通过 migrateLegacy 额外解析旧结构并迁移进默认项目。
 	if len(data.Projects) == 0 {
 		proj := Project{ID: "default", Name: "默认项目", UpdatedAt: time.Now().Format(time.RFC3339)}
-		// 旧字段可能存在于反序列化失败，但通过额外解析处理
 		if migrated := a.migrateLegacy(b, &proj); migrated {
 			data.Projects = []Project{proj}
 			data.CurrentProjectID = proj.ID
@@ -187,7 +189,8 @@ func activeProjectIndex(data AppData) int {
 	return -1
 }
 
-// collectScope 计算导出范围内的目录与接口（限定当前项目）
+// collectScope 计算导出/分享范围内的目录与接口（限定当前项目）。
+// 返回 (标题, 目录列表, 接口列表)；单接口时标题取接口名，目录范围时取目录名，否则为“接口文档”。
 func (a *App) collectScope(data AppData, dirID string, apiID string) (title string, dirs []Directory, apis []ApiInfo) {
 	idx := activeProjectIndex(data)
 	if idx < 0 {
@@ -234,6 +237,8 @@ func (a *App) collectScope(data AppData, dirID string, apiID string) (title stri
 	return title, dirs, apis
 }
 
+// buildDocContent 按指定格式（markdown/html/word/openapi）生成文档内容。
+// 返回 (内容, 标题, 错误)；当范围内无接口时返回错误。
 func (a *App) buildDocContent(dirID, apiID, format string) (content string, title string, err error) {
 	data := a.readData()
 	title, dirs, apis := a.collectScope(data, dirID, apiID)

@@ -12,6 +12,10 @@ var syncSrv *http.Server
 var syncStore *server.Store
 var syncShareToken string
 
+// defaultSyncAddr 内置同步服务默认监听地址（端口 8080）。
+// 升级检测（DefaultUpdateURL）也复用此常量，避免端口硬编码散落多处。
+const defaultSyncAddr = ":8080"
+
 // localIP 返回本机第一个非回环 IPv4 地址（用于生成局域网可访问的分享地址）
 func localIP() string {
 	addrs, err := net.InterfaceAddrs()
@@ -37,7 +41,7 @@ func (a *App) StartSyncServer(addr string) (string, error) {
 		return syncSrv.Addr, nil
 	}
 	if addr == "" {
-		addr = ":8080"
+		addr = defaultSyncAddr
 	}
 	s := server.NewStore(a.syncDir)
 	syncStore = s
@@ -55,7 +59,7 @@ func (a *App) StartSyncServer(addr string) (string, error) {
 	return ln.Addr().String(), nil
 }
 
-// StopSyncServer 停止内置同步服务
+// StopSyncServer 停止内置同步服务并释放监听资源。
 func (a *App) StopSyncServer() error {
 	if syncSrv == nil {
 		return nil
@@ -65,26 +69,18 @@ func (a *App) StopSyncServer() error {
 	return nil
 }
 
-// SyncServerRunning 返回内置同步服务是否运行中
+// SyncServerRunning 返回内置同步服务是否正在运行。
 func (a *App) SyncServerRunning() bool {
 	return syncSrv != nil
-}
-
-// SyncServerAddr 返回内置同步服务实际监听地址（host:port），未运行时为空
-func (a *App) SyncServerAddr() string {
-	if syncSrv == nil {
-		return ""
-	}
-	return syncSrv.Addr
 }
 
 // SyncServerURL 返回内置同步服务实际可访问的完整地址（http://IP:port）。
 // 绑定到 0.0.0.0 / [::] / 空 host 时，用本机局域网 IP 拼出别人能连的地址。
 func (a *App) SyncServerURL() string {
-	addr := a.SyncServerAddr()
-	if addr == "" {
+	if syncSrv == nil {
 		return ""
 	}
+	addr := syncSrv.Addr
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "http://" + addr

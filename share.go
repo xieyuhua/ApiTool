@@ -37,7 +37,7 @@ type shareServer struct {
 	server   *http.Server
 	listener net.Listener
 	port     int
-	host     string // 对外可访问 host（监听 0.0.0.0 时用本机局域网 IP）
+	host     string // 对外可访问 host：监听通配地址(0.0.0.0/[::]/空)或 127.0.0.1 回退时，均取本机局域网 IP
 }
 
 var shareSrv = &shareServer{docs: map[string]*shareDoc{}}
@@ -113,7 +113,8 @@ func (s *shareServer) handle(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(doc.html))
 }
 
-// buildHTMLForScope 生成指定范围的 HTML 文档内容
+// buildHTMLForScope 生成指定范围的分享 HTML 文档。
+// 返回值依次为 (HTML 内容, 标题, 错误)；标题已附加项目名称（项目名 / 目录或接口名）。
 func (a *App) buildHTMLForScope(dirID, apiID string) (string, string, error) {
 	data := a.readData()
 	title, dirs, apis := a.collectScope(data, dirID, apiID)

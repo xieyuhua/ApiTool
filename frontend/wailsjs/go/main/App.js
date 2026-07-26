@@ -90,10 +90,6 @@ export function StopSyncServer() {
   return window['go']['main']['App']['StopSyncServer']();
 }
 
-export function SyncServerAddr() {
-  return window['go']['main']['App']['SyncServerAddr']();
-}
-
 export function SyncServerRunning() {
   return window['go']['main']['App']['SyncServerRunning']();
 }

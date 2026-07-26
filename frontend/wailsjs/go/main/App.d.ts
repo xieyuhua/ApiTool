@@ -46,8 +46,6 @@ export function StopShare(arg1:string):Promise<void>;
 
 export function StopSyncServer():Promise<void>;
 
-export function SyncServerAddr():Promise<string>;
-
 export function SyncServerRunning():Promise<boolean>;
 
 export function SyncServerURL():Promise<string>;

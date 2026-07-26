@@ -230,19 +230,8 @@ func htmlToc(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID str
 	}
 }
 
-func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo) string {
-	var body, toc strings.Builder
-	if dirs == nil && len(apis) == 1 && rootID == "" {
-		htmlApi(&body, apis[0], "")
-	} else {
-		htmlDir(&body, dirs, apis, rootID, 0, "")
-		htmlToc(&toc, dirs, apis, rootID, 0, "")
-	}
-	tocHTML := ""
-	if toc.Len() > 0 {
-		tocHTML = `<nav class="toc"><div class="toc-title">目录</div>` + toc.String() + `</nav>`
-	}
-	css := `
+// docCSS 分享/导出 HTML 文档的内联样式，自包含，无需外部样式表。
+const docCSS = `
 :root{color-scheme:light}
 *{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2329;background:#f7f8fa}
 .layout{display:flex;max-width:1280px;margin:0 auto}
@@ -280,7 +269,9 @@ pre{background:#1d2129;color:#e5e6eb;border-radius:8px;padding:14px;font-size:13
 .empty-tip{color:#86909c;font-size:14px;padding:40px 0;text-align:center;display:none}
 @media print{.toc,.doc-search{display:none}}
 `
-	js := `
+
+// docJS 分享/导出 HTML 文档的内联脚本：目录搜索过滤（纯原生 JS，无依赖）。
+const docJS = `
 <script>
 function apitoolMatch(q,hay){hay=(hay||'').toLowerCase();if(hay.indexOf(q)>=0)return true;var i=0;for(var j=0;j<hay.length&&i<q.length;j++){if(hay[j]===q[i])i++;}return i===q.length;}
 function apitoolFilter(){var box=document.getElementById('docSearch');var q=box?box.value.trim().toLowerCase():'';var apis=document.querySelectorAll('.api');var tocApis=document.querySelectorAll('.toc-api');var tocDirs=document.querySelectorAll('.toc-dir');var dirs=document.querySelectorAll('h2.dir');
@@ -291,6 +282,21 @@ dirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCase()
 tocDirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCase();var any=false;document.querySelectorAll('.toc-api').forEach(function(a){if((a.getAttribute('data-dir')||'')===(d.getAttribute('data-dir')||'')&&a.style.display!=='none')any=true;});d.style.display=(apitoolMatch(q,name)||any)?'':'none';});
 var visible=0;apis.forEach(function(a){if(a.style.display!=='none')visible++;});var t=document.getElementById('docEmpty');if(t)t.style.display=visible?'none':'block';}
 </script>`
+
+func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo) string {
+	var body, toc strings.Builder
+	if dirs == nil && len(apis) == 1 && rootID == "" {
+		htmlApi(&body, apis[0], "")
+	} else {
+		htmlDir(&body, dirs, apis, rootID, 0, "")
+		htmlToc(&toc, dirs, apis, rootID, 0, "")
+	}
+	tocHTML := ""
+	if toc.Len() > 0 {
+		tocHTML = `<nav class="toc"><div class="toc-title">目录</div>` + toc.String() + `</nav>`
+	}
+	css := docCSS
+	js := docJS
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s - 接口文档</title><style>%s</style></head>
