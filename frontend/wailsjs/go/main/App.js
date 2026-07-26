@@ -6,6 +6,10 @@ export function BuildSharedHTML(arg1, arg2) {
   return window['go']['main']['App']['BuildSharedHTML'](arg1, arg2);
 }
 
+export function BuildSharedTitle(arg1, arg2) {
+  return window['go']['main']['App']['BuildSharedTitle'](arg1, arg2);
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
@@ -96,4 +100,8 @@ export function SyncServerRunning() {
 
 export function SyncServerURL() {
   return window['go']['main']['App']['SyncServerURL']();
+}
+
+export function SyncShareBackend() {
+  return window['go']['main']['App']['SyncShareBackend']();
 }

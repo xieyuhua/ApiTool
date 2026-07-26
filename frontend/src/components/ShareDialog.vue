@@ -2,8 +2,9 @@
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  BuildSharedHTML, ExportDoc, ShareDoc,
+  BuildSharedHTML, BuildSharedTitle, ExportDoc, ShareDoc,
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
+  SyncShareBackend,
 } from '../../wailsjs/go/main/App'
 import { store, cloudBase } from '../store'
 
@@ -53,6 +54,8 @@ const cloudReady = computed(() => {
   const u = (settings.cloudURL || '').trim()
   return !!u && !!settings.cloudToken
 })
+// 内置同步服务作为分享后端：启动时由 8080 同步服务托管分享文档（同一端口、多端共享）
+const syncShare = ref({ url: '', token: '', running: false })
 
 const password = ref('')
 const expire = ref(60)
@@ -71,9 +74,13 @@ const busy = ref(false)
 async function refresh() {
   shares.value = []
   try {
-    if (cloudReady.value) {
-      const r = await fetch(cloudBase() + '/api/share', {
-        headers: { Authorization: 'Bearer ' + settings.cloudToken },
+    const sb = syncShare.value
+    let base = '', token = ''
+    if (sb.running && sb.url) { base = sb.url; token = sb.token }
+    else if (cloudReady.value) { base = cloudBase(); token = settings.cloudToken }
+    if (base) {
+      const r = await fetch(base + '/api/share', {
+        headers: { Authorization: 'Bearer ' + token },
       })
       const list = await r.json().catch(() => [])
       if (Array.isArray(list)) {
@@ -82,7 +89,7 @@ async function refresh() {
           title: s.title,
           hasPassword: s.hasPassword,
           expireAt: s.expireAt,
-          link: cloudBase() + '/s/' + s.token,
+          link: base + '/s/' + s.token,
         }))
       }
     } else {
@@ -90,8 +97,12 @@ async function refresh() {
     }
   } catch { shares.value = [] }
 }
-watch(visible, (v) => {
-  if (v) { result.value = ''; resultToken.value = ''; refresh(); buildCode() }
+watch(visible, async (v) => {
+  if (v) {
+    result.value = ''; resultToken.value = ''
+    try { syncShare.value = await SyncShareBackend() } catch { syncShare.value = { url: '', token: '', running: false } }
+    refresh(); buildCode()
+  }
 })
 
 function tokenFromLink(link) {
@@ -103,7 +114,20 @@ async function create() {
   busy.value = true
   try {
     const html = await BuildSharedHTML(props.dirId, props.apiId)
-    if (cloudReady.value) {
+    const sb = syncShare.value
+    if (sb.running && sb.url) {
+      // 内置同步服务托管（同一 8080 端口，启动内部服务即可多端共享）
+      const title = await BuildSharedTitle(props.dirId, props.apiId)
+      const r = await fetch(sb.url + '/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sb.token },
+        body: JSON.stringify({ title, html, password: password.value, expireMinutes: expire.value }),
+      })
+      const b = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(b.error || ('分享失败 ' + r.status))
+      resultToken.value = b.token
+      result.value = sb.url + '/s/' + b.token
+    } else if (cloudReady.value) {
       const r = await fetch(cloudBase() + '/api/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.cloudToken },
@@ -126,7 +150,13 @@ async function create() {
 }
 async function stop(token) {
   try {
-    if (cloudReady.value) {
+    const sb = syncShare.value
+    if (sb.running && sb.url) {
+      await fetch(sb.url + '/api/share/' + token, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + sb.token },
+      })
+    } else if (cloudReady.value) {
       await fetch(cloudBase() + '/api/share/' + token, {
         method: 'DELETE',
         headers: { Authorization: 'Bearer ' + settings.cloudToken },
@@ -176,14 +206,18 @@ function fmtExpire(exp) {
 
       <!-- 在线链接 -->
       <el-tab-pane label="在线链接" name="link">
-        <el-alert v-if="cloudReady" type="success" :closable="false" show-icon
+        <el-alert v-if="syncShare.running" type="success" :closable="false" show-icon
           style="margin-bottom:14px"
-          :title="'云分享模式：文档将上传到云服务器 ' + cloudBase() + '，生成公网可访问的链接，任何人都可在浏览器打开（无需对方安装本程序）。'"
+          :title="'内置同步服务托管（局域网多端共享）：' + syncShare.url"
+          description="文档由本工具内置同步服务（:8080）托管，同一局域网内的其他设备可直接打开下方链接。公网访问请先在「设置 → 云同步」填写云服务器地址并登录。" />
+        <el-alert v-else-if="cloudReady" type="success" :closable="false" show-icon
+          style="margin-bottom:14px"
+          :title="'云分享模式：文档将上传到云服务器 ' + cloudBase()"
           description="需先在「设置 → 云同步」填写云服务器地址并登录。" />
         <el-alert v-else type="warning" :closable="false" show-icon
           style="margin-bottom:14px"
-          title="本地分享模式（未配置云服务器）"
-          description="该链接由本工具内置本地服务托管（地址为 127.0.0.1，仅本机可访问）。同一局域网内的他人可将链接中的 127.0.0.1 替换为本机局域网 IP 访问；公网访问请先在「设置 → 云同步」配置并登录云服务器。" />
+          title="本地临时分享服务"
+          description="未启动内置同步服务且未配置云同步，将由本工具临时本地服务托管（随机端口，应用退出后失效）。建议在「设置」中启动内置同步服务以获得稳定的局域网分享地址。" />
 
         <el-form label-width="90px">
           <el-form-item label="访问密码">

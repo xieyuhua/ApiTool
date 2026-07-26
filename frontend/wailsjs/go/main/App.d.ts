@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function BuildSharedHTML(arg1:string,arg2:string):Promise<string>;
 
+export function BuildSharedTitle(arg1:string,arg2:string):Promise<string>;
+
 export function CheckUpdate():Promise<main.CheckUpdateResult>;
 
 export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
@@ -49,3 +51,5 @@ export function SyncServerAddr():Promise<string>;
 export function SyncServerRunning():Promise<boolean>;
 
 export function SyncServerURL():Promise<string>;
+
+export function SyncShareBackend():Promise<main.ShareBackend>;

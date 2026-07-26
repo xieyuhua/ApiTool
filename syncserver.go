@@ -9,6 +9,8 @@ import (
 )
 
 var syncSrv *http.Server
+var syncStore *server.Store
+var syncShareToken string
 
 // localIP 返回本机第一个非回环 IPv4 地址（用于生成局域网可访问的分享地址）
 func localIP() string {
@@ -38,6 +40,8 @@ func (a *App) StartSyncServer(addr string) (string, error) {
 		addr = ":8080"
 	}
 	s := server.NewStore(a.syncDir)
+	syncStore = s
+	syncShareToken = s.ShareToken() // 取本地分享 token，供分享文档托管到本服务
 	// 先用 net.Listen 拿到真实监听地址（尤其 addr 含 :0 随机端口，或 :8080 会被系统解析为 [::]:8080）
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -89,4 +93,21 @@ func (a *App) SyncServerURL() string {
 		host = localIP()
 	}
 	return fmt.Sprintf("http://%s:%s", host, port)
+}
+
+// ShareBackend 描述用于托管分享文档的内置同步服务
+type ShareBackend struct {
+	URL     string `json:"url"`
+	Token   string `json:"token"`
+	Running bool   `json:"running"`
+}
+
+// SyncShareBackend 返回内置同步服务作为分享后端的地址与 token（仅在其运行时有效）。
+// 前端分享文档可优先托管到该服务（同一 8080 端口），启动内部服务后即可多端共享，
+// 无需再到「云同步」填写地址并登录。
+func (a *App) SyncShareBackend() ShareBackend {
+	if syncSrv == nil {
+		return ShareBackend{}
+	}
+	return ShareBackend{URL: a.SyncServerURL(), Token: syncShareToken, Running: true}
 }

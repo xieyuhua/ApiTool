@@ -107,6 +107,22 @@ func (s *Store) auth(r *http.Request) (*User, bool) {
 	return nil, false
 }
 
+// ShareToken 返回本地分享使用的 token：若已有账号则返回首个账号 token，
+// 否则自动创建一个本地账号（local）并持久化，使内置同步服务的分享接口
+// 无需手动登录即可使用（仅本机启动同步服务的客户端持有该 token）。
+func (s *Store) ShareToken() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.users {
+		return u.Token
+	}
+	u := &User{Username: "local", Salt: newToken(), Token: newToken()}
+	u.Hash = hashPW("local", u.Salt)
+	s.users[u.Username] = u
+	s.saveUsers()
+	return u.Token
+}
+
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)

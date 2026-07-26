@@ -37,6 +37,7 @@ type shareServer struct {
 	server   *http.Server
 	listener net.Listener
 	port     int
+	host     string // 对外可访问 host（监听 0.0.0.0 时用本机局域网 IP）
 }
 
 var shareSrv = &shareServer{docs: map[string]*shareDoc{}}
@@ -58,6 +59,16 @@ func (s *shareServer) ensure() error {
 	}
 	s.listener = ln
 	s.port = ln.Addr().(*net.TCPAddr).Port
+	// 解析对外可访问 host：通配地址（0.0.0.0/[::]）用本机局域网 IP，否则用实际监听 host
+	if h, _, err := net.SplitHostPort(ln.Addr().String()); err == nil {
+		if h == "" || h == "0.0.0.0" || h == "[::]" || h == "::" {
+			s.host = localIP()
+		} else {
+			s.host = h
+		}
+	} else {
+		s.host = "127.0.0.1"
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handle)
 	s.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -130,6 +141,12 @@ func (a *App) BuildSharedHTML(dirID, apiID string) (string, error) {
 	return html, nil
 }
 
+// BuildSharedTitle 返回分享文档的标题（项目名 / 目录或接口名）
+func (a *App) BuildSharedTitle(dirID, apiID string) (string, error) {
+	_, title, err := a.buildHTMLForScope(dirID, apiID)
+	return title, err
+}
+
 // CreateShareLink 创建分享链接（内嵌服务托管文档，支持密码与有效期）
 func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
 	html, title, err := a.buildHTMLForScope(dirID, apiID)
@@ -154,9 +171,7 @@ func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) 
 		expireAt:  expire,
 	}
 	shareSrv.mu.Unlock()
-	// 注意：服务监听 0.0.0.0（仅 IPv4），故链接必须用 127.0.0.1 而非 localhost，
-	// 否则 localhost 在部分系统优先解析为 IPv6 ::1 而连不上服务（页面空白）。
-	return fmt.Sprintf("http://127.0.0.1:%d/?t=%s", shareSrv.port, token), nil
+	return fmt.Sprintf("http://%s:%d/?t=%s", shareSrv.host, shareSrv.port, token), nil
 }
 
 // ListShares 列出当前有效的分享链接
@@ -175,7 +190,7 @@ func (a *App) ListShares() []ShareInfo {
 			HasPassword: d.password != "",
 			ExpireAt:   exp,
 			CreatedAt:  d.createdAt.Unix(),
-			Link:       fmt.Sprintf("http://127.0.0.1:%d/?t=%s", shareSrv.port, d.token),
+			Link:       fmt.Sprintf("http://%s:%d/?t=%s", shareSrv.host, shareSrv.port, d.token),
 		})
 	}
 	return out
