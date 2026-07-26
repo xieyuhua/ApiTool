@@ -203,9 +203,9 @@ async function removeProjectNow() {
       <el-button size="small" @click="newDir('')">+ 目录</el-button>
       <el-button size="small" type="primary" @click="openNewApi('')">+ 接口</el-button>
     </div>
-    <div class="sb-tree" @contextmenu.prevent>
+    <div class="sb-tree" v-loading="store.treeLoading" element-loading-text="加载目录中…" @contextmenu.prevent>
       <el-tree ref="treeRef" :data="treeData" node-key="id" :props="{ label: 'label', children: 'children' }"
-        :filter-node-method="filterNode" :expand-on-click-node="true" default-expand-all highlight-current
+        :filter-node-method="filterNode" :expand-on-click-node="true" highlight-current
         :current-node-key="store.currentApiId" @node-click="onNodeClick" @node-contextmenu="onCtxMenu">
         <template #default="{ data }">
           <div class="tree-node" :class="{ selected: data.type === 'api' && data.id === store.currentApiId }">

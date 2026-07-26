@@ -6,6 +6,10 @@ export function BuildSharedHTML(arg1, arg2) {
   return window['go']['main']['App']['BuildSharedHTML'](arg1, arg2);
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function CopyDocMarkdown(arg1, arg2) {
   return window['go']['main']['App']['CopyDocMarkdown'](arg1, arg2);
 }
@@ -32,6 +36,10 @@ export function GenerateDescriptions(arg1, arg2, arg3) {
 
 export function GetDataFilePath() {
   return window['go']['main']['App']['GetDataFilePath']();
+}
+
+export function GetVersion() {
+  return window['go']['main']['App']['GetVersion']();
 }
 
 export function ImportDoc() {

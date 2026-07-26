@@ -171,6 +171,37 @@ func baseName(p string) string {
 	return strings.TrimSuffix(b, filepath.Ext(b))
 }
 
+// ensureTagPath 将形如 "A/B/C" 的标签名拆成多级嵌套目录，
+// 返回末级目录 ID。兼容 Apipost 等多级文件夹用 "/" 拼接在 tag 名里的导出方式。
+func ensureTagPath(tagPath string, dirs *[]Directory, tagDir map[string]string) string {
+	tagPath = strings.Trim(tagPath, "/")
+	if tagPath == "" {
+		return ""
+	}
+	parent := ""
+	curKey := ""
+	for _, seg := range strings.Split(tagPath, "/") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		if curKey == "" {
+			curKey = seg
+		} else {
+			curKey = curKey + "/" + seg
+		}
+		if id, ok := tagDir[curKey]; ok {
+			parent = id
+			continue
+		}
+		id := genID()
+		*dirs = append(*dirs, Directory{ID: id, Name: seg, ParentID: parent, Sort: len(*dirs)})
+		tagDir[curKey] = id
+		parent = id
+	}
+	return parent
+}
+
 func joinURL(base, p string) string {
 	if p == "" {
 		return base
@@ -390,19 +421,12 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 	}
 	// 目录：优先用顶层 tags 声明；兼容 Apipost 等「接口自带 tags 但未在顶层声明」的导出，
 	// 在遍历接口时若遇到未声明的 tag 也补建目录，保证按目录分组。
+	// tag 名中含 "/" 时拆成多级嵌套目录（如 "用户管理/账号"）。
 	tagDir := map[string]string{}
-	addTag := func(name string) {
-		if name == "" || tagDir[name] != "" {
-			return
-		}
-		id := genID()
-		dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
-		tagDir[name] = id
-	}
 	if tl, ok := doc["tags"].([]interface{}); ok {
 		for _, t := range tl {
 			if tm, ok := t.(map[string]interface{}); ok {
-				addTag(strVal(tm["name"]))
+				ensureTagPath(strVal(tm["name"]), &dirs, tagDir)
 			}
 		}
 	}
@@ -432,10 +456,7 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 			if tl, ok := op["tags"].([]interface{}); ok && len(tl) > 0 {
 				for _, t := range tl {
 					if name, ok := t.(string); ok {
-						addTag(name) // 接口引用的 tag 即使未声明也建目录
-						if id, ok2 := tagDir[name]; ok2 {
-							api.DirID = id
-						}
+						api.DirID = ensureTagPath(name, &dirs, tagDir)
 					}
 				}
 			}
@@ -510,18 +531,10 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 	}
 
 	tagDir := map[string]string{}
-	addTag := func(name string) {
-		if name == "" || tagDir[name] != "" {
-			return
-		}
-		id := genID()
-		dirs = append(dirs, Directory{ID: id, Name: name, ParentID: "", Sort: len(dirs)})
-		tagDir[name] = id
-	}
 	if tl, ok := doc["tags"].([]interface{}); ok {
 		for _, t := range tl {
 			if tm, ok := t.(map[string]interface{}); ok {
-				addTag(strVal(tm["name"]))
+				ensureTagPath(strVal(tm["name"]), &dirs, tagDir)
 			}
 		}
 	}
@@ -551,10 +564,7 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 			if tl, ok := op["tags"].([]interface{}); ok && len(tl) > 0 {
 				for _, t := range tl {
 					if name, ok := t.(string); ok {
-						addTag(name)
-						if id, ok2 := tagDir[name]; ok2 {
-							api.DirID = id
-						}
+						api.DirID = ensureTagPath(name, &dirs, tagDir)
 					}
 				}
 			}

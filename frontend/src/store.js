@@ -1,5 +1,5 @@
 import { reactive, watch } from 'vue'
-import { LoadData, SaveData } from '../wailsjs/go/main/App'
+import { LoadData, SaveData, GetVersion, CheckUpdate } from '../wailsjs/go/main/App'
 
 export function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2))
@@ -42,15 +42,18 @@ function normalizeFields(fields) {
 
 export const store = reactive({
   loaded: false,
+  loading: false, // 初始化数据加载中（全屏遮罩）
+  treeLoading: false, // 切换项目 / 重建目录时的局部加载
   view: 'workspace', // workspace | docs | settings
   currentApiId: '',
   activeTab: 'debug', // debug | params | doc
+  appVersion: '', // 客户端版本号（来自 Go 端）
   data: {
     projects: [
-      { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '' },
+      { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] } },
     ],
     currentProjectId: 'default',
-    settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false },
+    settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' },
   },
 })
 
@@ -104,7 +107,7 @@ async function loadInto() {
   const d = await LoadData()
   d.projects ||= []
   if (!d.projects.length) {
-    d.projects = [{ id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '' }]
+    d.projects = [{ id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] } }]
   }
   if (!d.projects.find(p => p.id === d.currentProjectId)) {
     d.currentProjectId = d.projects[0].id
@@ -114,13 +117,19 @@ async function loadInto() {
     p.apis ||= []
     p.environments ||= []
     p.activeEnvId ||= ''
+    p.common ||= { headers: [], query: [] }
+    p.common.headers ||= []
+    p.common.query ||= []
     p.apis.forEach(normalizeApi)
   }
-  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false }
+  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' }
+  d.settings.version ||= '1.0.0'
+  d.settings.updateURL ||= 'http://127.0.0.1:8080'
   store.data = d
 }
 
 export async function initStore() {
+  store.loading = true
   const ok = await waitForGo()
   if (ok) {
     try {
@@ -131,9 +140,23 @@ export async function initStore() {
   } else {
     console.warn('未检测到 Wails 桥接（window.go），使用内存数据（预览模式）')
   }
+  store.loading = false
   store.loaded = true
+  if (ok) {
+    try { store.appVersion = await GetVersion() } catch {}
+  }
   watch(() => store.data, () => { scheduleSave(); scheduleAutoSync() }, { deep: true })
   if (ok) await autoPullOnStart()
+}
+
+// 检测升级：调用升级服务地址的 /version 接口，返回 { current, latest, hasNew, url, notes, error }
+export async function checkUpdate() {
+  if (!hasGoBridge()) return { current: store.appVersion, latest: '', hasNew: false, url: '', notes: '', error: '预览模式不支持升级检测' }
+  try {
+    return await CheckUpdate()
+  } catch (e) {
+    return { current: store.appVersion, latest: '', hasNew: false, url: '', notes: '', error: String(e) }
+  }
 }
 
 export async function reloadStore() {
@@ -251,14 +274,21 @@ export function activeEnvVars() {
 
 export function switchProject(id) {
   if (!store.data.projects.find(p => p.id === id)) return
-  store.data.currentProjectId = id
-  store.currentApiId = ''
-  saveNow()
+  if (id === store.data.currentProjectId) return
+  store.treeLoading = true
+  // 先让「加载中」绘制，再切换，避免大数据量重建目录时主线程阻塞看起来像卡死
+  setTimeout(() => {
+    store.data.currentProjectId = id
+    store.currentApiId = ''
+    saveNow()
+    store.treeLoading = false
+  }, 30)
 }
 
 export function addProject() {
   const p = {
     id: uid(), name: '新项目', dirs: [], apis: [], environments: [], activeEnvId: '',
+    common: { headers: [], query: [] },
     updatedAt: new Date().toISOString(),
   }
   store.data.projects.push(p)

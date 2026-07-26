@@ -105,6 +105,8 @@ html, body {
   border-radius: 6px; padding: 8px 12px; font-family: Consolas, monospace;
 }
 .doc-preview table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* 文档预览中 {{变量}} 高亮 */
+.var-chip { background: #e8f3ff; color: #165dff; padding: 0 4px; border-radius: 3px; font-family: Consolas, "Courier New", monospace; }
 .doc-preview th, .doc-preview td { border: 1px solid #e5e6eb; padding: 6px 10px; text-align: left; word-break: break-all; }
 .doc-preview th { background: #f7f8fa; }
 .doc-preview pre {

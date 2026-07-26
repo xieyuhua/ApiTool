@@ -1,9 +1,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning } from '../../wailsjs/go/main/App'
-import { store, saveNow, scheduleAutoSync } from '../store'
+import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, OpenInBrowser } from '../../wailsjs/go/main/App'
+import { store, saveNow, scheduleAutoSync, currentProject, checkUpdate } from '../store'
 import CloudSync from './CloudSync.vue'
+import KVEditor from './KVEditor.vue'
 
 const dataPath = ref('')
 const cloudVisible = ref(false)
@@ -11,10 +12,40 @@ const syncAddr = ref(':8080')
 const syncRunning = ref(false)
 const syncBusy = ref(false)
 
+// 版本与升级检测状态
+const checking = ref(false)
+const updateResult = ref(null)
+
 onMounted(async () => {
   try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
   try { syncRunning.value = await SyncServerRunning() } catch { /* ignore */ }
 })
+
+function openURL(url) {
+  if (!url) return
+  try { OpenInBrowser(url) } catch { window.open(url, '_blank') }
+}
+
+async function doCheckUpdate() {
+  checking.value = true
+  updateResult.value = null
+  try {
+    const r = await checkUpdate()
+    updateResult.value = r
+    if (r.error) {
+      ElMessage.warning('检测失败：' + r.error)
+    } else if (r.hasNew) {
+      ElMessage.success('发现新版本 ' + r.latest)
+    } else {
+      ElMessage.info('已是最新版本（' + (r.latest || store.appVersion) + '）')
+    }
+  } catch (e) {
+    updateResult.value = { error: String(e) }
+    ElMessage.error('检测异常：' + String(e))
+  } finally {
+    checking.value = false
+  }
+}
 
 async function save() {
   await saveNow()
@@ -82,6 +113,63 @@ async function toggleSync() {
             <el-input-number v-model="store.data.settings.timeoutSec" :min="1" :max="600" />
           </el-form-item>
         </el-form>
+      </div>
+
+      <div class="card">
+        <div class="card-title">公共参数（对所有接口的请求自动附加）</div>
+        <div style="font-size:12px;color:#86909c;margin-bottom:10px">
+          设置后，本项目所有接口发送请求时会自动带上这些 Header / Query；接口自身已设置的同名参数优先（接口覆盖公共）。
+        </div>
+        <el-tabs>
+          <el-tab-pane label="公共 Header">
+            <KVEditor :items="currentProject().common.headers" key-placeholder="Header 名" />
+          </el-tab-pane>
+          <el-tab-pane label="公共 Query">
+            <KVEditor :items="currentProject().common.query" key-placeholder="参数名" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
+      <div class="card">
+        <div class="card-title">版本与升级</div>
+        <div style="font-size:13px;color:#4e5969;margin-bottom:12px">
+          当前版本：<b>{{ store.appVersion || store.data.settings.version }}</b>
+        </div>
+        <el-form label-width="92px" label-position="left" style="margin-bottom:12px">
+          <el-form-item label="升级地址">
+            <el-input v-model="store.data.settings.updateURL" placeholder="http://127.0.0.1:8080" style="max-width:360px" />
+            <span style="font-size:12px;color:#86909c;margin-left:10px">
+              服务端需提供 <code>/version</code> 接口返回 {"version":"x.y.z","url":"下载地址","notes":"说明"}
+            </span>
+          </el-form-item>
+        </el-form>
+        <el-button type="primary" :loading="checking" @click="doCheckUpdate">
+          {{ checking ? '检测中…' : '检测更新' }}
+        </el-button>
+        <div v-if="updateResult" style="margin-top:12px">
+          <el-alert
+            v-if="updateResult.error"
+            type="warning" :closable="false"
+            :title="'检测失败：' + updateResult.error" show-icon />
+          <el-alert
+            v-else-if="updateResult.hasNew"
+            type="success" :closable="false"
+            :title="'发现新版本 ' + updateResult.latest"
+            :description="(updateResult.notes || '') + (updateResult.url ? '\n下载地址：' + updateResult.url : '')"
+            show-icon>
+            <template #default>
+              <div>
+                <div>{{ updateResult.notes || '点击下载安装新版本' }}</div>
+                <el-button v-if="updateResult.url" type="primary" size="small" style="margin-top:8px"
+                  @click="store.data.settings.updateURL && openURL(updateResult.url)">前往下载</el-button>
+              </div>
+            </template>
+          </el-alert>
+          <el-alert
+            v-else
+            type="info" :closable="false"
+            :title="'已是最新版本（' + (updateResult.latest || store.appVersion) + '）'" show-icon />
+        </div>
       </div>
 
       <div class="card">

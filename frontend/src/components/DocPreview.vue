@@ -36,6 +36,17 @@ function flatRows(fields, depth = 0) {
   }
   return out
 }
+
+// 将文本中的 {{变量}} 高亮显示（v-html 注入的内容需在全局样式中定义 .var-chip）
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+function highlightVars(text) {
+  if (!text) return ''
+  return String(text).split(/(\{\{[^}]+\}\})/g).map(p =>
+    /^\{\{[^}]+\}\}$/.test(p) ? '<span class="var-chip">' + escapeHtml(p) + '</span>' : escapeHtml(p)
+  ).join('')
+}
 </script>
 
 <template>
@@ -64,9 +75,9 @@ function flatRows(fields, depth = 0) {
         <h2>{{ api.name }}</h2>
         <div class="urlbar">
           <span class="method-tag" :class="'m-' + api.method">{{ api.method }}</span>
-          <span>{{ api.url || '（未填写地址）' }}</span>
+          <span v-html="highlightVars(api.url || '（未填写地址）')"></span>
         </div>
-        <p v-if="api.description" style="color:#4e5969">{{ api.description }}</p>
+        <p v-if="api.description" style="color:#4e5969" v-html="highlightVars(api.description)"></p>
 
         <template v-if="api.headers.some(h => h.enabled && h.key)">
           <h4>请求头</h4>
@@ -74,7 +85,7 @@ function flatRows(fields, depth = 0) {
             <thead><tr><th>参数名</th><th>值/示例</th><th>说明</th></tr></thead>
             <tbody>
               <tr v-for="(h, i) in api.headers.filter(x => x.enabled && x.key)" :key="i">
-                <td>{{ h.key }}</td><td>{{ h.value }}</td><td>{{ h.description }}</td>
+                <td>{{ h.key }}</td><td v-html="highlightVars(h.value)"></td><td>{{ h.description }}</td>
               </tr>
             </tbody>
           </table>
@@ -85,8 +96,8 @@ function flatRows(fields, depth = 0) {
           <table>
             <thead><tr><th>参数名</th><th>值/示例</th><th>说明</th></tr></thead>
             <tbody>
-              <tr v-for="(q, i) in api.query.filter(x => x.enabled && x.key)" :key="i">
-                <td>{{ q.key }}</td><td>{{ q.value }}</td><td>{{ q.description }}</td>
+              <tr v-for="(q, i) in api.query.filter(x => x.enabled && q.key)" :key="i">
+                <td>{{ q.key }}</td><td v-html="highlightVars(q.value)"></td><td>{{ q.description }}</td>
               </tr>
             </tbody>
           </table>
@@ -117,11 +128,11 @@ function flatRows(fields, depth = 0) {
 
         <template v-if="api.bodyType === 'json' && api.body.trim()">
           <h4>请求示例</h4>
-          <pre>{{ api.body }}</pre>
+          <pre v-html="highlightVars(api.body)"></pre>
         </template>
         <template v-if="api.lastResponse && api.lastResponse.isJson">
           <h4>响应示例（最近一次调试结果）</h4>
-          <pre>{{ api.lastResponse.body.length > 4000 ? api.lastResponse.body.slice(0, 4000) + '\n...(截断)' : api.lastResponse.body }}</pre>
+          <pre v-html="highlightVars(api.lastResponse.body.length > 4000 ? api.lastResponse.body.slice(0, 4000) + '\n...(截断)' : api.lastResponse.body)"></pre>
         </template>
       </div>
     </div>

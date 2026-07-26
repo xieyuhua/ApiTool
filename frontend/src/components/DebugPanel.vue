@@ -65,6 +65,20 @@ function persistEnv(key, value) {
   else env.vars.push({ key, value, enabled: true })
 }
 
+// 公共参数：项目级 common.headers / common.query 自动附加到所有请求；
+// 接口自身已设置的同名参数优先（接口覆盖公共）。
+function mergeCommon(spec) {
+  const c = currentProject().common || { headers: [], query: [] }
+  const hm = new Map()
+  for (const h of (c.headers || [])) if (h.enabled && h.key) hm.set(String(h.key).toLowerCase(), { ...h })
+  for (const h of spec.headers) if (h.enabled && h.key) hm.set(String(h.key).toLowerCase(), { ...h })
+  spec.headers = [...hm.values()]
+  const qm = new Map()
+  for (const q of (c.query || [])) if (q.enabled && q.key) qm.set(String(q.key).toLowerCase(), { ...q })
+  for (const q of spec.query) if (q.enabled && q.key) qm.set(String(q.key).toLowerCase(), { ...q })
+  spec.query = [...qm.values()]
+}
+
 async function send() {
   sending.value = true
   try {
@@ -81,14 +95,18 @@ async function send() {
       env: activeEnvVars(),
       contentType: props.api.contentType || '',
     }
+    mergeCommon(spec) // 公共参数自动附加（接口同名优先）
 
     // 前置脚本：可修改请求与临时环境变量
     if (props.api.preScript && props.api.preScript.trim()) {
       try {
+        const reqParsed = (() => { try { return JSON.parse(spec.body) } catch { return null } })()
         const req = {
           url: spec.url,
           method: spec.method,
-          body: spec.body,
+          // body 为解析后的对象（JSON 时），便于 request.body.data.token 这类取值；非 JSON 时为原字符串
+          body: reqParsed !== null ? reqParsed : spec.body,
+          json() { try { return JSON.parse(spec.body) } catch { return null } },
           setHeader(k, v) {
             const i = spec.headers.findIndex(h => h.key === k)
             if (i >= 0) spec.headers[i].value = v
@@ -108,7 +126,7 @@ async function send() {
         })
         spec.url = req.url
         spec.method = req.method
-        spec.body = req.body
+        spec.body = (typeof req.body === 'object' && req.body !== null) ? JSON.stringify(req.body, null, 2) : req.body
       } catch (e) {
         ElMessage.error('前置脚本执行出错：' + String(e))
         return
@@ -124,12 +142,15 @@ async function send() {
       try {
         const respHeaders = {}
         for (const k in r.headers) respHeaders[k] = r.headers[k]
+        const respParsed = (() => { try { return JSON.parse(r.body) } catch { return null } })()
         runScript(props.api.postScript, {
           response: {
             status: r.status,
             headers: respHeaders,
-            body: r.body,
-            json() { try { return JSON.parse(r.body) } catch { return null } },
+            // body 为解析后的对象（JSON 时），支持 response.body.data.token / response.body.list[0].name
+            body: respParsed !== null ? respParsed : r.body,
+            text: r.body,
+            json() { return respParsed },
           },
           env: k => envMap[k],
           setEnv: (k, v) => { envMap[k] = v; persistEnv(k, v) },
@@ -222,7 +243,7 @@ function fmtSize(n) {
           <KVEditor :items="api.query" key-placeholder="参数名" />
         </el-tab-pane>
         <el-tab-pane :label="`请求头 (${api.headers.length})`" name="headers">
-          <KVEditor :items="api.headers" key-placeholder="Header 名" />
+          <KVEditor :items="api.headers" key-placeholder="参数名" />
         </el-tab-pane>
         <el-tab-pane label="请求体 Body" name="body">
           <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; flex-wrap:wrap">
@@ -253,17 +274,23 @@ function fmtSize(n) {
         <el-tab-pane label="前置脚本" name="pre">
           <div class="script-tip">
             发送请求<b>前</b>执行（前端 JS）。可用变量：
-            <code>request.url</code> / <code>request.method</code> / <code>request.body</code> /
-            <code>request.setHeader(k,v)</code> / <code>request.setQuery(k,v)</code> /
+            <code>request.url</code> / <code>request.method</code> / <code>request.body</code>（JSON 时已是解析对象，可 <code>request.body.data.x</code>）/
+            <code>request.json()</code> / <code>request.setHeader(k,v)</code> / <code>request.setQuery(k,v)</code> /
             <code>setEnv(k,v)</code> / <code>env(k)</code> / <code>console.log()</code>
+            <br>示例：<code>request.setHeader("X-Token", env("token"))</code> / <code>request.body.data.page = 1</code>
           </div>
           <el-input v-model="api.preScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：request.setHeader('X-Token', env('token'))" />
         </el-tab-pane>
         <el-tab-pane label="后置脚本" name="post">
           <div class="script-tip">
             收到响应<b>后</b>执行（前端 JS）。可用变量：
-            <code>response.status</code> / <code>response.headers</code> / <code>response.body</code> /
-            <code>response.json()</code> / <code>setEnv(k,v)</code> / <code>env(k)</code> / <code>console.log()</code>
+            <code>response.status</code> / <code>response.headers</code>（对象，如 <code>response.headers["x-request-id"]</code>）/
+            <code>response.body</code>（JSON 时已是解析对象）/ <code>response.text</code>（原始字符串）/ <code>response.json()</code> /
+            <code>setEnv(k,v)</code> / <code>env(k)</code> / <code>console.log()</code>
+            <br>示例：
+            <code>setEnv("token", response.body.data.token)</code> /
+            <code>setEnv("name", response.body.data.list[0].name)</code> /
+            <code>if (response.status === 200) setEnv("ok", "1")</code>
           </div>
           <el-input v-model="api.postScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：setEnv('lastId', response.json().id)" />
         </el-tab-pane>

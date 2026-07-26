@@ -109,6 +109,9 @@ type Settings struct {
 	CloudURL   string `json:"cloudURL"`
 	CloudToken string `json:"cloudToken"`
 	CloudUser  string `json:"cloudUser"`
+	// 版本与升级
+	Version   string `json:"version"`   // 客户端版本号（同时作为配置初始化标记）
+	UpdateURL string `json:"updateURL"` // 升级服务地址，如 http://127.0.0.1:8080
 }
 
 // AppData 应用全部数据

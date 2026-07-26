@@ -156,6 +156,8 @@ export namespace main {
 	    cloudURL: string;
 	    cloudToken: string;
 	    cloudUser: string;
+	    version: string;
+	    updateURL: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -170,6 +172,8 @@ export namespace main {
 	        this.cloudURL = source["cloudURL"];
 	        this.cloudToken = source["cloudToken"];
 	        this.cloudUser = source["cloudUser"];
+	        this.version = source["version"];
+	        this.updateURL = source["updateURL"];
 	    }
 	}
 	export class EnvVar {
@@ -315,6 +319,28 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class CheckUpdateResult {
+	    current: string;
+	    latest: string;
+	    hasNew: boolean;
+	    url: string;
+	    notes: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CheckUpdateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.hasNew = source["hasNew"];
+	        this.url = source["url"];
+	        this.notes = source["notes"];
+	        this.error = source["error"];
+	    }
 	}
 	
 	

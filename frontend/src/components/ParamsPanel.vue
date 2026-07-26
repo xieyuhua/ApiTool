@@ -129,7 +129,7 @@ async function clearFields(target) {
 
       <FieldTable v-show="tab === 'req'" :fields="api.reqFields" />
       <FieldTable v-show="tab === 'resp'" :fields="api.respFields" />
-      <KVEditor v-show="tab === 'headers'" :items="api.headers" key-placeholder="Header 名" />
+      <KVEditor v-show="tab === 'headers'" :items="api.headers" key-placeholder="参数名" />
     </div>
 
     <el-dialog v-model="importVisible" :title="importTarget === 'req' ? '导入请求参数 JSON' : '导入响应参数 JSON'"

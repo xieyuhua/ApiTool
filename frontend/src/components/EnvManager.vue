@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { store, uid, newEnvVar, currentProject } from '../store'
+import { uid, currentProject } from '../store'
 import KVEditor from './KVEditor.vue'
 
 const visible = defineModel('visible')
@@ -29,10 +29,6 @@ function delEnv(id) {
 }
 function useEnv(id) {
   currentProject().activeEnvId = currentProject().activeEnvId === id ? '' : id
-}
-function addVar() {
-  if (!cur.value) return
-  cur.value.vars.push(newEnvVar())
 }
 </script>
 
@@ -67,10 +63,8 @@ function addVar() {
         </div>
 
         <div class="kv-title">环境变量（共 {{ cur.vars.length }} 项）</div>
+        <!-- 变量行的新增/删除由 KVEditor 自带的「添加一行」按钮负责，无需再单独提供「添加变量」入口 -->
         <KVEditor :items="cur.vars" key-placeholder="变量名" />
-        <div class="add-row">
-          <el-button link type="primary" @click="addVar">＋ 添加变量</el-button>
-        </div>
       </div>
 
       <div v-else class="env-empty">

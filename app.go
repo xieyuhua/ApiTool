@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +27,12 @@ func NewApp() *App {
 	return &App{}
 }
 
+// AppVersion 客户端版本号（用于升级检测与本地配置标记）
+const AppVersion = "1.0.0"
+
+// DefaultUpdateURL 默认升级服务地址（本地 8080 服务）
+const DefaultUpdateURL = "http://127.0.0.1:8080"
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	dir, err := os.UserConfigDir()
@@ -35,6 +43,10 @@ func (a *App) startup(ctx context.Context) {
 	_ = os.MkdirAll(dataDir, 0o755)
 	a.dataFile = filepath.Join(dataDir, "data.json")
 	a.syncDir = filepath.Join(dataDir, "syncserver")
+	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
+	if _, err := os.Stat(a.dataFile); err != nil {
+		_ = a.SaveData(defaultData())
+	}
 }
 
 func defaultData() AppData {
@@ -54,6 +66,8 @@ func defaultData() AppData {
 			AIBaseURL:  "https://api.openai.com/v1",
 			AIModel:    "gpt-4o-mini",
 			TimeoutSec: 30,
+			Version:    AppVersion,
+			UpdateURL:  DefaultUpdateURL,
 		},
 	}
 }
@@ -69,6 +83,13 @@ func (a *App) readData() AppData {
 	_ = json.Unmarshal(b, &data)
 	if data.Settings.TimeoutSec <= 0 {
 		data.Settings.TimeoutSec = 30
+	}
+	// 兼容旧版本配置（无 version / updateURL 字段）
+	if data.Settings.Version == "" {
+		data.Settings.Version = AppVersion
+	}
+	if data.Settings.UpdateURL == "" {
+		data.Settings.UpdateURL = DefaultUpdateURL
 	}
 	// 兼容旧版本（无 projects，仅有 dirs/apis/environments）的迁移
 	if len(data.Projects) == 0 {
@@ -304,4 +325,109 @@ func sanitizeFilename(s string) string {
 		return "api-doc"
 	}
 	return string(out)
+}
+
+// UpdateInfo 升级服务返回的版本信息
+type UpdateInfo struct {
+	Version string `json:"version"` // 服务端最新版本号
+	URL     string `json:"url"`     // 新版本下载地址
+	Notes   string `json:"notes"`   // 更新说明
+}
+
+// CheckUpdateResult 检测结果返回给前端
+type CheckUpdateResult struct {
+	Current  string `json:"current"`  // 当前版本
+	Latest   string `json:"latest"`   // 服务端版本
+	HasNew   bool   `json:"hasNew"`   // 是否有新版本
+	URL      string `json:"url"`      // 新版本下载地址
+	Notes    string `json:"notes"`    // 更新说明
+	Error    string `json:"error"`    // 检测错误信息（网络/解析失败）
+}
+
+// GetVersion 返回当前客户端版本号
+func (a *App) GetVersion() string {
+	return AppVersion
+}
+
+// CheckUpdate 调用升级服务地址的 /version 接口检测是否有新版本。
+// 升级服务需返回 JSON：{ "version": "1.2.0", "url": "...", "notes": "..." }
+func (a *App) CheckUpdate() CheckUpdateResult {
+	data := a.readData()
+	res := CheckUpdateResult{Current: data.Settings.Version}
+	if data.Settings.Version == "" {
+		res.Current = AppVersion
+	}
+	res.Latest = res.Current
+
+	base := strings.TrimSpace(data.Settings.UpdateURL)
+	if base == "" {
+		base = DefaultUpdateURL
+	}
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	base = strings.TrimRight(base, "/")
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(base + "/version")
+	if err != nil {
+		res.Error = "无法连接升级服务：" + err.Error()
+		return res
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		res.Error = fmt.Sprintf("升级服务返回状态 %d", resp.StatusCode)
+		return res
+	}
+	var info UpdateInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		res.Error = "升级服务返回数据解析失败：" + err.Error()
+		return res
+	}
+	if info.Version == "" {
+		res.Error = "升级服务未返回版本号"
+		return res
+	}
+	res.Latest = info.Version
+	res.URL = info.URL
+	res.Notes = info.Notes
+	res.HasNew = compareVersion(info.Version, res.Current) > 0
+	return res
+}
+
+// compareVersion 比较两个语义化版本号（仅比较数值段），a>b 返回 1，相等 0，a<b 返回 -1
+func compareVersion(a, b string) int {
+	as := strings.Split(strings.TrimSpace(a), ".")
+	bs := strings.Split(strings.TrimSpace(b), ".")
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		ai, bi := 0, 0
+		if i < len(as) {
+			ai = atoiSafe(as[i])
+		}
+		if i < len(bs) {
+			bi = atoiSafe(bs[i])
+		}
+		if ai > bi {
+			return 1
+		}
+		if ai < bi {
+			return -1
+		}
+	}
+	return 0
+}
+
+func atoiSafe(s string) int {
+	v := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			break
+		}
+		v = v*10 + int(c-'0')
+	}
+	return v
 }

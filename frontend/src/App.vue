@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
 import { store, initStore, currentApi, saveNow } from './store'
 import Sidebar from './components/Sidebar.vue'
 import DebugPanel from './components/DebugPanel.vue'
@@ -10,6 +10,38 @@ import SettingsPanel from './components/SettingsPanel.vue'
 
 onMounted(initStore)
 window.addEventListener('beforeunload', saveNow)
+
+// 目录栏宽度可拖拽调整（持久化到 localStorage）
+const NAV_W = 60
+const MIN_W = 180
+const MAX_W = 600
+const sidebarWidth = ref(Number(localStorage.getItem('sb-width')) || 280)
+let resizing = false
+
+function startResize(e) {
+  resizing = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onResize)
+  window.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+function onResize(e) {
+  if (!resizing) return
+  let w = e.clientX - NAV_W
+  if (w < MIN_W) w = MIN_W
+  if (w > MAX_W) w = MAX_W
+  sidebarWidth.value = w
+  localStorage.setItem('sb-width', String(w))
+}
+function stopResize() {
+  resizing = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onResize)
+  window.removeEventListener('mouseup', stopResize)
+}
+onBeforeUnmount(stopResize)
 
 const api = computed(() => currentApi())
 const navs = [
@@ -30,7 +62,8 @@ const navs = [
     </div>
 
     <template v-if="store.view === 'workspace'">
-      <Sidebar />
+      <Sidebar :style="{ width: sidebarWidth + 'px' }" />
+      <div class="sb-resizer" :class="{ active: resizing }" @mousedown="startResize" title="拖动调整目录宽度"></div>
       <div class="main-area">
         <template v-if="api">
           <div class="api-header">
@@ -58,6 +91,11 @@ const navs = [
     <DocCenter v-else-if="store.view === 'docs'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
   </div>
+
+  <div v-if="!store.loaded" class="boot-loading">
+    <div class="spinner"></div>
+    <div class="boot-text">正在加载接口数据…</div>
+  </div>
 </template>
 
 <style scoped>
@@ -69,4 +107,19 @@ const navs = [
 .api-desc-input { flex: 1; }
 .main-tabs { background: #fff; padding: 0 22px; border-bottom: 1px solid #e5e6eb; }
 .main-tabs :deep(.el-tabs__header) { margin-bottom: 0; }
+.sb-resizer {
+  width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent;
+  position: relative; z-index: 5; transition: background .15s;
+}
+.sb-resizer:hover, .sb-resizer.active { background: #165dff; }
+.boot-loading {
+  position: fixed; inset: 0; z-index: 9999; background: #f5f6f8;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+}
+.boot-loading .spinner {
+  width: 38px; height: 38px; border: 4px solid #e5e6eb; border-top-color: #165dff;
+  border-radius: 50%; animation: spin .8s linear infinite;
+}
+.boot-loading .boot-text { color: #86909c; font-size: 14px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

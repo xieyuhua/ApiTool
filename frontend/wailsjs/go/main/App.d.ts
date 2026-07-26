@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function BuildSharedHTML(arg1:string,arg2:string):Promise<string>;
 
+export function CheckUpdate():Promise<main.CheckUpdateResult>;
+
 export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
 
 export function CopyToClipboard(arg1:string):Promise<void>;
@@ -17,6 +19,8 @@ export function FormatJSON(arg1:string):Promise<string>;
 export function GenerateDescriptions(arg1:string,arg2:string,arg3:Array<main.Field>):Promise<Array<main.Field>>;
 
 export function GetDataFilePath():Promise<string>;
+
+export function GetVersion():Promise<string>;
 
 export function ImportDoc():Promise<string>;
 
