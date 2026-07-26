@@ -116,6 +116,16 @@ func (a *App) buildHTMLForScope(dirID, apiID string) (string, string, error) {
 	return buildHTML(title, rootID, dirs, apis), title, nil
 }
 
+// BuildSharedHTML 生成可独立分享的网页文档（含内联样式的完整 HTML 源码）。
+// 返回的内容不依赖任何服务端，可直接保存为 .html 文件或粘贴部署，发给任何人都能打开。
+func (a *App) BuildSharedHTML(dirID, apiID string) (string, error) {
+	html, _, err := a.buildHTMLForScope(dirID, apiID)
+	if err != nil {
+		return "", err
+	}
+	return html, nil
+}
+
 // CreateShareLink 创建分享链接（内嵌服务托管文档，支持密码与有效期）
 func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
 	html, title, err := a.buildHTMLForScope(dirID, apiID)

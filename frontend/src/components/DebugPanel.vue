@@ -313,7 +313,8 @@ function fmtSize(n) {
 </template>
 
 <style scoped>
-.url-row { display: flex; gap: 10px; }
+.url-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.url-row .el-input { flex: 1; min-width: 240px; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
 .resp-meta { color: #86909c; font-size: 12px; font-weight: 400; margin-left: 10px; }
 .script-tip { font-size: 12px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.7; }
