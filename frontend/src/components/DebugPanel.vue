@@ -230,15 +230,18 @@ function fmtSize(n) {
         </el-select>
         <el-input v-model="api.url" size="large" placeholder="请输入接口地址，如 https://api.example.com/user/list（支持 {{变量}}）"
           @keyup.enter="send" />
-        <el-select v-model="currentProject().activeEnvId" size="large" style="width:140px" placeholder="环境" title="选择环境变量">
+        <el-button type="primary" size="large" :loading="sending" style="width:100px" @click="send">
+          发 送
+        </el-button>
+      </div>
+      <!-- 环境变量 / 公共参数 工具栏，置于接口地址之下 -->
+      <div class="req-toolbar">
+        <el-select v-model="currentProject().activeEnvId" size="large" style="width:150px" placeholder="环境" title="选择环境变量">
           <el-option label="无环境" value="" />
           <el-option v-for="e in currentProject().environments" :key="e.id" :label="e.name" :value="e.id" />
         </el-select>
         <el-button size="large" title="管理环境" @click="envVisible = true">⚙ 环境</el-button>
         <el-button size="large" title="公共参数（对所有接口自动附加）" @click="commonVisible = true">☰ 公共参数</el-button>
-        <el-button type="primary" size="large" :loading="sending" style="width:100px" @click="send">
-          发 送
-        </el-button>
       </div>
 
       <el-tabs v-model="reqTab" style="margin-top:10px">
@@ -334,8 +337,9 @@ function fmtSize(n) {
 </template>
 
 <style scoped>
-.url-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.url-row .el-input { flex: 1; min-width: 240px; }
+.req-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.url-row { display: flex; gap: 10px; align-items: center; }
+.url-row .el-input { flex: 1; min-width: 0; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
 .resp-meta { color: #86909c; font-size: 12px; font-weight: 400; margin-left: 10px; }
 .script-tip { font-size: 12px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.7; }

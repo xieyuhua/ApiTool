@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, OpenInBrowser } from '../../wailsjs/go/main/App'
+import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser } from '../../wailsjs/go/main/App'
 import { store, saveNow, scheduleAutoSync, checkUpdate } from '../store'
 import CloudSync from './CloudSync.vue'
 
@@ -10,6 +10,7 @@ const cloudVisible = ref(false)
 const syncAddr = ref(':8080')
 const syncRunning = ref(false)
 const syncBusy = ref(false)
+const syncURL = ref('') // 实际可访问地址（http://IP:port），与启动地址区分
 
 // 版本与升级检测状态
 const checking = ref(false)
@@ -17,7 +18,10 @@ const updateResult = ref(null)
 
 onMounted(async () => {
   try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
-  try { syncRunning.value = await SyncServerRunning() } catch { /* ignore */ }
+  try {
+    syncRunning.value = await SyncServerRunning()
+    if (syncRunning.value) syncURL.value = await SyncServerURL()
+  } catch { /* ignore */ }
 })
 
 function openURL(url) {
@@ -67,11 +71,14 @@ async function toggleSync() {
     if (syncRunning.value) {
       await StopSyncServer()
       syncRunning.value = false
+      syncURL.value = ''
       ElMessage.success('已停止内置同步服务')
     } else {
-      const msg = await StartSyncServer(syncAddr.value)
+      const addr = await StartSyncServer(syncAddr.value)
       syncRunning.value = true
-      ElMessage.success(msg)
+      syncURL.value = await SyncServerURL()
+      ElMessage.success('内置同步服务已启动：' + syncURL.value)
+      void addr
     }
   } catch (e) {
     ElMessage.error(String(e))
@@ -175,15 +182,24 @@ async function toggleSync() {
       <div class="card">
         <div class="card-title">内置同步服务（工具与服务一起部署，可选）</div>
         <div style="font-size:13px; color:#4e5969; margin-bottom:12px">
-          启动后本工具同时作为同步服务器，其他人可将云服务器地址填为
-          <code>http://你的IP{{ syncAddr }}</code> 来连接。停止后仅本机使用。
+          启动后本工具同时作为同步服务器。下面填写的是<b>监听地址</b>（绑定用，如
+          <code>:8080</code> / <code>0.0.0.0:8080</code>，写 <code>:0</code> 让系统分配随机端口）；
+          启动后下方会显示<b>实际访问地址</b>，其他人把该地址填到「云同步」的云服务器地址即可连接。
         </div>
-        <div style="display:flex; gap:12px; align-items:center">
-          <el-input v-model="syncAddr" placeholder=":8080" style="width:200px" />
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+          <el-input v-model="syncAddr" placeholder=":8080" style="width:220px"
+            title="监听地址（绑定用，非访问地址）" />
           <el-button :type="syncRunning ? 'danger' : 'success'" :loading="syncBusy" @click="toggleSync">
             {{ syncRunning ? '停止服务' : '启动服务' }}
           </el-button>
           <el-tag v-if="syncRunning" type="success" effect="plain">运行中</el-tag>
+        </div>
+        <div v-if="syncRunning && syncURL" class="sync-url">
+          <span class="su-label">实际访问地址（可分享给他人）：</span>
+          <code class="su-code">{{ syncURL }}</code>
+          <el-button size="small" link type="primary" @click="openURL(syncURL)">打开</el-button>
+          <el-button size="small" link type="primary"
+            @click="store.data.settings.cloudURL = syncURL; ElMessage.success('已填入云服务器地址')">填入云服务器</el-button>
         </div>
       </div>
 
