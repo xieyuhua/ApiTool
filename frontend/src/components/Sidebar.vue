@@ -46,7 +46,11 @@ function confirmNewApi() {
 
 function filterNode(value, node) {
   if (!value) return true
-  return node.label.toLowerCase().includes(value.toLowerCase())
+  const v = value.toLowerCase()
+  if (node.label.toLowerCase().includes(v)) return true
+  // 接口节点额外匹配接口地址（url）
+  if (node.type === 'api' && node.url && node.url.toLowerCase().includes(v)) return true
+  return false
 }
 function onKeyword(v) { treeRef.value?.filter(v) }
 

@@ -183,7 +183,7 @@ function fmtExpire(exp) {
         <el-alert v-else type="warning" :closable="false" show-icon
           style="margin-bottom:14px"
           title="本地分享模式（未配置云服务器）"
-          description="该链接由本工具内置本地服务托管，同一局域网内的他人可在浏览器打开（localhost 替换为你的局域网 IP）；公网访问请先在「设置 → 云同步」配置并登录云服务器。" />
+          description="该链接由本工具内置本地服务托管（地址为 127.0.0.1，仅本机可访问）。同一局域网内的他人可将链接中的 127.0.0.1 替换为本机局域网 IP 访问；公网访问请先在「设置 → 云同步」配置并登录云服务器。" />
 
         <el-form label-width="90px">
           <el-form-item label="访问密码">

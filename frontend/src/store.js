@@ -384,7 +384,7 @@ export function buildTree() {
       out.push({ id: d.id, label: d.name, type: 'dir', children: nodes(d.id) })
     }
     for (const a of p.apis.filter(x => x.dirId === parentId)) {
-      out.push({ id: a.id, label: a.name, type: 'api', method: a.method, children: [] })
+      out.push({ id: a.id, label: a.name, type: 'api', method: a.method, url: a.url, children: [] })
     }
     return out
   }

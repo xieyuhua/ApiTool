@@ -127,9 +127,9 @@ async function clearFields(target) {
         <span v-if="tab !== 'headers'" class="tip">导入时会自动保留同名字段已填写的描述；AI 补全仅填充空白描述</span>
       </div>
 
-      <FieldTable v-show="tab === 'req'" :fields="api.reqFields" />
-      <FieldTable v-show="tab === 'resp'" :fields="api.respFields" />
-      <KVEditor v-show="tab === 'headers'" :items="api.headers" key-placeholder="参数名" />
+      <FieldTable v-if="tab === 'req'" :fields="api.reqFields" />
+      <FieldTable v-if="tab === 'resp'" :fields="api.respFields" />
+      <KVEditor v-if="tab === 'headers'" :items="api.headers" key-placeholder="参数名" />
     </div>
 
     <el-dialog v-model="importVisible" :title="importTarget === 'req' ? '导入请求参数 JSON' : '导入响应参数 JSON'"

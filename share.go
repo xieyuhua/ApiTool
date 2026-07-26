@@ -48,9 +48,13 @@ func (s *shareServer) ensure() error {
 	if s.server != nil {
 		return nil
 	}
+	// 优先监听 0.0.0.0（IPv4 通配，支持局域网）；若失败（如被防火墙拦截）回退 127.0.0.1（仅本机）
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
-		return err
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return err
+		}
 	}
 	s.listener = ln
 	s.port = ln.Addr().(*net.TCPAddr).Port
@@ -150,7 +154,9 @@ func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) 
 		expireAt:  expire,
 	}
 	shareSrv.mu.Unlock()
-	return fmt.Sprintf("http://localhost:%d/?t=%s", shareSrv.port, token), nil
+	// 注意：服务监听 0.0.0.0（仅 IPv4），故链接必须用 127.0.0.1 而非 localhost，
+	// 否则 localhost 在部分系统优先解析为 IPv6 ::1 而连不上服务（页面空白）。
+	return fmt.Sprintf("http://127.0.0.1:%d/?t=%s", shareSrv.port, token), nil
 }
 
 // ListShares 列出当前有效的分享链接
@@ -169,7 +175,7 @@ func (a *App) ListShares() []ShareInfo {
 			HasPassword: d.password != "",
 			ExpireAt:   exp,
 			CreatedAt:  d.createdAt.Unix(),
-			Link:       fmt.Sprintf("http://localhost:%d/?t=%s", shareSrv.port, d.token),
+			Link:       fmt.Sprintf("http://127.0.0.1:%d/?t=%s", shareSrv.port, d.token),
 		})
 	}
 	return out
