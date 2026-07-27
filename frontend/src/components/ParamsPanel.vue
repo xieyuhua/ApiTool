@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ParseFields, FormatJSON, GenerateDescriptions } from '../../wailsjs/go/main/App'
+import { getLiveResponse, markDebugDirty, debugDirty, saveDebugNow } from '../store'
 import FieldTable from './FieldTable.vue'
 import KVEditor from './KVEditor.vue'
 
@@ -37,6 +38,7 @@ async function doImport() {
     else props.api.respFields = fields || []
     importVisible.value = false
     tab.value = target
+    markDebugDirty()
     ElMessage.success('导入成功，已保留原有字段描述')
   } catch (e) {
     ElMessage.error(String(e))
@@ -44,12 +46,13 @@ async function doImport() {
 }
 
 async function importFromResponse() {
-  const resp = props.api.lastResponse
+  const resp = getLiveResponse(props.api.id)
   if (!resp || !resp.isJson) { ElMessage.warning('没有可用的 JSON 响应，请先在「接口调试」中发送请求'); return }
   try {
     const fields = await ParseFields(resp.body, JSON.parse(JSON.stringify(props.api.respFields)))
     props.api.respFields = fields || []
     tab.value = 'resp'
+    markDebugDirty()
     ElMessage.success('已从最近一次响应导入')
   } catch (e) {
     ElMessage.error(String(e))
@@ -62,6 +65,7 @@ async function importFromBody() {
     const fields = await ParseFields(props.api.body, JSON.parse(JSON.stringify(props.api.reqFields)))
     props.api.reqFields = fields || []
     tab.value = 'req'
+    markDebugDirty()
     ElMessage.success('已从请求体导入')
   } catch (e) {
     ElMessage.error(String(e))
@@ -81,6 +85,7 @@ async function importFromQuery() {
   }
   props.api.reqFields = existing
   tab.value = 'req'
+  markDebugDirty()
   ElMessage.success('已从 Query 参数导入请求参数文档')
 }
 
@@ -94,6 +99,7 @@ async function aiComplete(target) {
       JSON.parse(JSON.stringify(fields)))
     if (target === 'req') props.api.reqFields = result || []
     else props.api.respFields = result || []
+    markDebugDirty()
     ElMessage.success('AI 已补全空白字段描述')
   } catch (e) {
     ElMessage.error(String(e))
@@ -107,13 +113,31 @@ async function clearFields(target) {
     await ElMessageBox.confirm('确定清空所有字段？', '提示', { type: 'warning' })
     if (target === 'req') props.api.reqFields = []
     else props.api.respFields = []
+    markDebugDirty()
   } catch { /* 取消 */ }
+}
+
+// 显式保存：把当前「参数设置」中的修改落盘。
+// 与「接口调试」的保存请求一致——只有点击才会持久化，编辑过程不会自动保存。
+async function saveParams() {
+  try {
+    await saveDebugNow()
+    ElMessage.success('已保存参数设置')
+  } catch (e) {
+    ElMessage.error('保存失败：' + String(e))
+  }
 }
 </script>
 
 <template>
   <div class="panel-page">
     <div class="card">
+      <div class="params-head">
+        <span class="params-title">参数设置</span>
+        <span style="flex:1" />
+        <el-button size="small" type="success" @click="saveParams" title="保存当前参数设置（仅点击时落盘）">保存</el-button>
+        <span v-if="debugDirty" class="dirty-tip">有未保存的修改</span>
+      </div>
       <el-tabs v-model="tab">
         <el-tab-pane label="请求参数" name="req" />
         <el-tab-pane label="响应参数" name="resp" />
@@ -147,15 +171,15 @@ async function clearFields(target) {
       <template v-if="tab === 'req'">
         <div class="sub-block">
           <div class="sub-title">Query 参数 <span class="sub-tip">（也属于请求参数）</span></div>
-          <KVEditor :items="api.query" key-placeholder="参数名" />
+          <KVEditor :items="api.query" key-placeholder="参数名" @change="markDebugDirty" />
         </div>
         <div class="sub-block">
           <div class="sub-title">请求体字段（请求参数）</div>
-          <FieldTable :fields="api.reqFields" />
+          <FieldTable :fields="api.reqFields" @change="markDebugDirty" />
         </div>
       </template>
-      <FieldTable v-if="tab === 'resp'" :fields="api.respFields" />
-      <KVEditor v-if="tab === 'headers'" :items="api.headers" key-placeholder="参数名" />
+      <FieldTable v-if="tab === 'resp'" :fields="api.respFields" @change="markDebugDirty" />
+      <KVEditor v-if="tab === 'headers'" :items="api.headers" key-placeholder="参数名" @change="markDebugDirty" />
     </div>
 
     <el-dialog v-model="importVisible" :title="importTarget === 'req' ? '导入请求参数 JSON' : '导入响应参数 JSON'"
@@ -172,6 +196,9 @@ async function clearFields(target) {
 </template>
 
 <style scoped>
+.params-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.params-title { font-size: 15px; font-weight: 600; color: #1d2129; }
+.dirty-tip { color: #fa8c16; font-size: 12px; font-weight: 500; }
 .toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
 .tip { color: #c2c7cf; font-size: 12px; margin-left: 10px; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }

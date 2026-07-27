@@ -72,6 +72,13 @@ export const debugDirty = ref(false)
 export function markDebugDirty() { debugDirty.value = true }
 export function clearDebugDirty() { debugDirty.value = false }
 
+// 调试响应：仅内存态，不随自动保存落盘。
+// 只有用户点击「保存请求」时，才会把当前响应写入接口定义（api.lastResponse）并持久化，
+// 从而避免发送请求后文档/响应示例被自动更新。
+export const liveResponses = reactive({}) // apiId -> 最近一次响应
+export function setLiveResponse(apiId, r) { if (apiId) liveResponses[apiId] = r }
+export function getLiveResponse(apiId) { return apiId ? (liveResponses[apiId] || null) : null }
+
 // 全局弹窗可见状态：环境管理与公共参数入口统一放在顶部导航栏，
 // 不再占用接口请求行的空间。
 export const envDialogVisible = ref(false)

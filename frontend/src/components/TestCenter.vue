@@ -211,6 +211,14 @@ function togglePlanCase(id) {
   if (i >= 0) arr.splice(i, 1)
   else arr.push(id)
 }
+// 全选：按用例列表顺序加入所有用例
+function selectAllPlanCases() {
+  editingPlan.value.caseIds = cases.value.map(c => c.id)
+}
+// 清空：移除计划中的所有用例
+function clearPlanCases() {
+  editingPlan.value.caseIds = []
+}
 
 // ---------------- 执行 ----------------
 const running = ref(false)
@@ -558,7 +566,14 @@ const passRate = computed(() => {
           </div>
         </div>
         <div class="plan-cases">
-          <div class="pc-title">计划用例（按顺序执行，勾选加入）</div>
+          <div class="pc-title">
+            计划用例（按顺序执行，勾选加入）
+            <span class="pc-ops">
+              <el-button size="small" link type="primary" :disabled="!cases.length" @click="selectAllPlanCases">全选</el-button>
+              <el-button size="small" link :disabled="!(editingPlan.caseIds||[]).length" @click="clearPlanCases">清空</el-button>
+              <span class="pc-count">已选 {{ (editingPlan.caseIds||[]).length }} / {{ cases.length }}</span>
+            </span>
+          </div>
           <div v-if="!cases.length" class="assert-empty">请先在「测试用例」中生成用例</div>
           <div v-for="c in cases" :key="c.id" class="pc-row">
             <el-checkbox :model-value="(editingPlan.caseIds||[]).includes(c.id)" @change="togglePlanCase(c.id)" />
@@ -669,7 +684,9 @@ const passRate = computed(() => {
 .conc-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #4e5969; }
 
 .plan-cases { margin-top: 16px; border: 1px solid #e5e6eb; border-radius: 8px; padding: 12px; max-height: 360px; overflow: auto; }
-.pc-title { font-size: 13px; color: #4e5969; margin-bottom: 10px; font-weight: 600; }
+.pc-title { font-size: 13px; color: #4e5969; margin-bottom: 10px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.pc-ops { margin-left: auto; display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.pc-count { font-size: 12px; color: #86909c; }
 .pc-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-bottom: 1px dashed #f2f3f5; }
 .pc-name { font-size: 13px; } .pc-cat { color: #86909c; font-size: 12px; }
 

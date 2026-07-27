@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SendRequest, FormatJSON, ParseFields } from '../../wailsjs/go/main/App'
-import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow } from '../store'
+import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../store'
 import { runScript } from '../script'
 import KVEditor from './KVEditor.vue'
 
@@ -26,7 +26,7 @@ const contentTypeOptions = [
   'application/javascript',
 ]
 
-const resp = computed(() => props.api.lastResponse || null)
+const resp = computed(() => getLiveResponse(props.api.id) || null)
 const bodyPlaceholder = computed(() =>
   props.api.bodyType === 'json' ? '{\n  "name": "张三"\n}' : '请求体原始文本')
 
@@ -77,25 +77,7 @@ function mergeCommon(spec) {
   spec.query = [...qm.values()]
 }
 
-async function send() {
-  sending.value = true
-  try {
-    const envMap = envToMap(activeEnvVars())
-    const spec = {
-      method: props.api.method,
-      url: props.api.url,
-      headers: JSON.parse(JSON.stringify(props.api.headers)),
-      query: JSON.parse(JSON.stringify(props.api.query)),
-      bodyType: props.api.bodyType,
-      body: props.api.body,
-      formItems: JSON.parse(JSON.stringify(props.api.formItems)),
-      timeoutSec: store.data.settings.timeoutSec || 30,
-      env: activeEnvVars(),
-      contentType: props.api.contentType || '',
-    }
-    mergeCommon(spec) // 公共参数自动附加（接口同名优先）
-
-    // 将地址栏中携带的 ?query 解析进「Query 参数」列表，并从地址中移除，
+// 将地址栏中携带的 ?query 解析进「Query 参数」列表，并从地址中移除，
 // 避免发送时地址里的 query 与 api.query 重复叠加。
 function syncUrlQuery() {
   const raw = props.api.url || ''
@@ -122,7 +104,25 @@ function syncUrlQuery() {
   markDebugDirty()
 }
 
-// 前置脚本：可修改请求与临时环境变量
+async function send() {
+  sending.value = true
+  try {
+    const envMap = envToMap(activeEnvVars())
+    const spec = {
+      method: props.api.method,
+      url: props.api.url,
+      headers: JSON.parse(JSON.stringify(props.api.headers)),
+      query: JSON.parse(JSON.stringify(props.api.query)),
+      bodyType: props.api.bodyType,
+      body: props.api.body,
+      formItems: JSON.parse(JSON.stringify(props.api.formItems)),
+      timeoutSec: store.data.settings.timeoutSec || 30,
+      env: activeEnvVars(),
+      contentType: props.api.contentType || '',
+    }
+    mergeCommon(spec) // 公共参数自动附加（接口同名优先）
+
+    // 前置脚本：可修改请求与临时环境变量
     if (props.api.preScript && props.api.preScript.trim()) {
       try {
         const reqParsed = (() => { try { return JSON.parse(spec.body) } catch { return null } })()
@@ -191,8 +191,7 @@ function syncUrlQuery() {
     }
     }
 
-    props.api.lastResponse = r
-    props.api.updatedAt = new Date().toISOString()
+    setLiveResponse(props.api.id, r)
     if (r.error) {
       pushLog('error', `请求失败 ${spec.method} ${spec.url}`, r.error)
       ElMessage.error(r.error)
@@ -213,12 +212,14 @@ function syncUrlQuery() {
 }
 
 // 显式保存当前请求数据（url / 方法 / 参数 / 请求体 / 脚本等，含本次响应），
-// 同时根据请求体 / 响应体生成参数文档。用户调试时的修改不会自动落盘，
-// 需主动点击「保存请求」。
+// 同时根据请求体 / 响应体生成参数文档。发送不会自动落盘，只有点击「保存请求」才会：
+// 1) 把内存态的本次响应写入接口定义（持久化）；
+// 2) 重新生成请求/响应参数文档。
 async function saveRequest() {
   try {
-    await saveDebugNow()
     await generateDocs()
+    props.api.lastResponse = getLiveResponse(props.api.id)
+    await saveDebugNow()
     ElMessage.success('已保存当前请求并生成文档')
   } catch (e) {
     ElMessage.error('保存失败：' + String(e))
@@ -234,9 +235,10 @@ async function generateDocs() {
       props.api.reqFields = fields || []
     } catch (e) { console.warn('请求参数文档生成失败', e) }
   }
-  if (resp.value && resp.value.isJson) {
+  const r = getLiveResponse(props.api.id)
+  if (r && r.isJson) {
     try {
-      const fields = await ParseFields(resp.value.body, JSON.parse(JSON.stringify(props.api.respFields)))
+      const fields = await ParseFields(r.body, JSON.parse(JSON.stringify(props.api.respFields)))
       props.api.respFields = fields || []
     } catch (e) { console.warn('响应参数文档生成失败', e) }
   }
@@ -266,9 +268,10 @@ async function bodyToReqFields() {
 
 // 用响应 JSON 生成响应参数文档
 async function respToRespFields() {
-  if (!resp.value || !resp.value.isJson) { ElMessage.warning('当前响应不是 JSON'); return }
+  const r = getLiveResponse(props.api.id)
+  if (!r || !r.isJson) { ElMessage.warning('当前响应不是 JSON'); return }
   try {
-    const fields = await ParseFields(resp.value.body, JSON.parse(JSON.stringify(props.api.respFields)))
+    const fields = await ParseFields(r.body, JSON.parse(JSON.stringify(props.api.respFields)))
     props.api.respFields = fields || []
     store.activeTab = 'params'
     ElMessage.success('已从响应生成响应参数，可在参数设置中补充描述')
@@ -413,7 +416,7 @@ function buildRespDetail(r) {
       </div>
 
       <div v-if="!resp" style="color:#86909c; font-size:13px; padding:20px 0; text-align:center">
-        点击「发送」后，响应结果将显示在这里（自动保存，下次打开仍可查看）
+        点击「发送」后，响应结果将显示在这里；点「保存请求」才会把响应与文档一并保存
       </div>
       <div v-else-if="resp.error" class="resp-body" style="color:#ff8181">{{ resp.error }}</div>
       <template v-else>

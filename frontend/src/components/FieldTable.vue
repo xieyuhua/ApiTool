@@ -5,6 +5,8 @@ import { newField } from '../store'
 const props = defineProps({
   fields: { type: Array, required: true },
 })
+const emit = defineEmits(['change'])
+function changed() { emit('change') }
 
 const types = ['string', 'integer', 'number', 'boolean', 'object',
   'array[object]', 'array[string]', 'array[integer]', 'array[number]', 'null']
@@ -28,12 +30,15 @@ function canHaveChildren(f) {
 function addChild(f) {
   f.children ||= []
   f.children.push(newField())
+  changed()
 }
 function removeRow(row) {
   row.parent.splice(row.index, 1)
+  changed()
 }
 function addRoot() {
   props.fields.push(newField())
+  changed()
 }
 function prefix(depth) {
   return depth === 0 ? '' : '  '.repeat(depth - 1) + '└ '
@@ -58,17 +63,17 @@ function prefix(depth) {
           <td>
             <div class="fname-cell">
               <span class="tree-prefix">{{ prefix(row.depth) }}</span>
-              <el-input v-model="row.f.name" placeholder="字段名" />
+              <el-input v-model="row.f.name" placeholder="字段名" @input="changed" />
             </div>
           </td>
           <td>
-            <el-select v-model="row.f.type" size="small">
+            <el-select v-model="row.f.type" size="small" @change="changed">
               <el-option v-for="t in types" :key="t" :label="t" :value="t" />
             </el-select>
           </td>
-          <td style="text-align:center"><el-checkbox v-model="row.f.required" /></td>
-          <td><el-input v-model="row.f.description" placeholder="字段描述" /></td>
-          <td><el-input v-model="row.f.example" placeholder="示例" /></td>
+          <td style="text-align:center"><el-checkbox v-model="row.f.required" @change="changed" /></td>
+          <td><el-input v-model="row.f.description" placeholder="字段描述" @input="changed" /></td>
+          <td><el-input v-model="row.f.example" placeholder="示例" @input="changed" /></td>
           <td style="text-align:center; white-space:nowrap">
             <el-button v-if="canHaveChildren(row.f)" link type="primary" title="添加子字段"
               @click="addChild(row.f)">＋子</el-button>
