@@ -1,7 +1,16 @@
 <script setup>
 import { computed, ref, reactive } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow } from '../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, logStore } from '../store'
+import LogPanel from './LogPanel.vue'
+
+// 左侧选项卡：目录 / 日志 切换（持久化）
+const sidebarTab = ref(localStorage.getItem('sb-tab') || 'tree')
+function setSbTab(t) {
+  sidebarTab.value = t
+  localStorage.setItem('sb-tab', t)
+}
+const logErrorCount = computed(() => logStore.entries.filter(e => e.type === 'error').length)
 
 const keyword = ref('')
 const treeRef = ref(null)
@@ -202,42 +211,57 @@ async function removeProjectNow() {
         </template>
       </el-dropdown>
     </div>
-    <div class="sb-head">
-      <el-input v-model="keyword" placeholder="搜索接口 / 目录" size="small" clearable @input="onKeyword" />
-      <el-button size="small" @click="newDir('')">+ 目录</el-button>
-      <el-button size="small" type="primary" @click="openNewApi('')">+ 接口</el-button>
+
+    <div class="sb-tabs">
+      <div class="sb-tab" :class="{ active: sidebarTab === 'tree' }" @click="setSbTab('tree')">目录</div>
+      <div class="sb-tab" :class="{ active: sidebarTab === 'log' }" @click="setSbTab('log')">
+        日志
+        <span v-if="logErrorCount > 0" class="tab-badge">{{ logErrorCount > 99 ? '99+' : logErrorCount }}</span>
+      </div>
     </div>
-    <div class="sb-tree" v-loading="store.treeLoading" element-loading-text="加载目录中…" @contextmenu.prevent>
-      <el-tree ref="treeRef" :data="treeData" node-key="id" :props="{ label: 'label', children: 'children' }"
-        :filter-node-method="filterNode" :expand-on-click-node="true" highlight-current
-        :current-node-key="store.currentApiId" @node-click="onNodeClick" @node-contextmenu="onCtxMenu">
-        <template #default="{ data }">
-          <div class="tree-node" :class="{ selected: data.type === 'api' && data.id === store.currentApiId }">
-            <span v-if="data.type === 'dir'" class="dir-icon">📁</span>
-            <span v-else class="method-tag" :class="'m-' + (data.method || 'GET')">{{ data.method || 'GET' }}</span>
-            <span class="node-label" :title="data.label">{{ data.label }}</span>
-            <el-dropdown trigger="click" @command="cmd => handleCmd(cmd, data)" @click.stop>
-              <span class="more-btn" @click.stop>⋯</span>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <template v-if="data.type === 'dir'">
-                    <el-dropdown-item command="addApi">新建接口</el-dropdown-item>
-                    <el-dropdown-item command="addDir">新建子目录</el-dropdown-item>
-                    <el-dropdown-item command="rename" divided>重命名</el-dropdown-item>
-                    <el-dropdown-item command="delete">删除</el-dropdown-item>
-                  </template>
-                  <template v-else>
-                    <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                    <el-dropdown-item command="duplicate">复制接口</el-dropdown-item>
-                    <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-                  </template>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
-        </template>
-      </el-tree>
-      <div v-if="!treeData.length" class="sb-empty">暂无接口，点击上方「+ 接口」创建</div>
+
+    <div v-show="sidebarTab === 'tree'" class="sb-body">
+      <div class="sb-head">
+        <el-input v-model="keyword" placeholder="搜索接口 / 目录" size="small" clearable @input="onKeyword" />
+        <el-button size="small" @click="newDir('')">+ 目录</el-button>
+        <el-button size="small" type="primary" @click="openNewApi('')">+ 接口</el-button>
+      </div>
+      <div class="sb-tree" v-loading="store.treeLoading" element-loading-text="加载目录中…" @contextmenu.prevent>
+        <el-tree ref="treeRef" :data="treeData" node-key="id" :props="{ label: 'label', children: 'children' }"
+          :filter-node-method="filterNode" :expand-on-click-node="true" highlight-current
+          :current-node-key="store.currentApiId" @node-click="onNodeClick" @node-contextmenu="onCtxMenu">
+          <template #default="{ data }">
+            <div class="tree-node" :class="{ selected: data.type === 'api' && data.id === store.currentApiId }">
+              <span v-if="data.type === 'dir'" class="dir-icon">📁</span>
+              <span v-else class="method-tag" :class="'m-' + (data.method || 'GET')">{{ data.method || 'GET' }}</span>
+              <span class="node-label" :title="data.label">{{ data.label }}</span>
+              <el-dropdown trigger="click" @command="cmd => handleCmd(cmd, data)" @click.stop>
+                <span class="more-btn" @click.stop>⋯</span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <template v-if="data.type === 'dir'">
+                      <el-dropdown-item command="addApi">新建接口</el-dropdown-item>
+                      <el-dropdown-item command="addDir">新建子目录</el-dropdown-item>
+                      <el-dropdown-item command="rename" divided>重命名</el-dropdown-item>
+                      <el-dropdown-item command="delete">删除</el-dropdown-item>
+                    </template>
+                    <template v-else>
+                      <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                      <el-dropdown-item command="duplicate">复制接口</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </template>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+        </el-tree>
+        <div v-if="!treeData.length" class="sb-empty">暂无接口，点击上方「+ 接口」创建</div>
+      </div>
+    </div>
+
+    <div v-show="sidebarTab === 'log'" class="sb-body sb-log">
+      <LogPanel />
     </div>
 
     <el-dialog v-model="newApiVisible" title="新建接口" width="520px">
@@ -278,6 +302,24 @@ async function removeProjectNow() {
 
 <style scoped>
 .sb-proj { display: flex; gap: 6px; align-items: center; padding: 10px 12px 6px; }
+.sb-tabs { display: flex; border-bottom: 1px solid #f0f1f3; flex-shrink: 0; }
+.sb-tab {
+  flex: 1; text-align: center; padding: 9px 0; font-size: 13px; color: #4e5969;
+  cursor: pointer; position: relative; user-select: none;
+}
+.sb-tab:hover { color: #1f2329; }
+.sb-tab.active { color: #165dff; font-weight: 600; }
+.sb-tab.active::after {
+  content: ''; position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%);
+  width: 28px; height: 2px; background: #165dff;
+}
+.tab-badge {
+  display: inline-block; min-width: 16px; height: 16px; line-height: 16px; padding: 0 4px;
+  margin-left: 4px; background: #f53f3f; color: #fff; font-size: 10px; font-weight: 700;
+  border-radius: 8px; vertical-align: middle;
+}
+.sb-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.sb-log { display: block; }
 .sb-head { display: flex; gap: 6px; padding: 6px 12px 12px; border-bottom: 1px solid #f0f1f3; }
 .sb-head .el-button + .el-button { margin-left: 0; }
 .sb-tree { flex: 1; overflow: auto; padding: 8px 6px; }

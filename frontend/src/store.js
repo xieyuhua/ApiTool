@@ -1,4 +1,5 @@
-import { reactive, watch } from 'vue'
+import { reactive, watch, ref } from 'vue'
+import * as runtime from '../wailsjs/runtime/runtime'
 import { LoadData, SaveData, GetVersion, CheckUpdate } from '../wailsjs/go/main/App'
 
 export function uid() {
@@ -50,7 +51,7 @@ export const store = reactive({
   appVersion: '', // 客户端版本号（来自 Go 端）
   data: {
     projects: [
-      { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] } },
+      { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] }, testCases: [], testPlans: [], testReports: [] },
     ],
     currentProjectId: 'default',
     settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' },
@@ -64,7 +65,22 @@ export function currentProject() {
 }
 
 let saveTimer = null
+// 调试面板脏标记：用户修改了当前请求数据但尚未显式「保存请求」时为真。
+// 为真期间，store 的自动保存（deep watch）会被抑制，避免把临时调试改动
+// 静默覆盖到接口定义里。仅当用户点击「保存请求」时才落盘。
+export const debugDirty = ref(false)
+export function markDebugDirty() { debugDirty.value = true }
+export function clearDebugDirty() { debugDirty.value = false }
+
+// 全局弹窗可见状态：环境管理与公共参数入口统一放在顶部导航栏，
+// 不再占用接口请求行的空间。
+export const envDialogVisible = ref(false)
+export const commonDialogVisible = ref(false)
+export function openEnvDialog() { envDialogVisible.value = true }
+export function openCommonDialog() { commonDialogVisible.value = true }
+
 function scheduleSave() {
+  if (debugDirty.value) return // 调试中：抑制自动保存，等待显式保存
   clearTimeout(saveTimer)
   saveTimer = setTimeout(saveNow, 500)
 }
@@ -94,9 +110,17 @@ export async function saveNow() {
   if (!hasGoBridge()) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
+    clearDebugDirty() // 任何显式保存后，清除调试脏标记
   } catch (e) {
     console.error('保存失败', e)
   }
+}
+
+// 显式保存当前调试请求数据（用户点击「保存请求」），同时清除脏标记，
+// 使后续自动保存恢复生效。
+export async function saveDebugNow() {
+  clearDebugDirty()
+  await saveNow()
 }
 
 async function loadInto() {
@@ -107,7 +131,7 @@ async function loadInto() {
   const d = await LoadData()
   d.projects ||= []
   if (!d.projects.length) {
-    d.projects = [{ id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] } }]
+    d.projects = [{ id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] }, testCases: [], testPlans: [], testReports: [] }]
   }
   if (!d.projects.find(p => p.id === d.currentProjectId)) {
     d.currentProjectId = d.projects[0].id
@@ -120,6 +144,9 @@ async function loadInto() {
     p.common ||= { headers: [], query: [] }
     p.common.headers ||= []
     p.common.query ||= []
+    p.testCases ||= []
+    p.testPlans ||= []
+    p.testReports ||= []
     p.apis.forEach(normalizeApi)
   }
   d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' }
@@ -406,4 +433,149 @@ export function projectApis() {
 }
 export function projectDirs() {
   return currentProject().dirs
+}
+
+// ---------------- 接口测试：数据访问辅助 ----------------
+
+export function projectTestCases() {
+  return currentProject().testCases || []
+}
+export function projectTestPlans() {
+  return currentProject().testPlans || []
+}
+export function projectReports() {
+  return currentProject().testReports || []
+}
+
+// 将 AI 生成的用例合并进当前项目（去重同名 + 同接口避免重复堆叠）
+export function addTestCases(cases) {
+  const p = currentProject()
+  p.testCases ||= []
+  p.testCases.push(...cases)
+  saveNow()
+  return p.testCases
+}
+
+export function removeTestCase(id) {
+  const p = currentProject()
+  p.testCases = (p.testCases || []).filter(c => c.id !== id)
+  // 同步从所有计划中移除
+  for (const plan of (p.testPlans || [])) {
+    plan.caseIds = (plan.caseIds || []).filter(cid => cid !== id)
+  }
+  saveNow()
+}
+
+export function saveTestCase(c) {
+  const p = currentProject()
+  p.testCases ||= []
+  const i = p.testCases.findIndex(x => x.id === c.id)
+  if (i >= 0) p.testCases[i] = c
+  else p.testCases.push(c)
+  saveNow()
+}
+
+export function addTestPlan(plan) {
+  const p = currentProject()
+  p.testPlans ||= []
+  p.testPlans.push(plan)
+  saveNow()
+  return plan
+}
+
+export function removeTestPlan(id) {
+  const p = currentProject()
+  p.testPlans = (p.testPlans || []).filter(x => x.id !== id)
+  saveNow()
+}
+
+// 将报告存入历史（最多保留 50 条）
+export function appendReport(r) {
+  const p = currentProject()
+  p.testReports ||= []
+  p.testReports.unshift(r)
+  if (p.testReports.length > 50) p.testReports.length = 50
+  saveNow()
+}
+
+export function removeReport(id) {
+  const p = currentProject()
+  p.testReports = (p.testReports || []).filter(x => x.id !== id)
+  saveNow()
+}
+
+// ---------------- 调试日志（内存态，不持久化） ----------------
+// 调试模式开启时记录请求/响应详情；关闭时仅记录错误，便于聚焦问题。
+export const logStore = reactive({
+  enabled: true,     // 总开关
+  debug: true,       // 调试模式：记录请求/响应详情
+  panelOpen: true,   // 左侧日志列是否展开
+  filter: 'all',     // all | request | error
+  expanded: {},      // 各条日志详情展开状态 id -> bool
+  entries: [],       // {id, time, type, title, detail}
+})
+
+let _logSeq = 0
+export function pushLog(type, title, detail) {
+  if (!logStore.enabled) return
+  // 非错误且未开启调试模式时不记录，避免噪音
+  if (type !== 'error' && !logStore.debug) return
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  const ms = String(now.getMilliseconds()).padStart(3, '0')
+  logStore.entries.unshift({
+    id: ++_logSeq,
+    time: `${hh}:${mm}:${ss}.${ms}`,
+    type,           // request | response | error | info
+    title,
+    detail: detail || '',
+  })
+  if (logStore.entries.length > 400) logStore.entries.length = 400
+}
+
+export function clearLogs() {
+  logStore.entries = []
+}
+
+// ---------------- AI 生成测试任务（全局状态，跨视图保留） ----------------
+// 生成任务是后台异步跑的，状态放在全局，避免切到其它视图（接口测试组件被卸载）
+// 时丢失进度与事件监听。切回「接口测试」时自动恢复进度展示与完成提示。
+export const genJobId = ref('')
+export const genStat = ref({ total: 0, done: 0, name: '', phase: '' })
+// 任务结束 / 出错时写入，供「接口测试」视图切回时弹出提示（提示后清除）
+export const genDoneInfo = ref(null)   // { count: number, time: number }
+export const genErrorInfo = ref(null)  // { error: string, time: number }
+
+export function startGenJob(jobId, total) {
+  genJobId.value = jobId
+  genStat.value = { total, done: 0, name: '', phase: 'queued' }
+}
+
+let _genOff = []
+// 在应用启动时注册一次（App.onMounted），不随组件卸载而失效。
+export function initGenListener() {
+  if (_genOff.length) return
+  _genOff.push(runtime.EventsOn('apitool:gen-progress', (p) => {
+    if (p.jobId !== genJobId.value) return
+    genStat.value = { total: p.total, done: p.done, name: p.name || '', phase: p.phase || '' }
+  }))
+  _genOff.push(runtime.EventsOn('apitool:gen-done', (p) => {
+    if (p.jobId !== genJobId.value) return
+    genJobId.value = ''
+    genStat.value = { total: 0, done: 0, name: '', phase: '' }
+    if (p.cases && p.cases.length) {
+      addTestCases(p.cases)
+      genDoneInfo.value = { count: p.cases.length, time: Date.now() }
+    } else {
+      genDoneInfo.value = { count: 0, time: Date.now() }
+    }
+  }))
+  _genOff.push(runtime.EventsOn('apitool:gen-error', (p) => {
+    if (p.jobId !== genJobId.value) return
+    genJobId.value = ''
+    genStat.value = { total: 0, done: 0, name: '', phase: '' }
+    genErrorInfo.value = { error: p.error || '生成失败', time: Date.now() }
+  }))
 }

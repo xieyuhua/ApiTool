@@ -18,6 +18,12 @@ type Field struct {
 	Children    []*Field `json:"children,omitempty"`
 }
 
+// CommonParams 项目级公共参数（自动附加到所有接口请求，接口自身同名参数优先）
+type CommonParams struct {
+	Headers []KV `json:"headers"`
+	Query   []KV `json:"query"`
+}
+
 // ResponseData 请求响应结果
 type ResponseData struct {
 	Status     int               `json:"status"`
@@ -96,7 +102,87 @@ type Project struct {
 	Apis         []ApiInfo     `json:"apis"`
 	Environments []Environment `json:"environments"`
 	ActiveEnvID  string        `json:"activeEnvId"`
+	Common       CommonParams  `json:"common"`
 	UpdatedAt    string        `json:"updatedAt"`
+	// 接口测试
+	TestCases  []TestCase  `json:"testCases,omitempty"`
+	TestPlans  []TestPlan  `json:"testPlans,omitempty"`
+	TestReports []TestReport `json:"testReports,omitempty"`
+}
+
+// Assertion 测试断言（期望）
+type Assertion struct {
+	Type     string `json:"type"`     // status | json | bodyContains | header | duration
+	Target   string `json:"target"`   // json 时为 JSONPath；header 时为请求头名；其余为空
+	Operator string `json:"operator"` // eq | ne | gt | gte | lt | lte | contains | exists | isTrue | isFalse
+	Expected string `json:"expected"` // 期望值（duration 时单位为毫秒）
+	Enabled  bool   `json:"enabled"`
+}
+
+// TestCase 测试用例（自带完整请求快照 + 断言，运行时不依赖原接口）
+type TestCase struct {
+	ID          string      `json:"id"`
+	ApiID       string      `json:"apiId"`       // 关联接口 ID（可为空）
+	ApiName     string      `json:"apiName"`     // 关联接口名称（展示用）
+	Category    string      `json:"category"`    // 正常流程 | 参数边界 | 异常场景 | 权限安全
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Method      string      `json:"method"`
+	URL         string      `json:"url"`
+	Headers     []KV        `json:"headers"`
+	Query       []KV        `json:"query"`
+	BodyType    string      `json:"bodyType"`
+	Body        string      `json:"body"`
+	FormItems   []KV        `json:"formItems"`
+	ContentType string      `json:"contentType"`
+	Assertions  []Assertion `json:"assertions"`
+	Enabled     bool        `json:"enabled"`
+	CreatedAt   string      `json:"createdAt"`
+}
+
+// TestPlan 测试执行计划（有序用例 + 运行环境）
+type TestPlan struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	CaseIDs     []string `json:"caseIds"`     // 有序用例 ID 列表
+	EnvID       string   `json:"envId"`       // 运行环境
+	Concurrency int      `json:"concurrency"` // 并发数（预留，当前串行执行）
+	CreatedAt   string   `json:"createdAt"`
+	UpdatedAt   string   `json:"updatedAt"`
+}
+
+// AssertionResult 单条断言执行结果
+type AssertionResult struct {
+	Description string `json:"description"` // 人类可读描述
+	Passed      bool   `json:"passed"`
+	Detail      string `json:"detail"` // 实际值 vs 期望值
+}
+
+// TestResult 单个用例执行结果
+type TestResult struct {
+	CaseID          string            `json:"caseId"`
+	CaseName        string            `json:"caseName"`
+	Category        string            `json:"category"`
+	Passed          bool              `json:"passed"`
+	Status          int               `json:"status"`
+	DurationMs      int64             `json:"durationMs"`
+	Error           string            `json:"error"`
+	ResponseBody    string            `json:"responseBody"`
+	AssertionResults []AssertionResult `json:"assertionResults"`
+}
+
+// TestReport 测试报告
+type TestReport struct {
+	ID         string       `json:"id"`
+	PlanID     string       `json:"planId"`
+	PlanName   string       `json:"planName"`
+	CreatedAt  string       `json:"createdAt"`
+	Total      int          `json:"total"`
+	Passed     int          `json:"passed"`
+	Failed     int           `json:"failed"`
+	DurationMs int64        `json:"durationMs"`
+	Results    []TestResult `json:"results"`
+	Summary    string       `json:"summary"` // AI 分析摘要
 }
 
 // Settings 全局设置

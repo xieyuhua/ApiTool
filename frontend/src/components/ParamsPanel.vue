@@ -68,6 +68,22 @@ async function importFromBody() {
   }
 }
 
+// 将 Query 参数并入请求参数文档（同名不重复），使查询参数也出现在结构化请求参数中
+async function importFromQuery() {
+  const qs = props.api.query.filter(q => q.enabled && q.key)
+  if (!qs.length) { ElMessage.warning('没有可用的 Query 参数，请先在「接口调试」中填写'); return }
+  const existing = JSON.parse(JSON.stringify(props.api.reqFields))
+  const have = new Set(existing.map(f => f.name))
+  for (const q of qs) {
+    if (have.has(q.key)) continue
+    existing.push({ name: q.key, type: 'string', required: false, example: q.value, description: q.description, children: [] })
+    have.add(q.key)
+  }
+  props.api.reqFields = existing
+  tab.value = 'req'
+  ElMessage.success('已从 Query 参数导入请求参数文档')
+}
+
 async function aiComplete(target) {
   const fields = target === 'req' ? props.api.reqFields : props.api.respFields
   if (!fields.length) { ElMessage.warning('没有字段可补全'); return }
@@ -108,6 +124,7 @@ async function clearFields(target) {
         <template v-if="tab === 'req'">
           <el-button size="small" type="primary" plain @click="openImport('req')">粘贴 JSON 导入</el-button>
           <el-button size="small" @click="importFromBody">从请求体导入</el-button>
+          <el-button size="small" @click="importFromQuery">从 Query 导入</el-button>
           <el-button size="small" type="success" plain :loading="aiLoading" @click="aiComplete('req')">
             ✨ AI 补全字段描述
           </el-button>
@@ -127,7 +144,16 @@ async function clearFields(target) {
         <span v-if="tab !== 'headers'" class="tip">导入时会自动保留同名字段已填写的描述；AI 补全仅填充空白描述</span>
       </div>
 
-      <FieldTable v-if="tab === 'req'" :fields="api.reqFields" />
+      <template v-if="tab === 'req'">
+        <div class="sub-block">
+          <div class="sub-title">Query 参数 <span class="sub-tip">（也属于请求参数）</span></div>
+          <KVEditor :items="api.query" key-placeholder="参数名" />
+        </div>
+        <div class="sub-block">
+          <div class="sub-title">请求体字段（请求参数）</div>
+          <FieldTable :fields="api.reqFields" />
+        </div>
+      </template>
       <FieldTable v-if="tab === 'resp'" :fields="api.respFields" />
       <KVEditor v-if="tab === 'headers'" :items="api.headers" key-placeholder="参数名" />
     </div>
@@ -149,4 +175,7 @@ async function clearFields(target) {
 .toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
 .tip { color: #c2c7cf; font-size: 12px; margin-left: 10px; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.sub-block { margin-bottom: 18px; }
+.sub-title { font-size: 13px; font-weight: 600; color: #4e5969; margin-bottom: 8px; }
+.sub-tip { font-weight: 400; color: #c2c7cf; font-size: 12px; }
 </style>

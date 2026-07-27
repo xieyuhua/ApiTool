@@ -6,8 +6,11 @@ const props = defineProps({
   keyPlaceholder: { type: String, default: '参数名' },
 })
 
-function add() { props.items.push(newKV()) }
-function remove(i) { props.items.splice(i, 1) }
+const emit = defineEmits(['change'])
+
+function add() { props.items.push(newKV()); emit('change') }
+function remove(i) { props.items.splice(i, 1); emit('change') }
+function onEdit() { emit('change') }
 </script>
 
 <template>
@@ -20,10 +23,10 @@ function remove(i) { props.items.splice(i, 1) }
       <span class="c-op"></span>
     </div>
     <div v-for="(kv, i) in items" :key="i" class="kv-row">
-      <span class="c-enable"><el-checkbox v-model="kv.enabled" /></span>
-      <span class="c-key"><el-input v-model="kv.key" :placeholder="keyPlaceholder" /></span>
-      <span class="c-val"><el-input v-model="kv.value" placeholder="值" /></span>
-      <span class="c-desc"><el-input v-model="kv.description" placeholder="说明（写入文档）" /></span>
+      <span class="c-enable"><el-checkbox v-model="kv.enabled" @change="onEdit" /></span>
+      <span class="c-key"><el-input v-model="kv.key" :placeholder="keyPlaceholder" @input="onEdit" /></span>
+      <span class="c-val"><el-input v-model="kv.value" placeholder="值" @input="onEdit" /></span>
+      <span class="c-desc"><el-input v-model="kv.description" placeholder="说明（写入文档）" @input="onEdit" /></span>
       <span class="c-op">
         <el-button link type="danger" title="删除" @click="remove(i)">✕</el-button>
       </span>

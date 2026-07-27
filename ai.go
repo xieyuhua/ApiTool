@@ -129,3 +129,81 @@ func (a *App) GenerateDescriptions(apiName string, apiDesc string, fields []*Fie
 	applyAIDesc(fields, "", descMap, false)
 	return fields, nil
 }
+
+// aiChat 调用 OpenAI 兼容接口，返回助手消息文本。
+// 内部处理鉴权、模型、超时与错误响应。system 为系统提示，user 为用户提示。
+func aiChat(s Settings, system, user string) (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(s.AIBaseURL), "/")
+	if base == "" {
+		base = "https://api.openai.com/v1"
+	}
+	model := s.AIModel
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": system},
+			{"role": "user", "content": user},
+		},
+		"temperature": 0.3,
+	}
+	b, _ := json.Marshal(reqBody)
+
+	req, err := http.NewRequest("POST", base+"/chat/completions", bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.AIKey)
+
+	client := &http.Client{Timeout: 180 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("AI 请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if resp.StatusCode != 200 {
+		msg := string(respBytes)
+		if len(msg) > 300 {
+			msg = msg[:300]
+		}
+		return "", fmt.Errorf("AI 接口返回错误(%d): %s", resp.StatusCode, msg)
+	}
+
+	var chatResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBytes, &chatResp); err != nil || len(chatResp.Choices) == 0 {
+		return "", fmt.Errorf("AI 响应解析失败")
+	}
+	return chatResp.Choices[0].Message.Content, nil
+}
+
+// extractJSON 从可能夹杂说明文字的 AI 返回中提取第一个 JSON 片段（对象或数组）。
+func extractJSON(s string) string {
+	startObj := strings.Index(s, "{")
+	endObj := strings.LastIndex(s, "}")
+	startArr := strings.Index(s, "[")
+	endArr := strings.LastIndex(s, "]")
+	// 选择更靠前的起始符号
+	var start, end int
+	if startObj < 0 && startArr < 0 {
+		return ""
+	}
+	if startArr >= 0 && (startObj < 0 || startArr < startObj) {
+		start, end = startArr, endArr
+	} else {
+		start, end = startObj, endObj
+	}
+	if start < 0 || end <= start {
+		return ""
+	}
+	return s[start : end+1]
+}

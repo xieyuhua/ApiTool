@@ -1,14 +1,18 @@
 <script setup>
 import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow } from './store'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener } from './store'
 import Sidebar from './components/Sidebar.vue'
 import DebugPanel from './components/DebugPanel.vue'
 import ParamsPanel from './components/ParamsPanel.vue'
 import DocPreview from './components/DocPreview.vue'
 import DocCenter from './components/DocCenter.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import TestCenter from './components/TestCenter.vue'
+import EnvManager from './components/EnvManager.vue'
+import CommonParams from './components/CommonParams.vue'
 
 onMounted(initStore)
+initGenListener()
 window.addEventListener('beforeunload', saveNow)
 
 // 目录栏宽度可拖拽调整（持久化到 localStorage）
@@ -47,6 +51,7 @@ const api = computed(() => currentApi())
 const navs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
+  { key: 'testing', label: '接口测试', icon: '🧪' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
 </script>
@@ -61,10 +66,22 @@ const navs = [
       </div>
     </div>
 
+    <EnvManager v-model:visible="envDialogVisible" />
+    <CommonParams v-model:visible="commonDialogVisible" />
+
     <template v-if="store.view === 'workspace'">
       <Sidebar :style="{ width: sidebarWidth + 'px' }" />
       <div class="sb-resizer" :class="{ active: resizing }" @mousedown="startResize" title="拖动调整目录宽度"></div>
       <div class="main-area">
+        <div class="global-bar">
+          <span class="gb-label">环境</span>
+          <el-select v-model="currentProject().activeEnvId" size="small" class="gb-env" placeholder="无环境" title="当前环境变量">
+            <el-option label="无环境" value="" />
+            <el-option v-for="e in currentProject().environments" :key="e.id" :label="e.name" :value="e.id" />
+          </el-select>
+          <el-button size="small" text title="环境管理" @click="openEnvDialog">⚙ 环境</el-button>
+          <el-button size="small" text title="公共参数（对所有接口自动附加）" @click="openCommonDialog">☰ 公共</el-button>
+        </div>
         <template v-if="api">
           <div class="api-header">
             <span class="method-tag" :class="'m-' + api.method">{{ api.method }}</span>
@@ -89,6 +106,7 @@ const navs = [
     </template>
 
     <DocCenter v-else-if="store.view === 'docs'" />
+    <TestCenter v-else-if="store.view === 'testing'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
   </div>
 
@@ -99,6 +117,19 @@ const navs = [
 </template>
 
 <style scoped>
+.global-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 22px;
+  background: #fff;
+  border-bottom: 1px solid #e5e6eb;
+}
+.gb-label { font-size: 12px; color: #86909c; margin-right: 2px; }
+.global-bar .gb-env { width: 140px; }
+.global-bar :deep(.el-button.is-text) { color: #86909c; padding: 4px 8px; font-size: 12px; }
+.global-bar :deep(.el-button.is-text:hover) { color: #165dff; background: #f2f3f5; }
 .api-header {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 22px 0; background: #fff;

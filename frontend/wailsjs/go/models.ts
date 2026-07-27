@@ -176,6 +176,254 @@ export namespace main {
 	        this.updateURL = source["updateURL"];
 	    }
 	}
+	export class AssertionResult {
+	    description: string;
+	    passed: boolean;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AssertionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.description = source["description"];
+	        this.passed = source["passed"];
+	        this.detail = source["detail"];
+	    }
+	}
+	export class TestResult {
+	    caseId: string;
+	    caseName: string;
+	    category: string;
+	    passed: boolean;
+	    status: number;
+	    durationMs: number;
+	    error: string;
+	    responseBody: string;
+	    assertionResults: AssertionResult[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TestResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.caseId = source["caseId"];
+	        this.caseName = source["caseName"];
+	        this.category = source["category"];
+	        this.passed = source["passed"];
+	        this.status = source["status"];
+	        this.durationMs = source["durationMs"];
+	        this.error = source["error"];
+	        this.responseBody = source["responseBody"];
+	        this.assertionResults = this.convertValues(source["assertionResults"], AssertionResult);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TestReport {
+	    id: string;
+	    planId: string;
+	    planName: string;
+	    createdAt: string;
+	    total: number;
+	    passed: number;
+	    failed: number;
+	    durationMs: number;
+	    results: TestResult[];
+	    summary: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.planId = source["planId"];
+	        this.planName = source["planName"];
+	        this.createdAt = source["createdAt"];
+	        this.total = source["total"];
+	        this.passed = source["passed"];
+	        this.failed = source["failed"];
+	        this.durationMs = source["durationMs"];
+	        this.results = this.convertValues(source["results"], TestResult);
+	        this.summary = source["summary"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TestPlan {
+	    id: string;
+	    name: string;
+	    caseIds: string[];
+	    envId: string;
+	    concurrency: number;
+	    createdAt: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.caseIds = source["caseIds"];
+	        this.envId = source["envId"];
+	        this.concurrency = source["concurrency"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class Assertion {
+	    type: string;
+	    target: string;
+	    operator: string;
+	    expected: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Assertion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.target = source["target"];
+	        this.operator = source["operator"];
+	        this.expected = source["expected"];
+	        this.enabled = source["enabled"];
+	    }
+	}
+	export class TestCase {
+	    id: string;
+	    apiId: string;
+	    apiName: string;
+	    category: string;
+	    name: string;
+	    description: string;
+	    method: string;
+	    url: string;
+	    headers: KV[];
+	    query: KV[];
+	    bodyType: string;
+	    body: string;
+	    formItems: KV[];
+	    contentType: string;
+	    assertions: Assertion[];
+	    enabled: boolean;
+	    createdAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestCase(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.apiId = source["apiId"];
+	        this.apiName = source["apiName"];
+	        this.category = source["category"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.headers = this.convertValues(source["headers"], KV);
+	        this.query = this.convertValues(source["query"], KV);
+	        this.bodyType = source["bodyType"];
+	        this.body = source["body"];
+	        this.formItems = this.convertValues(source["formItems"], KV);
+	        this.contentType = source["contentType"];
+	        this.assertions = this.convertValues(source["assertions"], Assertion);
+	        this.enabled = source["enabled"];
+	        this.createdAt = source["createdAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CommonParams {
+	    headers: KV[];
+	    query: KV[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CommonParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.headers = this.convertValues(source["headers"], KV);
+	        this.query = this.convertValues(source["query"], KV);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class EnvVar {
 	    key: string;
 	    value: string;
@@ -251,7 +499,11 @@ export namespace main {
 	    apis: ApiInfo[];
 	    environments: Environment[];
 	    activeEnvId: string;
+	    common: CommonParams;
 	    updatedAt: string;
+	    testCases?: TestCase[];
+	    testPlans?: TestPlan[];
+	    testReports?: TestReport[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Project(source);
@@ -265,7 +517,11 @@ export namespace main {
 	        this.apis = this.convertValues(source["apis"], ApiInfo);
 	        this.environments = this.convertValues(source["environments"], Environment);
 	        this.activeEnvId = source["activeEnvId"];
+	        this.common = this.convertValues(source["common"], CommonParams);
 	        this.updatedAt = source["updatedAt"];
+	        this.testCases = this.convertValues(source["testCases"], TestCase);
+	        this.testPlans = this.convertValues(source["testPlans"], TestPlan);
+	        this.testReports = this.convertValues(source["testReports"], TestReport);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -320,6 +576,8 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	
 	export class CheckUpdateResult {
 	    current: string;
 	    latest: string;
@@ -342,6 +600,7 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	
 	
 	
 	
@@ -438,6 +697,9 @@ export namespace main {
 	        this.link = source["link"];
 	    }
 	}
+	
+	
+	
 
 }
 

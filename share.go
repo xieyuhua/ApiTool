@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -126,10 +127,12 @@ func (a *App) buildHTMLForScope(dirID, apiID string) (string, string, error) {
 		rootID = dirID
 	}
 	// 文档标题附加项目名称
+	common := CommonParams{}
 	if idx := activeProjectIndex(data); idx >= 0 {
 		title = data.Projects[idx].Name + " / " + title
+		common = data.Projects[idx].Common
 	}
-	return buildHTML(title, rootID, dirs, apis), title, nil
+	return buildHTML(title, rootID, dirs, apis, common), title, nil
 }
 
 // BuildSharedHTML 生成可独立分享的网页文档（含内联样式的完整 HTML 源码）。
@@ -148,12 +151,8 @@ func (a *App) BuildSharedTitle(dirID, apiID string) (string, error) {
 	return title, err
 }
 
-// CreateShareLink 创建分享链接（内嵌服务托管文档，支持密码与有效期）
-func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
-	html, title, err := a.buildHTMLForScope(dirID, apiID)
-	if err != nil {
-		return "", err
-	}
+// shareContent 将一段 HTML 文档托管为分享链接（支持密码与有效期），返回可访问 URL
+func (a *App) shareContent(html, title, password string, expireMinutes int) (string, error) {
 	if err := shareSrv.ensure(); err != nil {
 		return "", fmt.Errorf("启动分享服务失败: %v", err)
 	}
@@ -173,6 +172,25 @@ func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) 
 	}
 	shareSrv.mu.Unlock()
 	return fmt.Sprintf("http://%s:%d/?t=%s", shareSrv.host, shareSrv.port, token), nil
+}
+
+// CreateShareLink 创建分享链接（内嵌服务托管文档，支持密码与有效期）
+func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
+	html, title, err := a.buildHTMLForScope(dirID, apiID)
+	if err != nil {
+		return "", err
+	}
+	return a.shareContent(html, title, password, expireMinutes)
+}
+
+// ShareTestReport 将测试报告（JSON）渲染为 HTML 并托管为分享链接，接入「文档中心」分享能力。
+func (a *App) ShareTestReport(reportJSON, password string, expireMinutes int) (string, error) {
+	var r TestReport
+	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
+		return "", fmt.Errorf("报告解析失败: %v", err)
+	}
+	title := "测试报告 - " + r.PlanName
+	return a.shareContent(reportHTML(r), title, password, expireMinutes)
 }
 
 // ListShares 列出当前有效的分享链接

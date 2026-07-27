@@ -1,8 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown } from '../../wailsjs/go/main/App'
-import { saveNow } from '../store'
+import { saveNow, currentProject } from '../store'
 import ShareDialog from './ShareDialog.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
@@ -36,6 +36,10 @@ function flatRows(fields, depth = 0) {
   }
   return out
 }
+
+// 项目公共参数（自动附加到所有接口请求）
+const commonHeaders = computed(() => (currentProject().common?.headers || []).filter(h => h.enabled && h.key))
+const commonQuery = computed(() => (currentProject().common?.query || []).filter(q => q.enabled && q.key))
 
 // 将文本中的 {{变量}} 高亮显示（v-html 注入的内容需在全局样式中定义 .var-chip）
 function escapeHtml(s) {
@@ -96,7 +100,27 @@ function highlightVars(text) {
           <table>
             <thead><tr><th>参数名</th><th>值/示例</th><th>说明</th></tr></thead>
             <tbody>
-              <tr v-for="(q, i) in api.query.filter(x => x.enabled && q.key)" :key="i">
+              <tr v-for="(q, i) in api.query.filter(x => x.enabled && x.key)" :key="i">
+                <td>{{ q.key }}</td><td v-html="highlightVars(q.value)"></td><td>{{ q.description }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+
+        <template v-if="commonHeaders.length || commonQuery.length">
+          <h4>公共参数 <span class="common-tip">（项目级，自动附加到所有接口，接口同名优先）</span></h4>
+          <table v-if="commonHeaders.length">
+            <thead><tr><th>公共请求头</th><th>值/示例</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr v-for="(h, i) in commonHeaders" :key="'ch'+i">
+                <td>{{ h.key }}</td><td v-html="highlightVars(h.value)"></td><td>{{ h.description }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <table v-if="commonQuery.length" style="margin-top:8px">
+            <thead><tr><th>公共 Query 参数</th><th>值/示例</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr v-for="(q, i) in commonQuery" :key="'cq'+i">
                 <td>{{ q.key }}</td><td v-html="highlightVars(q.value)"></td><td>{{ q.description }}</td>
               </tr>
             </tbody>
@@ -140,3 +164,7 @@ function highlightVars(text) {
     <ShareDialog v-model:visible="shareVisible" dir-id="" :api-id="api.id" />
   </div>
 </template>
+
+<style scoped>
+.common-tip { font-size: 12px; color: #c2c7cf; font-weight: 400; }
+</style>

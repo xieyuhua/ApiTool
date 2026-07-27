@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ExportDoc, CopyDocMarkdown, ImportDoc } from '../../wailsjs/go/main/App'
-import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs } from '../store'
+import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../wailsjs/go/main/App'
+import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports } from '../store'
 import ShareDialog from './ShareDialog.vue'
 
 const scopeDirId = ref('')
@@ -77,6 +77,48 @@ function openApi(id) {
   store.activeTab = 'doc'
 }
 
+// ---------------- 测试报告（接入文档中心） ----------------
+const reports = computed(() => projectReports())
+
+const reportShareVisible = ref(false)
+const reportShareTarget = ref('')
+const sharePassword = ref('')
+const shareExpire = ref(0)
+const shareLink = ref('')
+const shareLoading = ref(false)
+
+function openShareReport(r) {
+  reportShareTarget.value = JSON.stringify(r)
+  sharePassword.value = ''
+  shareExpire.value = 0
+  shareLink.value = ''
+  reportShareVisible.value = true
+}
+async function doShareReport() {
+  shareLoading.value = true
+  try {
+    const link = await ShareTestReport(reportShareTarget.value, sharePassword.value, shareExpire.value)
+    shareLink.value = link
+    ElMessage.success('分享链接已生成')
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    shareLoading.value = false
+  }
+}
+async function copyLink() {
+  try {
+    await CopyToClipboard(shareLink.value)
+    ElMessage.success('链接已复制到剪贴板')
+  } catch (e) { ElMessage.error(String(e)) }
+}
+async function exportReportHtml(r) {
+  try {
+    const path = await ExportTestReport(JSON.stringify(r), 'html')
+    if (path) ElMessage.success('已导出：' + path)
+  } catch (e) { ElMessage.error(String(e)) }
+}
+
 const formats = [
   { key: 'markdown', name: 'Markdown', ext: '.md', desc: '通用文档格式，适合 Git 仓库、Wiki' },
   { key: 'html', name: 'HTML', ext: '.html', desc: '带目录导航的网页文档，可直接分享' },
@@ -134,9 +176,55 @@ const formats = [
           <span class="api-row-url">{{ a.url }}</span>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-title">测试报告（{{ reports.length }}）</div>
+        <div style="color:#86909c; font-size:13px; margin-bottom:10px">
+          在「接口测试」中运行用例或计划后生成的测试分析报告，可在此直接分享为网页链接或导出 HTML，与接口文档统一分发。
+        </div>
+        <div v-if="!reports.length" style="color:#c9cdd4; text-align:center; padding:18px">暂无测试报告，请先到「接口测试」运行</div>
+        <div v-for="r in reports" :key="r.id" class="report-row">
+          <div class="rr-main">
+            <span class="rr-name">{{ r.planName }}</span>
+            <span class="rr-meta">{{ r.passed }}/{{ r.total }} 通过 · {{ r.durationMs }}ms · {{ r.createdAt }}</span>
+          </div>
+          <div class="rr-actions">
+            <el-button size="small" type="primary" plain @click="openShareReport(r)">分享链接</el-button>
+            <el-button size="small" @click="exportReportHtml(r)">导出 HTML</el-button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <ShareDialog v-model:visible="shareVisible" :dir-id="scopeDirId" api-id="" />
+
+    <el-dialog v-model="reportShareVisible" title="分享测试报告" width="560px">
+      <div v-if="!shareLink" class="share-form">
+        <div class="sf-item">
+          <label>访问密码（可选）</label>
+          <el-input v-model="sharePassword" placeholder="留空表示无需密码" show-password />
+        </div>
+        <div class="sf-item">
+          <label>有效期</label>
+          <el-select v-model="shareExpire" style="width:100%">
+            <el-option label="永久有效" :value="0" />
+            <el-option label="30 分钟" :value="30" />
+            <el-option label="1 天" :value="1440" />
+            <el-option label="7 天" :value="10080" />
+          </el-select>
+        </div>
+      </div>
+      <div v-else class="share-result">
+        <el-alert type="success" :closable="false" title="分享链接已生成" />
+        <div class="sr-link">{{ shareLink }}</div>
+        <el-button size="small" type="primary" @click="copyLink">复制链接</el-button>
+      </div>
+      <template #footer>
+        <el-button v-if="!shareLink" @click="reportShareVisible = false">取消</el-button>
+        <el-button v-if="!shareLink" type="primary" :loading="shareLoading" @click="doShareReport">生成链接</el-button>
+        <el-button v-else @click="reportShareVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -157,4 +245,15 @@ const formats = [
 .api-row:hover { background: #f2f3f5; }
 .api-row-name { font-size: 13px; }
 .api-row-url { color: #86909c; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 4px; border-bottom: 1px dashed #f2f3f5; }
+.report-row:last-child { border-bottom: none; }
+.rr-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rr-name { font-size: 13px; font-weight: 600; }
+.rr-meta { font-size: 12px; color: #86909c; }
+.rr-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.share-form { display: flex; flex-direction: column; gap: 14px; }
+.sf-item { display: flex; flex-direction: column; gap: 5px; }
+.sf-item label { font-size: 12px; color: #86909c; }
+.share-result { display: flex; flex-direction: column; gap: 12px; }
+.sr-link { background: #f7f8fa; border: 1px solid #e5e6eb; border-radius: 6px; padding: 10px 12px; font-size: 12px; word-break: break-all; color: #4e5969; }
 </style>

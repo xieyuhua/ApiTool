@@ -99,7 +99,7 @@ func mdKVTable(sb *strings.Builder, title string, kvs []KV) {
 	sb.WriteString("\n")
 }
 
-func mdApi(sb *strings.Builder, api ApiInfo, level int) {
+func mdApi(sb *strings.Builder, api ApiInfo, level int, common CommonParams) {
 	h := strings.Repeat("#", min(level, 6))
 	sb.WriteString(fmt.Sprintf("%s %s\n\n", h, api.Name))
 	sb.WriteString(fmt.Sprintf("`%s` `%s`\n\n", strings.ToUpper(api.Method), api.URL))
@@ -108,6 +108,9 @@ func mdApi(sb *strings.Builder, api ApiInfo, level int) {
 	}
 	mdKVTable(sb, "请求头", api.Headers)
 	mdKVTable(sb, "Query 参数", api.Query)
+	// 公共参数：项目级，自动附加到所有接口（接口同名覆盖公共）
+	mdKVTable(sb, "公共请求头", common.Headers)
+	mdKVTable(sb, "公共 Query 参数", common.Query)
 	mdFieldTable(sb, "请求参数", api.ReqFields)
 	mdFieldTable(sb, "响应参数", api.RespFields)
 	if api.BodyType == "json" && strings.TrimSpace(api.Body) != "" {
@@ -123,25 +126,25 @@ func mdApi(sb *strings.Builder, api ApiInfo, level int) {
 	sb.WriteString("---\n\n")
 }
 
-func mdDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int) {
+func mdDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, common CommonParams) {
 	for _, api := range dirApis(apis, parentID) {
-		mdApi(sb, api, level)
+		mdApi(sb, api, level, common)
 	}
 	for _, d := range childDirs(dirs, parentID) {
 		h := strings.Repeat("#", min(level, 6))
 		sb.WriteString(fmt.Sprintf("%s %s\n\n", h, d.Name))
-		mdDir(sb, dirs, apis, d.ID, level+1)
+		mdDir(sb, dirs, apis, d.ID, level+1, common)
 	}
 }
 
-func buildMarkdown(title, rootID string, dirs []Directory, apis []ApiInfo) string {
+func buildMarkdown(title, rootID string, dirs []Directory, apis []ApiInfo, common CommonParams) string {
 	var sb strings.Builder
 	sb.WriteString("# " + title + "\n\n")
 	sb.WriteString("> 导出时间：" + time.Now().Format("2006-01-02 15:04:05") + "\n\n")
 	if dirs == nil && len(apis) == 1 && rootID == "" {
-		mdApi(&sb, apis[0], 2)
+		mdApi(&sb, apis[0], 2, common)
 	} else {
-		mdDir(&sb, dirs, apis, rootID, 2)
+		mdDir(&sb, dirs, apis, rootID, 2, common)
 	}
 	return sb.String()
 }
@@ -182,7 +185,7 @@ func htmlKVTable(sb *strings.Builder, title string, kvs []KV) {
 	sb.WriteString(`</tbody></table>`)
 }
 
-func htmlApi(sb *strings.Builder, api ApiInfo, dirName string) {
+func htmlApi(sb *strings.Builder, api ApiInfo, dirName string, common CommonParams) {
 	method := strings.ToUpper(api.Method)
 	sb.WriteString(fmt.Sprintf(`<div class="api" id="api-%s" data-name="%s" data-url="%s" data-dir="%s"><h3>%s</h3>`,
 		api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName), html.EscapeString(api.Name)))
@@ -193,6 +196,8 @@ func htmlApi(sb *strings.Builder, api ApiInfo, dirName string) {
 	}
 	htmlKVTable(sb, "请求头", api.Headers)
 	htmlKVTable(sb, "Query 参数", api.Query)
+	htmlKVTable(sb, "公共请求头", common.Headers)
+	htmlKVTable(sb, "公共 Query 参数", common.Query)
 	htmlFieldTable(sb, "请求参数", api.ReqFields)
 	htmlFieldTable(sb, "响应参数", api.RespFields)
 	if api.BodyType == "json" && strings.TrimSpace(api.Body) != "" {
@@ -208,13 +213,13 @@ func htmlApi(sb *strings.Builder, api ApiInfo, dirName string) {
 	sb.WriteString(`</div>`)
 }
 
-func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, dirName string) {
+func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, dirName string, common CommonParams) {
 	for _, api := range dirApis(apis, parentID) {
-		htmlApi(sb, api, dirName)
+		htmlApi(sb, api, dirName, common)
 	}
 	for _, d := range childDirs(dirs, parentID) {
 		sb.WriteString(fmt.Sprintf(`<h2 class="dir" data-dir="%s">%s</h2>`, escAttr(d.Name), html.EscapeString(d.Name)))
-		htmlDir(sb, dirs, apis, d.ID, level+1, d.Name)
+		htmlDir(sb, dirs, apis, d.ID, level+1, d.Name, common)
 	}
 }
 
@@ -283,12 +288,12 @@ tocDirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCas
 var visible=0;apis.forEach(function(a){if(a.style.display!=='none')visible++;});var t=document.getElementById('docEmpty');if(t)t.style.display=visible?'none':'block';}
 </script>`
 
-func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo) string {
+func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo, common CommonParams) string {
 	var body, toc strings.Builder
 	if dirs == nil && len(apis) == 1 && rootID == "" {
-		htmlApi(&body, apis[0], "")
+		htmlApi(&body, apis[0], "", common)
 	} else {
-		htmlDir(&body, dirs, apis, rootID, 0, "")
+		htmlDir(&body, dirs, apis, rootID, 0, "", common)
 		htmlToc(&toc, dirs, apis, rootID, 0, "")
 	}
 	tocHTML := ""
@@ -373,7 +378,7 @@ func schemaFromField(f *Field) map[string]interface{} {
 	}
 }
 
-func buildOpenAPI(title string, apis []ApiInfo) (string, error) {
+func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, error) {
 	paths := map[string]map[string]interface{}{}
 	for _, api := range apis {
 		p := api.URL
@@ -412,6 +417,29 @@ func buildOpenAPI(title string, apis []ApiInfo) (string, error) {
 				"name": kv.Key, "in": "header", "description": kv.Description,
 				"schema": map[string]string{"type": "string"}, "example": kv.Value,
 			})
+		}
+		// 公共参数：项目级自动附加（接口同名覆盖公共），仅追加接口未定义的
+		defined := map[string]bool{}
+		for _, kv := range append(append([]KV{}, api.Headers...), api.Query...) {
+			if kv.Enabled && kv.Key != "" {
+				defined[kv.Key] = true
+			}
+		}
+		for _, kv := range enabledKVs(common.Query) {
+			if !defined[kv.Key] {
+				params = append(params, map[string]interface{}{
+					"name": kv.Key, "in": "query", "description": "[公共参数] " + kv.Description,
+					"schema": map[string]string{"type": "string"}, "example": kv.Value,
+				})
+			}
+		}
+		for _, kv := range enabledKVs(common.Headers) {
+			if !defined[kv.Key] {
+				params = append(params, map[string]interface{}{
+					"name": kv.Key, "in": "header", "description": "[公共参数] " + kv.Description,
+					"schema": map[string]string{"type": "string"}, "example": kv.Value,
+				})
+			}
 		}
 		if len(params) > 0 {
 			op["parameters"] = params

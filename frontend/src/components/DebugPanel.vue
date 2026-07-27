@@ -2,11 +2,9 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SendRequest, FormatJSON, ParseFields } from '../../wailsjs/go/main/App'
-import { store, saveNow, activeEnvVars, currentProject, uid } from '../store'
+import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow } from '../store'
 import { runScript } from '../script'
 import KVEditor from './KVEditor.vue'
-import EnvManager from './EnvManager.vue'
-import CommonParams from './CommonParams.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
 
@@ -14,8 +12,6 @@ const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']
 const reqTab = ref('query')
 const respTab = ref('body')
 const sending = ref(false)
-const envVisible = ref(false)
-const commonVisible = ref(false)
 
 const contentTypeOptions = [
   'application/json',
@@ -99,7 +95,34 @@ async function send() {
     }
     mergeCommon(spec) // 公共参数自动附加（接口同名优先）
 
-    // 前置脚本：可修改请求与临时环境变量
+    // 将地址栏中携带的 ?query 解析进「Query 参数」列表，并从地址中移除，
+// 避免发送时地址里的 query 与 api.query 重复叠加。
+function syncUrlQuery() {
+  const raw = props.api.url || ''
+  const qIdx = raw.indexOf('?')
+  if (qIdx < 0) return
+  const base = raw.slice(0, qIdx)
+  let qs = raw.slice(qIdx + 1)
+  const hIdx = qs.indexOf('#')
+  if (hIdx >= 0) qs = qs.slice(0, hIdx)
+  const params = new URLSearchParams(qs)
+  const keys = [...params.keys()]
+  if (!keys.length) {
+    // 仅有一个多余的 ?，清理掉
+    props.api.url = base
+    return
+  }
+  const have = new Set((props.api.query || []).filter(q => q.key).map(q => q.key))
+  for (const [k, v] of params.entries()) {
+    if (have.has(k)) continue
+    props.api.query.push({ key: k, value: v, description: '', enabled: true })
+    have.add(k)
+  }
+  props.api.url = base
+  markDebugDirty()
+}
+
+// 前置脚本：可修改请求与临时环境变量
     if (props.api.preScript && props.api.preScript.trim()) {
       try {
         const reqParsed = (() => { try { return JSON.parse(spec.body) } catch { return null } })()
@@ -129,14 +152,17 @@ async function send() {
         spec.url = req.url
         spec.method = req.method
         spec.body = (typeof req.body === 'object' && req.body !== null) ? JSON.stringify(req.body, null, 2) : req.body
-      } catch (e) {
-        ElMessage.error('前置脚本执行出错：' + String(e))
-        return
-      }
+    } catch (e) {
+      const msg = '前置脚本执行出错：' + String(e)
+      pushLog('error', msg, String(e && e.stack ? e.stack : e))
+      ElMessage.error(msg)
+      return
+    }
       // 应用脚本中设置的环境变量
       spec.env = Object.entries(envMap).map(([key, value]) => ({ key, value, enabled: true }))
     }
 
+    pushLog('request', `${spec.method} ${spec.url}`, buildReqDetail(spec))
     const r = await SendRequest(spec)
 
     // 后置脚本：可读取响应并写回环境变量（持久化）
@@ -158,22 +184,61 @@ async function send() {
           setEnv: (k, v) => { envMap[k] = v; persistEnv(k, v) },
           console,
         })
-      } catch (e) {
-        ElMessage.warning('后置脚本执行出错：' + String(e))
-      }
+    } catch (e) {
+      const msg = '后置脚本执行出错：' + String(e)
+      pushLog('error', msg, String(e && e.stack ? e.stack : e))
+      ElMessage.warning(msg)
+    }
     }
 
     props.api.lastResponse = r
     props.api.updatedAt = new Date().toISOString()
     if (r.error) {
+      pushLog('error', `请求失败 ${spec.method} ${spec.url}`, r.error)
       ElMessage.error(r.error)
     } else {
+      pushLog('response', `${r.status} ${r.statusText || ''} · ${r.durationMs}ms · ${fmtSize(r.size)}`, buildRespDetail(r))
       respTab.value = 'body'
       ElMessage.success(`请求完成 ${r.status} · ${r.durationMs}ms`)
     }
-    saveNow()
+    // 注意：发送不再自动保存。响应仅在用户点击「保存请求」时随接口定义一并持久化，
+    // 避免把临时调试改动静默覆盖到已保存的接口数据。
+  } catch (e) {
+    const msg = '请求过程异常：' + String(e)
+    pushLog('error', msg, String(e && e.stack ? e.stack : e))
+    ElMessage.error(msg)
   } finally {
     sending.value = false
+  }
+}
+
+// 显式保存当前请求数据（url / 方法 / 参数 / 请求体 / 脚本等，含本次响应），
+// 同时根据请求体 / 响应体生成参数文档。用户调试时的修改不会自动落盘，
+// 需主动点击「保存请求」。
+async function saveRequest() {
+  try {
+    await saveDebugNow()
+    await generateDocs()
+    ElMessage.success('已保存当前请求并生成文档')
+  } catch (e) {
+    ElMessage.error('保存失败：' + String(e))
+  }
+}
+
+// 保存时同步生成文档：请求体 → 请求参数；响应体 → 响应参数。
+// ParseFields 会保留已填写的描述，不会覆盖手工补充的说明。
+async function generateDocs() {
+  if (props.api.body && props.api.body.trim()) {
+    try {
+      const fields = await ParseFields(props.api.body, JSON.parse(JSON.stringify(props.api.reqFields)))
+      props.api.reqFields = fields || []
+    } catch (e) { console.warn('请求参数文档生成失败', e) }
+  }
+  if (resp.value && resp.value.isJson) {
+    try {
+      const fields = await ParseFields(resp.value.body, JSON.parse(JSON.stringify(props.api.respFields)))
+      props.api.respFields = fields || []
+    } catch (e) { console.warn('响应参数文档生成失败', e) }
   }
 }
 
@@ -218,6 +283,38 @@ function fmtSize(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
   return (n / 1024 / 1024).toFixed(2) + ' MB'
 }
+
+// 将一次请求规格格式化为可读日志明细
+function buildReqDetail(spec) {
+  const lines = []
+  lines.push(`${spec.method} ${spec.url}`)
+  lines.push(`Timeout: ${spec.timeoutSec}s`)
+  const env = (spec.env || []).map(e => e.key + '=' + e.value).join(', ')
+  lines.push(`Env: ${env || '(无)'}`)
+  const hdrs = (spec.headers || []).filter(h => h.enabled && h.key)
+  if (hdrs.length) { lines.push('Headers:'); for (const h of hdrs) lines.push(`  ${h.key}: ${h.value}`) }
+  const qs = (spec.query || []).filter(q => q.enabled && q.key)
+  if (qs.length) { lines.push('Query:'); for (const q of qs) lines.push(`  ${q.key}=${q.value}`) }
+  if (spec.bodyType === 'form') {
+    const f = (spec.formItems || []).filter(x => x.enabled && x.key)
+    lines.push('Form:'); for (const x of f) lines.push(`  ${x.key}=${x.value}`)
+  } else if (spec.body && spec.bodyType !== 'none') {
+    lines.push('Body:')
+    lines.push(spec.body.length > 4000 ? spec.body.slice(0, 4000) + '\n...(已截断)' : spec.body)
+  }
+  return lines.join('\n')
+}
+
+// 将一次响应格式化为可读日志明细
+function buildRespDetail(r) {
+  const lines = []
+  lines.push(`Status: ${r.status} ${r.statusText || ''}`)
+  lines.push(`Duration: ${r.durationMs}ms · Size: ${r.size} B`)
+  lines.push('Headers:')
+  for (const k in (r.headers || {})) lines.push(`  ${k}: ${r.headers[k]}`)
+  if (r.body) lines.push('Body:\n' + (r.body.length > 4000 ? r.body.slice(0, 4000) + '\n...(已截断)' : r.body))
+  return lines.join('\n')
+}
 </script>
 
 <template>
@@ -225,35 +322,30 @@ function fmtSize(n) {
     <!-- 请求行 -->
     <div class="card">
       <div class="url-row">
-        <el-select v-model="api.method" style="width:110px" size="large">
+        <el-select v-model="api.method" style="width:110px" size="large" @change="markDebugDirty">
           <el-option v-for="m in methods" :key="m" :label="m" :value="m" />
         </el-select>
         <el-input v-model="api.url" size="large" placeholder="请输入接口地址，如 https://api.example.com/user/list（支持 {{变量}}）"
-          @keyup.enter="send" />
+          @keyup.enter="send" @input="markDebugDirty" @change="syncUrlQuery" />
         <el-button type="primary" size="large" :loading="sending" style="width:100px" @click="send">
           发 送
         </el-button>
-      </div>
-      <!-- 环境变量 / 公共参数 工具栏，置于接口地址之下 -->
-      <div class="req-toolbar">
-        <el-select v-model="currentProject().activeEnvId" size="large" style="width:150px" placeholder="环境" title="选择环境变量">
-          <el-option label="无环境" value="" />
-          <el-option v-for="e in currentProject().environments" :key="e.id" :label="e.name" :value="e.id" />
-        </el-select>
-        <el-button size="large" title="管理环境" @click="envVisible = true">⚙ 环境</el-button>
-        <el-button size="large" title="公共参数（对所有接口自动附加）" @click="commonVisible = true">☰ 公共参数</el-button>
+        <el-button size="large" type="success" @click="saveRequest" title="保存当前请求数据并生成文档（仅在点击时保存，不会每次发送自动更新）">
+          保存请求
+        </el-button>
+        <span v-if="debugDirty" class="dirty-tip">有未保存的修改</span>
       </div>
 
       <el-tabs v-model="reqTab" style="margin-top:10px">
         <el-tab-pane :label="`Query 参数 (${api.query.length})`" name="query">
-          <KVEditor :items="api.query" key-placeholder="参数名" />
+          <KVEditor :items="api.query" key-placeholder="参数名" @change="markDebugDirty" />
         </el-tab-pane>
         <el-tab-pane :label="`请求头 (${api.headers.length})`" name="headers">
-          <KVEditor :items="api.headers" key-placeholder="参数名" />
+          <KVEditor :items="api.headers" key-placeholder="参数名" @change="markDebugDirty" />
         </el-tab-pane>
         <el-tab-pane label="请求体 Body" name="body">
           <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; flex-wrap:wrap">
-            <el-radio-group v-model="api.bodyType" size="small">
+            <el-radio-group v-model="api.bodyType" size="small" @change="markDebugDirty">
               <el-radio-button value="none">none</el-radio-button>
               <el-radio-button value="json">JSON</el-radio-button>
               <el-radio-button value="form">Form 表单</el-radio-button>
@@ -262,19 +354,19 @@ function fmtSize(n) {
             <span style="color:#86909c; font-size:12px">Content-Type</span>
             <el-select v-model="api.contentType" size="small" filterable allow-create default-first-option
               placeholder="自动（按类型）" style="width:280px"
-              @change="onContentTypeChange">
+              @change="onContentTypeChange(); markDebugDirty()">
               <el-option v-for="ct in contentTypeOptions" :key="ct" :label="ct" :value="ct" />
             </el-select>
           </div>
           <template v-if="api.bodyType === 'json' || api.bodyType === 'text'">
             <el-input v-model="api.body" type="textarea" :rows="10" class="mono"
-              :placeholder="bodyPlaceholder" />
+              :placeholder="bodyPlaceholder" @input="markDebugDirty" />
             <div style="margin-top:8px; display:flex; gap:8px" v-if="api.bodyType === 'json'">
               <el-button size="small" @click="formatBody">格式化 JSON</el-button>
               <el-button size="small" @click="bodyToReqFields">生成请求参数文档</el-button>
             </div>
           </template>
-          <KVEditor v-else-if="api.bodyType === 'form'" :items="api.formItems" key-placeholder="字段名" />
+          <KVEditor v-else-if="api.bodyType === 'form'" :items="api.formItems" key-placeholder="字段名" @change="markDebugDirty" />
           <div v-else style="color:#86909c;font-size:13px">该请求不包含 Body</div>
         </el-tab-pane>
         <el-tab-pane label="前置脚本" name="pre">
@@ -285,7 +377,7 @@ function fmtSize(n) {
             <code>setEnv(k,v)</code> / <code>env(k)</code> / <code>console.log()</code>
             <br>示例：<code>request.setHeader("X-Token", env("token"))</code> / <code>request.body.data.page = 1</code>
           </div>
-          <el-input v-model="api.preScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：request.setHeader('X-Token', env('token'))" />
+          <el-input v-model="api.preScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：request.setHeader('X-Token', env('token'))" @input="markDebugDirty" />
         </el-tab-pane>
         <el-tab-pane label="后置脚本" name="post">
           <div class="script-tip">
@@ -298,13 +390,12 @@ function fmtSize(n) {
             <code>setEnv("name", response.body.data.list[0].name)</code> /
             <code>if (response.status === 200) setEnv("ok", "1")</code>
           </div>
-          <el-input v-model="api.postScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：setEnv('lastId', response.json().id)" />
+          <el-input v-model="api.postScript" type="textarea" :rows="9" class="mono" placeholder="// 例如：setEnv('lastId', response.json().id)" @input="markDebugDirty" />
         </el-tab-pane>
       </el-tabs>
     </div>
 
-    <EnvManager v-model:visible="envVisible" />
-    <CommonParams v-model:visible="commonVisible" />
+    <!-- 环境管理与公共参数入口已统一移至顶部全局导航栏 -->
 
     <!-- 响应区 -->
     <div class="card">
@@ -337,8 +428,8 @@ function fmtSize(n) {
 </template>
 
 <style scoped>
-.req-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-.url-row { display: flex; gap: 10px; align-items: center; }
+.dirty-tip { color: #fa8c16; font-size: 12px; font-weight: 500; }
+.url-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .url-row .el-input { flex: 1; min-width: 0; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
 .resp-meta { color: #86909c; font-size: 12px; font-weight: 400; margin-left: 10px; }

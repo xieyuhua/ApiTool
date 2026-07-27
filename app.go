@@ -241,6 +241,11 @@ func (a *App) collectScope(data AppData, dirID string, apiID string) (title stri
 // 返回 (内容, 标题, 错误)；当范围内无接口时返回错误。
 func (a *App) buildDocContent(dirID, apiID, format string) (content string, title string, err error) {
 	data := a.readData()
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return "", "", fmt.Errorf("没有可用的项目")
+	}
+	proj := data.Projects[idx]
 	title, dirs, apis := a.collectScope(data, dirID, apiID)
 	if len(apis) == 0 {
 		return "", "", fmt.Errorf("所选范围内没有接口")
@@ -251,11 +256,11 @@ func (a *App) buildDocContent(dirID, apiID, format string) (content string, titl
 	}
 	switch format {
 	case "markdown":
-		content = buildMarkdown(title, rootID, dirs, apis)
+		content = buildMarkdown(title, rootID, dirs, apis, proj.Common)
 	case "html", "word":
-		content = buildHTML(title, rootID, dirs, apis)
+		content = buildHTML(title, rootID, dirs, apis, proj.Common)
 	case "openapi":
-		content, err = buildOpenAPI(title, apis)
+		content, err = buildOpenAPI(title, apis, proj.Common)
 	default:
 		return "", "", fmt.Errorf("不支持的格式: %s", format)
 	}
