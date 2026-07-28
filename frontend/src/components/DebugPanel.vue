@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SendRequest, FormatJSON, ParseFields } from '../../wailsjs/go/main/App'
-import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../store'
+import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../store'
 import { runScript } from '../script'
 import KVEditor from './KVEditor.vue'
 
@@ -27,6 +27,10 @@ const contentTypeOptions = [
 ]
 
 const resp = computed(() => getLiveResponse(props.api.id) || null)
+
+// 标签计数只统计“有参数名”的行，忽略空白占位行
+const queryCount = computed(() => (props.api.query || []).filter(q => (q.key || '').trim()).length)
+const headerCount = computed(() => (props.api.headers || []).filter(h => (h.key || '').trim()).length)
 const bodyPlaceholder = computed(() =>
   props.api.bodyType === 'json' ? '{\n  "name": "张三"\n}' : '请求体原始文本')
 
@@ -77,8 +81,30 @@ function mergeCommon(spec) {
   spec.query = [...qm.values()]
 }
 
-// 地址栏中的 ?query 原样保留，不做改写。发送时由 send() 负责去重合并，
-// 这样 {{host}}/v2_api/vgo/order_detail?order_id=714 这类带参数的地址在调试后保持不变。
+// 将地址栏中携带的 ?query 解析进「Query 参数」列表，并从地址中移除，
+// 避免发送时地址里的 query 与 api.query 重复叠加。
+function syncUrlQuery() {
+  const raw = props.api.url || ''
+  const qIdx = raw.indexOf('?')
+  if (qIdx < 0) return
+  const base = raw.slice(0, qIdx)
+  let qs = raw.slice(qIdx + 1)
+  const hIdx = qs.indexOf('#')
+  if (hIdx >= 0) qs = qs.slice(0, hIdx)
+  const params = new URLSearchParams(qs)
+  const keys = [...params.keys()]
+  if (!keys.length) {
+    return
+  }
+  const have = new Set((props.api.query || []).filter(q => q.key).map(q => q.key))
+  for (const [k, v] of params.entries()) {
+    if (have.has(k)) continue
+    props.api.query.push({ key: k, value: v, description: '', enabled: true })
+    have.add(k)
+  }
+  markDebugDirty()
+}
+
 async function send() {
   sending.value = true
   try {
@@ -96,16 +122,6 @@ async function send() {
       contentType: props.api.contentType || '',
     }
     mergeCommon(spec) // 公共参数自动附加（接口同名优先）
-
-    // 地址栏中已携带的 ?query 以地址为准：从待发参数里剔除同名项，
-    // 避免「地址里的参数」与「Query 参数列表」重复叠加；同时地址本身保持不变。
-    try {
-      const rawQ = (spec.url.split('?')[1] || '').split('#')[0]
-      if (rawQ) {
-        const urlKeys = new Set([...new URLSearchParams(rawQ).keys()])
-        if (urlKeys.size) spec.query = spec.query.filter(q => !q.key || !urlKeys.has(q.key))
-      }
-    } catch {}
 
     // 前置脚本：可修改请求与临时环境变量
     if (props.api.preScript && props.api.preScript.trim()) {
@@ -314,7 +330,7 @@ function buildRespDetail(r) {
           <el-option v-for="m in methods" :key="m" :label="m" :value="m" />
         </el-select>
         <el-input v-model="api.url" size="large" placeholder="请输入接口地址，如 https://api.example.com/user/list（支持 {{变量}}）"
-          @keyup.enter="send" @input="markDebugDirty" />
+          @keyup.enter="send" @input="markDebugDirty" @change="syncUrlQuery" />
         <el-button type="primary" size="large" :loading="sending" style="width:100px" @click="send">
           发 送
         </el-button>
@@ -324,10 +340,10 @@ function buildRespDetail(r) {
       </div>
 
       <el-tabs v-model="reqTab" style="margin-top:10px">
-        <el-tab-pane :label="`Query 参数 (${api.query.length})`" name="query">
+        <el-tab-pane :label="`Query 参数 (${queryCount})`" name="query">
           <KVEditor :items="api.query" key-placeholder="参数名" @change="markDebugDirty" />
         </el-tab-pane>
-        <el-tab-pane :label="`请求头 (${api.headers.length})`" name="headers">
+        <el-tab-pane :label="`请求头 (${headerCount})`" name="headers">
           <KVEditor :items="api.headers" key-placeholder="参数名" @change="markDebugDirty" />
         </el-tab-pane>
         <el-tab-pane label="请求体 Body" name="body">
@@ -415,6 +431,7 @@ function buildRespDetail(r) {
 </template>
 
 <style scoped>
+.dirty-tip { color: #fa8c16; font-size: 12px; font-weight: 500; }
 .url-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .url-row .el-input { flex: 1; min-width: 0; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }

@@ -2,12 +2,16 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown } from '../../wailsjs/go/main/App'
-import { saveNow, currentProject } from '../store'
+import { saveNow, currentProject, savedApiSnapshots } from '../store'
 import ShareDialog from './ShareDialog.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
 const busy = ref(false)
 const shareVisible = ref(false)
+
+// 文档预览只读「已保存快照」：只有点击保存请求后快照才会刷新，
+// 实时调试编辑（未保存）不会体现到文档里。
+const docApi = computed(() => savedApiSnapshots[props.api.id] || props.api)
 
 async function doExport(format) {
   busy.value = true
@@ -57,7 +61,7 @@ function highlightVars(text) {
   <div class="panel-page">
     <div class="card">
       <div class="card-title">
-        <span>文档预览（随调试自动生成）</span>
+        <span>文档预览（保存请求后生成）</span>
         <span>
           <el-button size="small" @click="copyMd">复制 Markdown</el-button>
           <el-button size="small" @click="shareVisible = true">分享为网页链接</el-button>
@@ -76,31 +80,31 @@ function highlightVars(text) {
       </div>
 
       <div class="doc-preview">
-        <h2>{{ api.name }}</h2>
+        <h2>{{ docApi.name }}</h2>
         <div class="urlbar">
-          <span class="method-tag" :class="'m-' + api.method">{{ api.method }}</span>
-          <span v-html="highlightVars(api.url || '（未填写地址）')"></span>
+          <span class="method-tag" :class="'m-' + docApi.method">{{ docApi.method }}</span>
+          <span v-html="highlightVars(docApi.url || '（未填写地址）')"></span>
         </div>
-        <p v-if="api.description" style="color:#4e5969" v-html="highlightVars(api.description)"></p>
+        <p v-if="docApi.description" style="color:#4e5969" v-html="highlightVars(docApi.description)"></p>
 
-        <template v-if="api.headers.some(h => h.enabled && h.key)">
+        <template v-if="docApi.headers.some(h => h.enabled && h.key)">
           <h4>请求头</h4>
           <table>
             <thead><tr><th>参数名</th><th>值/示例</th><th>说明</th></tr></thead>
             <tbody>
-              <tr v-for="(h, i) in api.headers.filter(x => x.enabled && x.key)" :key="i">
+              <tr v-for="(h, i) in docApi.headers.filter(x => x.enabled && x.key)" :key="i">
                 <td>{{ h.key }}</td><td v-html="highlightVars(h.value)"></td><td>{{ h.description }}</td>
               </tr>
             </tbody>
           </table>
         </template>
 
-        <template v-if="api.query.some(q => q.enabled && q.key)">
+        <template v-if="docApi.query.some(q => q.enabled && q.key)">
           <h4>Query 参数</h4>
           <table>
             <thead><tr><th>参数名</th><th>值/示例</th><th>说明</th></tr></thead>
             <tbody>
-              <tr v-for="(q, i) in api.query.filter(x => x.enabled && x.key)" :key="i">
+              <tr v-for="(q, i) in docApi.query.filter(x => x.enabled && x.key)" :key="i">
                 <td>{{ q.key }}</td><td v-html="highlightVars(q.value)"></td><td>{{ q.description }}</td>
               </tr>
             </tbody>
@@ -128,8 +132,8 @@ function highlightVars(text) {
         </template>
 
         <template v-for="part in [
-          { title: '请求参数', rows: flatRows(api.reqFields) },
-          { title: '响应参数', rows: flatRows(api.respFields) },
+          { title: '请求参数', rows: flatRows(docApi.reqFields) },
+          { title: '响应参数', rows: flatRows(docApi.respFields) },
         ]" :key="part.title">
           <template v-if="part.rows.length">
             <h4>{{ part.title }}</h4>
@@ -150,13 +154,13 @@ function highlightVars(text) {
           </template>
         </template>
 
-        <template v-if="api.bodyType === 'json' && api.body.trim()">
+        <template v-if="docApi.bodyType === 'json' && docApi.body.trim()">
           <h4>请求示例</h4>
-          <pre v-html="highlightVars(api.body)"></pre>
+          <pre v-html="highlightVars(docApi.body)"></pre>
         </template>
-        <template v-if="api.lastResponse && api.lastResponse.isJson">
-          <h4>响应示例（最近一次调试结果）</h4>
-          <pre v-html="highlightVars(api.lastResponse.body.length > 4000 ? api.lastResponse.body.slice(0, 4000) + '\n...(截断)' : api.lastResponse.body)"></pre>
+        <template v-if="docApi.lastResponse && docApi.lastResponse.isJson">
+          <h4>响应示例（最近一次保存的请求响应）</h4>
+          <pre v-html="highlightVars(docApi.lastResponse.body.length > 4000 ? docApi.lastResponse.body.slice(0, 4000) + '\n...(截断)' : docApi.lastResponse.body)"></pre>
         </template>
       </div>
     </div>

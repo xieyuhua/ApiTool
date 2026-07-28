@@ -79,6 +79,16 @@ export const liveResponses = reactive({}) // apiId -> 最近一次响应
 export function setLiveResponse(apiId, r) { if (apiId) liveResponses[apiId] = r }
 export function getLiveResponse(apiId) { return apiId ? (liveResponses[apiId] || null) : null }
 
+// 已保存接口快照：每次显式保存时抓拍当前 store.data 中全部接口的深拷贝。
+// 文档预览只读此快照，从而「保存请求之后」文档才更新；单纯的实时调试编辑
+// （即使未保存）不会反映到文档里，避免把临时调试改动显示成已保存的文档。
+export const savedApiSnapshots = reactive({}) // apiId -> 接口深拷贝
+export function captureSnapshots() {
+  for (const p of store.data.projects) {
+    for (const a of p.apis) savedApiSnapshots[a.id] = JSON.parse(JSON.stringify(a))
+  }
+}
+
 // 全局弹窗可见状态：环境管理与公共参数入口统一放在顶部导航栏，
 // 不再占用接口请求行的空间。
 export const envDialogVisible = ref(false)
@@ -117,6 +127,7 @@ export async function saveNow() {
   if (!hasGoBridge()) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
+    captureSnapshots() // 抓拍保存态，文档预览随之更新
     clearDebugDirty() // 任何显式保存后，清除调试脏标记
   } catch (e) {
     console.error('保存失败', e)
@@ -160,6 +171,7 @@ async function loadInto() {
   d.settings.version ||= '1.0.0'
   d.settings.updateURL ||= 'http://127.0.0.1:8080'
   store.data = d
+  captureSnapshots() // 基线快照 = 已加载（=已保存）的数据，文档预览从此开始即为保存态
 }
 
 export async function initStore() {
@@ -388,6 +400,7 @@ export function removeApi(id) {
   const p = currentProject()
   const i = p.apis.findIndex(a => a.id === id)
   if (i >= 0) p.apis.splice(i, 1)
+  delete savedApiSnapshots[id]
   if (store.currentApiId === id) store.currentApiId = ''
 }
 
