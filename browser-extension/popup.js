@@ -9,6 +9,8 @@ function load() {
     $('patterns').value = (s.patterns || []).join('\n');
     $('enabled').checked = !!s.enabled;
     $('captureResponse').checked = s.captureResponse !== false;
+    $('filterStatic').checked = s.filterStatic !== false;
+    $('blacklist').value = (s.blacklist || []).join('\n');
   });
 }
 
@@ -19,6 +21,8 @@ function collect() {
     patterns: $('patterns').value.split('\n').map(x => x.trim()).filter(Boolean),
     enabled: $('enabled').checked,
     captureResponse: $('captureResponse').checked,
+    filterStatic: $('filterStatic').checked,
+    blacklist: $('blacklist').value.split('\n').map(x => x.trim()).filter(Boolean),
   };
 }
 

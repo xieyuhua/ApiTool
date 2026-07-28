@@ -206,6 +206,65 @@ func (a *App) GenerateTestCasesForApis(apiIDs []string) ([]TestCase, error) {
 	return out, nil
 }
 
+// apiToTestCase 将已有接口定义直接转换为可执行测试用例（无需 AI，用于快速自动化测试 / 压测）
+func apiToTestCase(api ApiInfo) TestCase {
+	tc := TestCase{
+		ID:          genID(),
+		ApiID:       api.ID,
+		ApiName:     api.Name,
+		Category:    "正常流程",
+		Name:        api.Method + " " + firstNonEmpty(api.Name, api.URL),
+		Description: api.Description,
+		Method:      api.Method,
+		URL:         api.URL,
+		Headers:     api.Headers,
+		Query:       api.Query,
+		BodyType:    api.BodyType,
+		Body:        api.Body,
+		FormItems:   api.FormItems,
+		ContentType: api.ContentType,
+		Assertions: []Assertion{
+			{Type: "status", Target: "", Operator: "eq", Expected: "200", Enabled: true},
+		},
+		Enabled:   true,
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	return tc
+}
+
+// ImportApisAsTestCases 将指定接口导入为测试用例，复用其请求定义（地址/参数/请求体）
+func (a *App) ImportApisAsTestCases(apiIDs []string) (int, error) {
+	if len(apiIDs) == 0 {
+		return 0, fmt.Errorf("请至少选择一个接口")
+	}
+	data := a.readData()
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	idSet := map[string]bool{}
+	for _, id := range apiIDs {
+		idSet[id] = true
+	}
+	count := 0
+	for i := range data.Projects[idx].Apis {
+		api := data.Projects[idx].Apis[i]
+		if !idSet[api.ID] {
+			continue
+		}
+		data.Projects[idx].TestCases = append(data.Projects[idx].TestCases, apiToTestCase(api))
+		count++
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("未找到所选接口")
+	}
+	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.SaveData(data); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ---------------- AI 生成测试用例（异步队列 + 进度） ----------------
 
 // 生成任务队列：前端提交任务后立即返回 jobId，后台 worker 顺序消费并推送进度事件。

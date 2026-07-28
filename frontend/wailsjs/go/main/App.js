@@ -54,6 +54,10 @@ export function ExportDoc(arg1, arg2, arg3) {
   return window['go']['main']['App']['ExportDoc'](arg1, arg2, arg3);
 }
 
+export function ExportStressReport(arg1, arg2) {
+  return window['go']['main']['App']['ExportStressReport'](arg1, arg2);
+}
+
 export function ExportTestReport(arg1, arg2) {
   return window['go']['main']['App']['ExportTestReport'](arg1, arg2);
 }
@@ -98,6 +102,14 @@ export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
 
+export function ImportApisAsTestCases(arg1) {
+  return window['go']['main']['App']['ImportApisAsTestCases'](arg1);
+}
+
+export function ImportCapturedAsTestCases(arg1) {
+  return window['go']['main']['App']['ImportCapturedAsTestCases'](arg1);
+}
+
 export function ImportDoc() {
   return window['go']['main']['App']['ImportDoc']();
 }
@@ -116,6 +128,10 @@ export function OpenInBrowser(arg1) {
 
 export function ParseFields(arg1, arg2) {
   return window['go']['main']['App']['ParseFields'](arg1, arg2);
+}
+
+export function RunStressTest(arg1, arg2) {
+  return window['go']['main']['App']['RunStressTest'](arg1, arg2);
 }
 
 export function RunTestCases(arg1, arg2, arg3) {

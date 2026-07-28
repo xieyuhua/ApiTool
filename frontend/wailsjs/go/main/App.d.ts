@@ -28,6 +28,8 @@ export function ExportCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<st
 
 export function ExportDoc(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function ExportStressReport(arg1:string,arg2:string):Promise<string>;
+
 export function ExportTestReport(arg1:string,arg2:string):Promise<string>;
 
 export function FormatJSON(arg1:string):Promise<string>;
@@ -50,6 +52,10 @@ export function GetDataFilePath():Promise<string>;
 
 export function GetVersion():Promise<string>;
 
+export function ImportApisAsTestCases(arg1:Array<string>):Promise<number>;
+
+export function ImportCapturedAsTestCases(arg1:Array<string>):Promise<number>;
+
 export function ImportDoc():Promise<string>;
 
 export function ListShares():Promise<Array<main.ShareInfo>>;
@@ -59,6 +65,8 @@ export function LoadData():Promise<main.AppData>;
 export function OpenInBrowser(arg1:string):Promise<void>;
 
 export function ParseFields(arg1:string,arg2:Array<main.Field>):Promise<Array<main.Field>>;
+
+export function RunStressTest(arg1:Array<main.StressTarget>,arg2:main.StressConfig):Promise<main.StressReport>;
 
 export function RunTestCases(arg1:Array<string>,arg2:string,arg3:number):Promise<main.TestReport>;
 

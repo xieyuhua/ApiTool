@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,9 @@ type CapturedRequest struct {
 
 // capturedIn 扩展上报的请求体（数组或单条）
 type capturedIn struct {
-	Requests []CapturedRequest `json:"requests"`
+	Requests      []CapturedRequest `json:"requests"`
+	CaptureStatic bool              `json:"captureStatic"` // 扩展侧「过滤静态资源」取反：true 表示「保留/捕获」静态资源
+	Blacklist     []string          `json:"blacklist"`     // 扩展侧自定义黑名单（支持 * 通配）
 }
 
 // CaptureServerInfo 返回捕获服务状态，供前端展示与扩展配置
@@ -157,7 +160,7 @@ func (a *App) handleCapture(w http.ResponseWriter, r *http.Request) {
 	var in capturedIn
 	if err := json.Unmarshal(raw, &in); err == nil && len(in.Requests) > 0 {
 		for i := range in.Requests {
-			a.appendCaptured(in.Requests[i])
+			a.appendCaptured(in.Requests[i], in.CaptureStatic, in.Blacklist)
 		}
 		writeCaptureJSON(w, 200, map[string]interface{}{"ok": true, "count": len(capturedList)})
 		return
@@ -165,14 +168,22 @@ func (a *App) handleCapture(w http.ResponseWriter, r *http.Request) {
 	// 兼容单条上报
 	var single CapturedRequest
 	if err2 := json.Unmarshal(raw, &single); err2 == nil && (single.URL != "" || single.Method != "") {
-		a.appendCaptured(single)
+		a.appendCaptured(single, false, nil)
 		writeCaptureJSON(w, 200, map[string]interface{}{"ok": true, "count": len(capturedList)})
 		return
 	}
 	writeCaptureJSON(w, 400, map[string]string{"error": "请求体解析失败，需为 {requests:[...]} 或单条捕获记录"})
 }
 
-func (a *App) appendCaptured(c CapturedRequest) {
+func (a *App) appendCaptured(c CapturedRequest, captureStatic bool, blacklist []string) {
+	// 服务端兜底过滤：即便扩展端因运行异常未过滤，css/图片/字体/data:URI 等静态资源也不会入库。
+	// 仅当用户在扩展端显式关闭「过滤静态资源」（即 captureStatic=true）时才放行。
+	if !captureStatic && isStaticResourceURL(c.URL) {
+		return
+	}
+	if matchBlacklistPat(c.URL, blacklist) {
+		return
+	}
 	if c.ID == "" {
 		c.ID = uuid.NewString()
 	}
@@ -274,6 +285,39 @@ func writeCaptureJSON(w http.ResponseWriter, code int, v interface{}) {
 }
 
 // ---------------- 转换为 ApiInfo ----------------
+
+// capturedToTestCase 将单条捕获请求转换为可执行测试用例（用于自动化测试 / 压测）
+func capturedToTestCase(c CapturedRequest) TestCase {
+	name := c.Method + " " + firstNonEmpty(c.Path, c.URL)
+	bodyType := "json"
+	switch c.BodyType {
+	case "form":
+		bodyType = "form"
+	case "text", "none":
+		bodyType = "text"
+	}
+	tc := TestCase{
+		ID:          uuid.NewString(),
+		ApiName:     "捕获: " + name,
+		Category:    "正常流程",
+		Name:        name,
+		Description: "由浏览器扩展捕获（页面：" + c.PageURL + "）",
+		Method:      c.Method,
+		URL:         c.URL,
+		Headers:     c.Headers,
+		Query:       c.Query,
+		BodyType:    bodyType,
+		Body:        c.Body,
+		FormItems:   []KV{},
+		ContentType: "",
+		Assertions: []Assertion{
+			{Type: "status", Target: "", Operator: "eq", Expected: "200", Enabled: true},
+		},
+		Enabled:   true,
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	return tc
+}
 
 // capturedToApi 将单条捕获请求转换为 ApiInfo（推断请求/响应字段树）
 func capturedToApi(c CapturedRequest) ApiInfo {
@@ -393,6 +437,42 @@ func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (in
 	return len(sel), nil
 }
 
+// ImportCapturedAsTestCases 将选中的捕获请求转换为测试用例，导入当前项目用于自动化测试 / 压测
+func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("请至少选择一条捕获记录")
+	}
+	idSet := map[string]bool{}
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	captureMu.Lock()
+	var sel []CapturedRequest
+	for _, c := range capturedList {
+		if idSet[c.ID] {
+			sel = append(sel, *c)
+		}
+	}
+	captureMu.Unlock()
+	if len(sel) == 0 {
+		return 0, fmt.Errorf("未找到所选捕获记录（可能已被清空）")
+	}
+
+	data := a.readData()
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	for _, c := range sel {
+		data.Projects[idx].TestCases = append(data.Projects[idx].TestCases, capturedToTestCase(c))
+	}
+	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.SaveData(data); err != nil {
+		return 0, err
+	}
+	return len(sel), nil
+}
+
 // ExportCapturedOpenAPI 将选中的捕获请求生成 OpenAPI 文档并弹出保存对话框
 func (a *App) ExportCapturedOpenAPI(ids []string, title string) (string, error) {
 	if len(ids) == 0 {
@@ -492,6 +572,66 @@ func (a *App) loadOrCreateCaptureToken() {
 		a.captureToken = "cap_" + uuid.NewString()
 	}
 	_ = os.WriteFile(p, []byte(a.captureToken), 0o600)
+}
+
+// ---------------- 静态资源 / 黑名单（服务端兜底过滤） ----------------
+
+// staticExts 常见静态资源扩展名（与扩展端保持一致）
+var staticExts = map[string]bool{
+	"js": true, "mjs": true, "cjs": true, "jsx": true, "ts": true, "tsx": true,
+	"css": true, "scss": true, "sass": true, "less": true,
+	"png": true, "jpg": true, "jpeg": true, "gif": true, "webp": true, "avif": true, "svg": true, "bmp": true, "ico": true,
+	"woff": true, "woff2": true, "eot": true, "ttf": true, "otf": true, "map": true,
+	"mp3": true, "mp4": true, "webm": true, "wav": true, "ogg": true, "pdf": true,
+}
+
+// isStaticResourceURL 按扩展名 / 协议判断是否为静态资源（css/图片/字体/data:URI 等）
+func isStaticResourceURL(u string) bool {
+	if u == "" {
+		return false
+	}
+	if strings.HasPrefix(u, "data:") || strings.HasPrefix(u, "blob:") {
+		return true
+	}
+	path := u
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	dot := strings.LastIndex(path, ".")
+	if dot < 0 || dot == len(path)-1 {
+		return false
+	}
+	return staticExts[strings.ToLower(path[dot+1:])]
+}
+
+// wildcardToRegex 将 * 通配模式转为正则（^...$），如 *.example.com/* -> ^.*\.example\.com/.*$
+func wildcardToRegex(p string) (*regexp.Regexp, error) {
+	var sb strings.Builder
+	sb.WriteString("^")
+	for _, part := range strings.Split(p, "*") {
+		sb.WriteString(regexp.QuoteMeta(part))
+		sb.WriteString(".*")
+	}
+	s := strings.TrimSuffix(sb.String(), ".*") + "$"
+	return regexp.Compile(s)
+}
+
+// matchBlacklistPat 命中自定义黑名单（每行一条，支持 * 通配）则返回 true
+func matchBlacklistPat(u string, pats []string) bool {
+	for _, p := range pats {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		re, err := wildcardToRegex(p)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(u) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(vals ...string) string {

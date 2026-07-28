@@ -11,6 +11,7 @@ import TestCenter from './components/TestCenter.vue'
 import EnvManager from './components/EnvManager.vue'
 import CommonParams from './components/CommonParams.vue'
 import CapturePanel from './components/CapturePanel.vue'
+import AutoTestPanel from './components/AutoTestPanel.vue'
 
 onMounted(initStore)
 initGenListener()
@@ -54,6 +55,7 @@ const navs = [
   { key: 'docs', label: '文档中心', icon: '📄' },
   { key: 'testing', label: '接口测试', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
+  { key: 'autotest', label: '自动化测试', icon: '🤖' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
 </script>
@@ -110,6 +112,7 @@ const navs = [
     <DocCenter v-else-if="store.view === 'docs'" />
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
+    <AutoTestPanel v-else-if="store.view === 'autotest'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
   </div>
 

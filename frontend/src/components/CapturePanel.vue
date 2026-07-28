@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CaptureInfo, StartCaptureServer, StopCaptureServer, GetCapturedRequests,
   ClearCapturedRequests, GenerateApiFromCaptured, ExportCapturedOpenAPI,
-  BuildCapturedOpenAPI, CopyToClipboard,
+  BuildCapturedOpenAPI, CopyToClipboard, ImportCapturedAsTestCases,
 } from '../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore } from '../store'
 
@@ -112,6 +112,19 @@ async function doImport() {
   finally { importing.value = false }
 }
 
+async function doImportAsCases() {
+  if (!selected.value.length) { ElMessage.warning('请先勾选要导入的捕获记录'); return }
+  importing.value = true
+  try {
+    const n = await ImportCapturedAsTestCases(selected.value)
+    await reloadStore()
+    selected.value = []
+    ElMessage.success(`已导入 ${n} 条测试用例，前往「自动化测试」运行或压测`)
+    store.view = 'autotest'
+  } catch (e) { ElMessage.error(String(e)) }
+  finally { importing.value = false }
+}
+
 async function doExport() {
   if (!selected.value.length) { ElMessage.warning('请先勾选要导出的捕获记录'); return }
   try {
@@ -201,6 +214,7 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
           <el-tree-select v-model="importDirId" :data="projectDirOptions" check-strictly :render-after-expand="false"
             size="small" style="width:200px" placeholder="选择目录（根目录）" default-expand-all />
           <el-button size="small" type="primary" :loading="importing" @click="doImport">生成接口并导入</el-button>
+          <el-button size="small" type="success" :loading="importing" @click="doImportAsCases">导入为测试用例</el-button>
           <el-divider direction="vertical" />
           <el-button size="small" @click="doExport">导出 OpenAPI</el-button>
           <el-button size="small" @click="copyOpenAPI">复制 OpenAPI</el-button>

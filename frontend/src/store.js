@@ -564,6 +564,9 @@ export function clearLogs() {
 // 时丢失进度与事件监听。切回「接口测试」时自动恢复进度展示与完成提示。
 export const genJobId = ref('')
 export const genStat = ref({ total: 0, done: 0, name: '', phase: '' })
+
+// 压测进度（全局，跨视图保留），供「自动化测试」视图读取
+export const stressStat = ref({ running: false, done: 0, total: 0 })
 // 任务结束 / 出错时写入，供「接口测试」视图切回时弹出提示（提示后清除）
 export const genDoneInfo = ref(null)   // { count: number, time: number }
 export const genErrorInfo = ref(null)  // { error: string, time: number }
@@ -597,5 +600,12 @@ export function initGenListener() {
     genJobId.value = ''
     genStat.value = { total: 0, done: 0, name: '', phase: '' }
     genErrorInfo.value = { error: p.error || '生成失败', time: Date.now() }
+  }))
+  _genOff.push(runtime.EventsOn('apitool:stress-progress', (p) => {
+    if (!p) return
+    stressStat.value = { running: true, done: p.done || 0, total: p.total || 0 }
+    if (p.done >= p.total && p.total > 0) {
+      // 完成后由调用方重置 running，这里仅更新计数
+    }
   }))
 }

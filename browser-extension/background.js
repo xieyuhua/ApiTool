@@ -11,6 +11,8 @@ let settings = {
   patterns: [],          // 监控网址规则，支持 * 通配，如 https://api.example.com/* 或 example.com
   enabled: false,        // 总开关
   captureResponse: true, // 是否抓取响应体
+  filterStatic: true,    // 过滤静态资源（js/css/图片/字体/data:URI 等）
+  blacklist: [],         // 自定义排除规则，支持 * 通配（每行一条），命中则不捕获
 };
 
 const attached = new Set();   // 已 attach 的 tabId
@@ -44,6 +46,44 @@ function matchUrl(url) {
     const re = new RegExp(p.split('*').map(escapeRegExp).join('.*'));
     if (re.test(url)) return true;
   }
+  return false;
+}
+
+// ---------------- 静态资源 / 黑名单过滤 ----------------
+// 已知静态资源扩展名（js / css / 图片 / 字体 / 音视频 / sourceMap 等）
+const STATIC_EXT = /\.(js|mjs|cjs|jsx|ts|tsx|css|scss|sass|less|png|jpe?g|jpeg|gif|webp|avif|svg|bmp|ico|woff2?|eot|ttf|otf|map|mp3|mp4|webm|wav|ogg|pdf)(\?|$|#)/i;
+const STATIC_TYPES = new Set([
+  'script', 'stylesheet', 'image', 'font', 'media', 'manifest', 'ping', 'websocket',
+]);
+
+// 按 URL 判断是否为静态资源（含 data:URI 内联资源）
+function isStaticByUrl(url) {
+  if (!url) return false;
+  if (/^data:/i.test(url)) return true;        // data:image/png;base64,... 等内联资源
+  if (/^blob:/i.test(url)) return true;        // blob: 资源
+  if (STATIC_EXT.test(url)) return true;
+  return false;
+}
+
+// 按资源类型（来自响应）判断是否为静态资源
+function isStaticType(type) {
+  return !!type && STATIC_TYPES.has(String(type).toLowerCase());
+}
+
+// 命中自定义黑名单（排除规则，支持 * 通配）
+function matchBlacklist(url) {
+  const pats = (settings.blacklist || []).map(p => p.trim()).filter(Boolean);
+  for (const p of pats) {
+    const re = new RegExp(p.split('*').map(escapeRegExp).join('.*'));
+    if (re.test(url)) return true;
+  }
+  return false;
+}
+
+// 是否应当跳过该请求（静态资源或命中黑名单）
+function shouldSkip(url, type) {
+  if (settings.filterStatic && (isStaticByUrl(url) || isStaticType(type))) return true;
+  if (matchBlacklist(url)) return true;
   return false;
 }
 
@@ -110,6 +150,8 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
   if (method === 'Network.requestWillBeSent') {
     const req = params.request || {};
+    // 命中监控规则后，仍可能因静态资源/黑名单而跳过，避免污染捕获列表
+    if (shouldSkip(req.url)) return;
     const headers = objToKV(req.headers || {});
     let bodyType = 'none';
     let body = req.postData || '';
@@ -145,6 +187,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     p.statusText = resp.statusText || '';
     p.respHeaders = resp.headers || {};
     p._mime = resp.mimeType || '';
+    p.respType = resp.type || '';
   } else if (method === 'Network.loadingFinished') {
     const p = pending.get(params.requestId);
     if (!p) return;
@@ -178,6 +221,11 @@ function finalize(p) {
   delete p._mime;
   const rid = p._rid;
   delete p._rid;
+  // 响应阶段兜底：若资源类型属于静态资源，则不回传（避免绕过 URL 启发式的情况）
+  if (settings.filterStatic && isStaticType(p.respType)) {
+    if (rid) pending.delete(rid);
+    return;
+  }
   sendCapture(p);
   if (rid) pending.delete(rid);
 }
@@ -195,7 +243,12 @@ function matchedRule(url) {
 function sendCapture(p) {
   const endpoint = (settings.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, '');
   const url = endpoint + '/capture';
-  const payload = { requests: [p] };
+  // captureStatic 为「过滤静态资源」的取反：用户勾选过滤时传 false（由桌面端兜底丢弃静态资源）
+  const payload = {
+    requests: [p],
+    captureStatic: !settings.filterStatic,
+    blacklist: settings.blacklist || [],
+  };
   fetch(url, {
     method: 'POST',
     headers: {

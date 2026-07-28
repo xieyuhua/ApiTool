@@ -56,6 +56,16 @@
     <input type="checkbox" id="captureResponse" checked />
   </div>
 
+  <div class="row switch-row">
+    <label style="margin:0">过滤静态资源（js/css/图片/字体/data:URI）</label>
+    <input type="checkbox" id="filterStatic" checked />
+  </div>
+
+  <div class="row">
+    <label>排除规则（黑名单，每行一条，支持 * 通配）</label>
+    <textarea id="blacklist" placeholder="*.google-analytics.com/*&#10;*cdn.example.com/static/*"></textarea>
+  </div>
+
   <div class="btns">
     <button class="primary" id="save">保存</button>
     <button id="test">测试连接</button>
