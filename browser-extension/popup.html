@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { width: 360px; margin: 0; padding: 14px; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #1f2329; font-size: 13px; }
+    h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+    .row { margin-bottom: 12px; }
+    label { display: block; font-size: 12px; color: #4e5969; margin-bottom: 4px; }
+    input[type="text"], textarea {
+      width: 100%; padding: 7px 9px; border: 1px solid #e5e6eb; border-radius: 6px; font-size: 13px; outline: none;
+    }
+    input:focus, textarea:focus { border-color: #165dff; box-shadow: 0 0 0 2px rgba(22,93,255,.12); }
+    textarea { height: 70px; resize: vertical; font-family: Consolas, monospace; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; }
+    .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    button {
+      flex: 1; padding: 8px 10px; border: 1px solid #e5e6eb; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px;
+    }
+    button.primary { background: #165dff; color: #fff; border-color: #165dff; }
+    button.danger { color: #f53f3f; border-color: #f53f3f; }
+    .status { margin-top: 10px; font-size: 12px; padding: 8px 10px; border-radius: 6px; background: #f7f8fa; }
+    .status.ok { color: #00b42a; }
+    .status.err { color: #f53f3f; }
+    .tip { font-size: 12px; color: #86909c; line-height: 1.6; margin-top: 8px; }
+    code { background: #f2f3f5; padding: 1px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h2>🌐 ApiTool 请求捕获</h2>
+
+  <div class="row switch-row">
+    <label style="margin:0">启用捕获</label>
+    <input type="checkbox" id="enabled" />
+  </div>
+
+  <div class="row">
+    <label>桌面端捕获地址</label>
+    <input type="text" id="endpoint" placeholder="http://127.0.0.1:8653" />
+  </div>
+
+  <div class="row">
+    <label>鉴权 Token（与桌面端「请求捕获」一致）</label>
+    <input type="text" id="token" placeholder="cap_..." />
+  </div>
+
+  <div class="row">
+    <label>监控网址（每行一条，支持 * 通配）</label>
+    <textarea id="patterns" placeholder="https://api.example.com/*&#10;example.com"></textarea>
+  </div>
+
+  <div class="row switch-row">
+    <label style="margin:0">抓取响应体（生成响应字段文档）</label>
+    <input type="checkbox" id="captureResponse" checked />
+  </div>
+
+  <div class="btns">
+    <button class="primary" id="save">保存</button>
+    <button id="test">测试连接</button>
+  </div>
+  <div class="btns">
+    <button id="reconnect">重新连接匹配标签页</button>
+    <button class="danger" id="disconnect">断开全部</button>
+  </div>
+
+  <div class="status" id="status">就绪</div>
+
+  <div class="tip">
+    1. 在桌面端「请求捕获」页复制 <b>Token</b> 粘贴到上方；<br />
+    2. 填写要监听的网址规则并「保存」「启用捕获」；<br />
+    3. 打开目标网页操作，请求会出现在桌面端「请求捕获」列表中。<br />
+    注意：启用后会向标签页注入调试器（浏览器顶部出现提示条），用于读取请求/响应体。
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

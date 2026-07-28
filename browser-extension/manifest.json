@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "ApiTool 请求捕获",
+  "version": "1.0.0",
+  "description": "监听浏览器指定网页的请求，回传给 ApiTool 桌面端的「请求捕获」模块，自动生成接口文档并导出 OpenAPI。",
+  "permissions": ["debugger", "storage", "tabs", "activeTab", "webRequest"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ApiTool 请求捕获"
+  }
+}

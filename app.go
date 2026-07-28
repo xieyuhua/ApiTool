@@ -16,10 +16,11 @@ import (
 
 // App struct
 type App struct {
-	ctx      context.Context
-	dataFile string
-	syncDir  string
-	mu       sync.Mutex
+	ctx         context.Context
+	dataFile    string
+	syncDir     string
+	mu          sync.Mutex
+	captureToken string // 浏览器扩展回传鉴权 Token（持久化）
 }
 
 // NewApp creates a new App application struct
@@ -46,6 +47,11 @@ func (a *App) startup(ctx context.Context) {
 	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
 	if _, err := os.Stat(a.dataFile); err != nil {
 		_ = a.SaveData(defaultData())
+	}
+	// 加载/生成捕获服务 Token，并自动启动独立捕获服务（供浏览器扩展回传数据）
+	a.loadOrCreateCaptureToken()
+	if _, err := a.StartCaptureServer(defaultCaptureAddr, a.captureToken); err != nil {
+		fmt.Println("警告：自动启动请求捕获服务失败：", err)
 	}
 }
 
