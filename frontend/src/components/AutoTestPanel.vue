@@ -306,66 +306,72 @@ watch(mode, () => {})
         </el-table>
       </div>
 
-      <!-- 功能测试报告记录 -->
-      <div class="card">
-        <div class="card-title">测试报告记录（{{ reports.length }}）</div>
-        <el-table v-if="reports.length" :data="reports" style="width:100%" max-height="380">
-          <el-table-column prop="planName" label="计划" min-width="120" show-overflow-tooltip />
-          <el-table-column label="时间" width="172">
-            <template #default="{ row }">{{ row.createdAt }}</template>
-          </el-table-column>
-          <el-table-column label="通过/失败" width="120">
-            <template #default="{ row }"><span class="ok">{{ row.passed }}</span> / <span class="fail">{{ row.failed }}</span></template>
-          </el-table-column>
-          <el-table-column label="总耗时" width="100">
-            <template #default="{ row }">{{ row.durationMs }} ms</template>
-          </el-table-column>
-          <el-table-column label="操作" width="270">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="viewHistoryReport(row)">查看</el-button>
-              <el-button link type="primary" size="small" @click="exportHistoryReport(row, 'markdown')">导出MD</el-button>
-              <el-button link type="primary" size="small" @click="exportHistoryReport(row, 'html')">导出HTML</el-button>
-              <el-button link type="danger" size="small" @click="deleteReport(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <div v-else class="tip">暂无报告。运行功能测试后，报告会记录在此，可随时重新查看或导出。</div>
-      </div>
+      <!-- 测试结果与报告：压测结果 / 测试报告记录 独立分区并列展示 -->
+      <div class="results-grid">
+        <!-- 功能测试报告记录 -->
+        <div class="card">
+          <div class="card-title">测试报告记录（{{ reports.length }}）</div>
+          <el-table v-if="reports.length" :data="reports" style="width:100%" max-height="340">
+            <el-table-column prop="planName" label="计划" min-width="100" show-overflow-tooltip />
+            <el-table-column label="时间" width="160">
+              <template #default="{ row }">{{ row.createdAt }}</template>
+            </el-table-column>
+            <el-table-column label="通过/失败" width="96">
+              <template #default="{ row }"><span class="ok">{{ row.passed }}</span> / <span class="fail">{{ row.failed }}</span></template>
+            </el-table-column>
+            <el-table-column label="耗时" width="86">
+              <template #default="{ row }">{{ row.durationMs }} ms</template>
+            </el-table-column>
+            <el-table-column label="操作" width="220">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="viewHistoryReport(row)">查看</el-button>
+                <el-button link type="primary" size="small" @click="exportHistoryReport(row, 'markdown')">MD</el-button>
+                <el-button link type="primary" size="small" @click="exportHistoryReport(row, 'html')">HTML</el-button>
+                <el-button link type="danger" size="small" @click="deleteReport(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="tip">暂无报告。运行功能测试后，报告会记录在此，可随时重新查看或导出。</div>
+        </div>
 
-      <!-- 压测结果 -->
-      <div v-if="mode === 'stress' && stressReport" class="card">
-        <div class="card-title">压测结果</div>
-        <div class="report-bar">
-          <el-button size="small" @click="copyStress">复制 JSON</el-button>
-          <el-button size="small" type="primary" plain @click="exportStress('markdown')">导出 Markdown</el-button>
-          <el-button size="small" type="primary" plain @click="exportStress('html')">导出 HTML</el-button>
+        <!-- 压测结果（运行后独立展示，不受模式切换影响） -->
+        <div v-if="stressReport" class="card">
+          <div class="card-title">
+            压测结果
+            <span class="stress-mode-tag" v-if="mode !== 'stress'">在「压力测试」模式下运行</span>
+          </div>
+          <div class="report-bar">
+            <el-button size="small" @click="copyStress">复制 JSON</el-button>
+            <el-button size="small" type="primary" plain @click="exportStress('markdown')">MD</el-button>
+            <el-button size="small" type="primary" plain @click="exportStress('html')">HTML</el-button>
+          </div>
+          <div class="stress-summary">
+            <div class="ss"><div class="ss-n">{{ stressReport.total }}</div><div>总请求</div></div>
+            <div class="ss ok"><div class="ss-n">{{ stressReport.success }}</div><div>成功</div></div>
+            <div class="ss fail"><div class="ss-n">{{ stressReport.failed }}</div><div>失败</div></div>
+            <div class="ss"><div class="ss-n">{{ stressReport.rps ? stressReport.rps.toFixed(1) : 0 }}</div><div>吞吐 RPS</div></div>
+            <div class="ss"><div class="ss-n">{{ stressReport.durationMs }}ms</div><div>总耗时</div></div>
+          </div>
+          <el-table :data="stressReport.results" style="width:100%; margin-top:12px" max-height="320">
+            <el-table-column prop="name" label="目标" min-width="140" show-overflow-tooltip />
+            <el-table-column label="成功率" width="84">
+              <template #default="{ row }"><span :class="row.failed === 0 ? 'ok' : 'fail'">{{ successRate(row) }}</span></template>
+            </el-table-column>
+            <el-table-column label="最小/平均" width="116">
+              <template #default="{ row }">
+                {{ row.minMs }} / {{ row.avgMs }}ms
+              </template>
+            </el-table-column>
+            <el-table-column label="P95/P99" width="116">
+              <template #default="{ row }">
+                {{ row.p95 }} / {{ row.p99 }}ms
+              </template>
+            </el-table-column>
+            <el-table-column label="状态码分布" min-width="160">
+              <template #default="{ row }"><span class="dist">{{ statusDistText(row.statusDist) }}</span></template>
+            </el-table-column>
+          </el-table>
         </div>
-        <div class="stress-summary">
-          <div class="ss"><div class="ss-n">{{ stressReport.total }}</div><div>总请求</div></div>
-          <div class="ss ok"><div class="ss-n">{{ stressReport.success }}</div><div>成功</div></div>
-          <div class="ss fail"><div class="ss-n">{{ stressReport.failed }}</div><div>失败</div></div>
-          <div class="ss"><div class="ss-n">{{ stressReport.rps ? stressReport.rps.toFixed(1) : 0 }}</div><div>吞吐 (RPS)</div></div>
-          <div class="ss"><div class="ss-n">{{ stressReport.durationMs }}ms</div><div>总耗时</div></div>
-        </div>
-        <el-table :data="stressReport.results" style="width:100%; margin-top:12px">
-          <el-table-column prop="name" label="目标" min-width="200" show-overflow-tooltip />
-          <el-table-column label="成功率" width="100">
-            <template #default="{ row }"><span :class="row.failed === 0 ? 'ok' : 'fail'">{{ successRate(row) }}</span></template>
-          </el-table-column>
-          <el-table-column label="最小/平均" width="130">
-            <template #default="{ row }">
-              {{ row.minMs }} / {{ row.avgMs }}ms
-            </template>
-          </el-table-column>
-          <el-table-column label="P95 / P99" width="140">
-            <template #default="{ row }">
-              {{ row.p95 }} / {{ row.p99 }}ms
-            </template>
-          </el-table-column>
-          <el-table-column label="状态码分布" min-width="220">
-            <template #default="{ row }"><span class="dist">{{ statusDistText(row.statusDist) }}</span></template>
-          </el-table-column>
-        </el-table>
       </div>
     </div>
 
@@ -504,6 +510,9 @@ watch(mode, () => {})
 .rs { background:#f7f8fa; border:1px solid #e5e6eb; border-radius:10px; padding:12px 18px; min-width:96px; text-align:center; }
 .rs .rs-n { font-size:22px; font-weight:700; } .rs.ok .rs-n { color:#00b42a; } .rs.fail .rs-n { color:#f53f3f; }
 .report-bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.results-grid { display:grid; grid-template-columns:1fr; gap:16px; }
+@media (min-width: 1024px) { .results-grid { grid-template-columns:1fr 1fr; align-items:start; } }
+.stress-mode-tag { font-size:12px; font-weight:400; color:#86909c; }
 .report-summary { background:#f7f8fa; border:1px solid #e5e6eb; border-radius:8px; padding:12px 14px; margin-bottom:12px; }
 .rs-title { font-weight:600; margin-bottom:8px; font-size:14px; }
 .report-summary pre { white-space:pre-wrap; word-break:break-word; font-family:inherit; font-size:13px; line-height:1.8; margin:0; }

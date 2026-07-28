@@ -643,9 +643,9 @@ const passRate = computed(() => {
 </template>
 
 <style scoped>
-.test-center { padding: 16px 22px; height: 100%; display: flex; flex-direction: column; }
+.test-center { padding: 16px 22px; flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
 .tc-tabs { background: #fff; padding: 0 12px; border-radius: 8px 8px 0 0; }
-.tc-page { flex: 1; overflow: auto; background: #fff; padding: 16px; border-radius: 0 0 8px 8px; }
+.tc-page { flex: 1; min-height: 0; overflow: auto; background: #fff; padding: 16px; border-radius: 0 0 8px 8px; }
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
 .tip { color: #c2c7cf; font-size: 12px; }
