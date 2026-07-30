@@ -205,6 +205,7 @@ export namespace main {
 	    database: string;
 	    dbType: string;
 	    dbIndex: number;
+	    encoding: string;
 	    useTLS: boolean;
 	    remark: string;
 	    updatedAt: string;
@@ -225,6 +226,7 @@ export namespace main {
 	        this.database = source["database"];
 	        this.dbType = source["dbType"];
 	        this.dbIndex = source["dbIndex"];
+	        this.encoding = source["encoding"];
 	        this.useTLS = source["useTLS"];
 	        this.remark = source["remark"];
 	        this.updatedAt = source["updatedAt"];

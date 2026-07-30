@@ -48,21 +48,12 @@
           <el-button size="small" @click="clearSshLog">清屏</el-button>
         </div>
 
+        <!-- xterm.js 终端容器：负责渲染输出与捕获键盘输入 -->
         <div class="term" ref="termRef" @click="focusTermInput">
-          <pre class="term-out">{{ sshLog }}<span v-if="sshConnected" class="term-cursor">█</span></pre>
           <div v-if="!sshConnected" class="term-overlay">
             <el-button type="primary" size="small" :loading="sshConnecting" @click="openSsh">连接</el-button>
             <span class="term-hint">点击「连接」打开实时终端会话</span>
           </div>
-          <input
-            v-if="sshConnected"
-            ref="sshInputRef"
-            class="term-input"
-            v-model="sshInput"
-            @keyup.enter="sendSsh"
-            spellcheck="false"
-            autocomplete="off"
-          />
         </div>
       </div>
 
@@ -119,6 +110,13 @@
             <el-option label="SFTP" value="sftp" />
           </el-select>
         </el-form-item>
+        <el-form-item label="编码" v-if="form.category === 'ssh'">
+          <el-select v-model="form.encoding" style="width:100%">
+            <el-option label="UTF-8（默认）" value="utf-8" />
+            <el-option label="GBK（中文服务器常见）" value="gbk" />
+            <el-option label="GB18030" value="gb18030" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主机"><el-input v-model="form.host" /></el-form-item>
         <el-form-item label="端口"><el-input v-model="form.port" /></el-form-item>
         <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
@@ -131,7 +129,7 @@
         <el-button type="success" plain @click="testConn">测试连接</el-button>
       </template>
       <div v-if="testResult" style="margin-top:8px" :style="{ color: testResult.Ok ? '#67c23a' : '#f56c6c' }">
-        {{ testResult.Ok ? '连接成功' : ('失败：' + testResult.Error) }}
+        {{ testResult.Ok ? '连接成功' : ('失败：' + (testResult.Error || '未知错误（请检查连接参数）')) }}
       </div>
     </el-dialog>
   </div>
@@ -147,6 +145,10 @@ import {
   PluginFTPList, PluginFTPRead, PluginFTPWrite, PluginFTPMkdir, PluginFTPDelete,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+// 标准终端引擎：完整支持 ANSI/VT100、真彩色、交替屏，能正确渲染 htop/vim/top 等全屏 TUI
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../store.js'
 
 // 连接分类定义
@@ -169,16 +171,16 @@ const editingId = ref('')
 const testResult = ref(null)
 
 // 表单状态（新增/编辑连接）
-const form = reactive({ name: '', category: 'ssh', host: '', port: 0, username: '', password: '', remark: '' })
+const form = reactive({ name: '', category: 'ssh', host: '', port: 0, username: '', password: '', remark: '', encoding: 'utf-8' })
 
-// 连接操作相关状态
+// SSH 实时终端相关状态
 const sshConnected = ref(false)   // 实时终端是否已连接
 const sshConnecting = ref(false)  // 正在建立连接
 const sshSessionId = ref('')      // 后端 SSH 会话 ID
-const sshLog = ref('')            // 终端回显文本
-const sshInput = ref('')          // 当前命令输入
-const termRef = ref(null)         // 终端容器
-const sshInputRef = ref(null)     // 隐藏输入框
+let term = null                    // xterm.js 终端实例（页面生命周期内复用）
+let fitAddon = null                // 自适应尺寸插件，根据容器大小计算行列
+const termRef = ref(null)         // 终端容器 DOM
+let termRO = null                  // 终端尺寸变化监听（用于窗口自适应，适配 vim/top/htop 等全屏程序）
 const remotePath = ref('/')
 const remoteFiles = ref([])
 const remoteContent = ref('')
@@ -245,7 +247,6 @@ function resetOps() {
   remoteContent.value = ''
   currentRemotePath.value = ''
   closeSsh()
-  sshLog.value = ''
 }
 
 // 打开连接时按需加载数据：SSH 自动建立实时会话，文件类自动列目录
@@ -260,14 +261,14 @@ watch(selected, (val) => {
 function blankForm() {
   Object.assign(form, {
     name: '', category: props.category, host: '', port: 0,
-    username: '', password: '', remark: '',
+    username: '', password: '', remark: '', encoding: 'utf-8',
   })
 }
 function openAdd() { editing.value = false; editingId.value = ''; testResult.value = null; blankForm(); showAdd.value = true }
 function editConn(c) {
   editing.value = true; editingId.value = c.id; testResult.value = null
   Object.assign(form, { name: c.name, category: c.category, host: c.host, port: c.port,
-    username: c.username, password: c.password, remark: c.remark })
+    username: c.username, password: c.password, remark: c.remark, encoding: c.encoding || 'utf-8' })
   showAdd.value = true
 }
 function saveConn() {
@@ -277,7 +278,7 @@ function saveConn() {
     id: editing.value ? editingId.value : ('pl_' + Date.now()),
     category: form.category, name: form.name, host: form.host,
     port: Number(form.port) || 0, username: form.username, password: form.password,
-    remark: form.remark,
+    remark: form.remark, encoding: form.encoding,
     updatedAt: new Date().toISOString(),
   }
   if (editing.value) updatePluginConn(conn)
@@ -294,24 +295,51 @@ async function testConn() {
 }
 
 // ===================== SSH 实时终端 =====================
-// 建立带 PTY 的持久会话，并通过事件流实时接收输出
+// 建立带 PTY 的持久会话，用 xterm.js 渲染输出、实时发送输入
 async function openSsh() {
   if (sshConnecting.value || sshConnected.value) return
   sshConnecting.value = true
-  sshLog.value = ''
   try {
+    await nextTick()                  // 等待 .term 容器挂载完成
+    if (!termRef.value) throw new Error('终端容器未就绪')
+    // 创建 xterm 实例（页面内仅创建一次），使用标准 VT 引擎，完整支持 ANSI/全屏 TUI
+    if (!term) {
+      term = new Terminal({
+        fontSize: 13,
+        fontFamily: 'Consolas, "Courier New", monospace',
+        cursorBlink: true,
+        scrollback: 5000,
+        theme: {
+          background: '#0c0c0c', foreground: '#c8e6c9', cursor: '#67c23a',
+          selectionBackground: '#264f78',
+        },
+      })
+      fitAddon = new FitAddon()
+      term.loadAddon(fitAddon)
+      term.open(termRef.value)
+      // 实时输入：每次按键直接发往远端（远端 PTY 开启 ECHO 自行回显，实现「边敲边显示」）
+      term.onData((d) => { if (sshSessionId.value) PluginSSHInput(sshSessionId.value, d) })
+    }
+    term.reset()         // 清空上一次会话的残留内容
+    fitAddon.fit()       // 先按当前容器尺寸 fit，保证后续 resize 准确
     const id = await PluginSSHOpen(selected.value)
     if (!id) throw new Error('未能建立会话')
     sshSessionId.value = id
     sshConnected.value = true
-    // 监听后端推送的实时输出与断开事件
-    EventsOn('ssh:' + id + ':data', (chunk) => {
-      sshLog.value += chunk
-      scrollTermToBottom()
-    })
+    // 监听后端推送的实时输出（原始字节流）与断开事件，直接交给 xterm 渲染
+    EventsOn('ssh:' + id + ':data', (chunk) => { if (term) term.write(chunk) })
     EventsOn('ssh:' + id + ':close', () => {
       sshConnected.value = false
-      sshLog.value += '\n[连接已关闭]\n'
+      if (term) term.writeln('\r\n[连接已关闭]')
+    })
+    // 连接建立后按容器尺寸同步 PTY，并监听后续窗口变化
+    nextTick(() => {
+      updateTermSize()
+      if (termRef.value && !termRO) {
+        termRO = new ResizeObserver(() => updateTermSize())
+        termRO.observe(termRef.value)
+      }
+      if (term) term.focus()
     })
   } catch (e) {
     ElMessage.error('SSH 连接失败：' + (e.message || e))
@@ -320,18 +348,9 @@ async function openSsh() {
   }
 }
 
-// 向会话发送命令（带回车），并回显到终端
-function sendSsh() {
-  if (!sshConnected.value || !sshSessionId.value) return
-  const cmd = sshInput.value
-  sshLog.value += cmd + '\n'
-  PluginSSHInput(sshSessionId.value, cmd + '\n')
-  sshInput.value = ''
-  scrollTermToBottom()
-}
-
-// 关闭会话并清理事件监听
+// 关闭会话并清理事件监听与终端实例
 function closeSsh() {
+  if (termRO) { termRO.disconnect(); termRO = null }
   if (sshSessionId.value) {
     EventsOff('ssh:' + sshSessionId.value + ':data')
     EventsOff('ssh:' + sshSessionId.value + ':close')
@@ -339,14 +358,20 @@ function closeSsh() {
     sshSessionId.value = ''
   }
   sshConnected.value = false
+  // 释放 xterm 实例（容器即将卸载），下次连接时重建，避免绑定到已移除的 DOM
+  if (term) { try { term.dispose() } catch (e) {} term = null; fitAddon = null }
 }
 
-function clearSshLog() { sshLog.value = '' }
+function clearSshLog() { if (term) term.reset() }
 // 终端点击任意处即聚焦输入（模仿 XShell 体验）
-function focusTermInput() { nextTick(() => sshInputRef.value && sshInputRef.value.focus()) }
-// 新输出到达后滚动到底部
-function scrollTermToBottom() {
-  nextTick(() => { if (termRef.value) termRef.value.scrollTop = termRef.value.scrollHeight })
+function focusTermInput() { if (term) term.focus() }
+// 将前端终端容器尺寸同步给远端 PTY（行/列），适配 vim/top/htop 等全屏程序
+function updateTermSize() {
+  if (!term || !fitAddon || !sshConnected.value || !sshSessionId.value) return
+  try {
+    fitAddon.fit()
+    PluginSSHResize(sshSessionId.value, term.rows, term.cols).catch(() => {})
+  } catch (e) {}
 }
 
 // ===================== SFTP / FTP =====================
@@ -446,20 +471,17 @@ function removeConn(id) {
 .term-status .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .term-host { font-size: 12px; color: #c0c4cc; font-family: Consolas, monospace; }
 
+/* xterm.js 容器：由 FitAddon 按此容器尺寸计算行列 */
 .term {
-  flex: 1; min-height: 0; position: relative; overflow: auto;
-  background: #0c0c0c; border-radius: 0 0 6px 6px; padding: 10px 12px;
-  font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.5;
-  cursor: text;
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
+  background: #0c0c0c; border-radius: 0 0 6px 6px; cursor: text;
 }
-.term-out { margin: 0; white-space: pre-wrap; word-break: break-all; color: #c8e6c9; text-shadow: 0 0 1px rgba(200,230,201,.3); }
-.term-cursor { color: #67c23a; animation: termBlink 1s steps(1) infinite; }
-@keyframes termBlink { 50% { opacity: 0; } }
-.term-input {
-  position: absolute; left: -9999px; /* 隐藏但可聚焦，用于捕获键盘输入 */
+.term :deep(.xterm) {
+  padding: 8px 10px; height: 100%; box-sizing: border-box;
 }
+.term :deep(.xterm-viewport) { background-color: transparent !important; }
 .term-overlay {
-  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+  position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; gap: 10px;
   align-items: center; justify-content: center; background: rgba(0,0,0,.55);
 }
 .term-hint { font-size: 12px; color: #8a8a8a; }

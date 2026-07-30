@@ -238,6 +238,10 @@ export function PluginSSHOpen(arg1) {
   return window['go']['main']['App']['PluginSSHOpen'](arg1);
 }
 
+export function PluginSSHResize(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginSSHResize'](arg1, arg2, arg3);
+}
+
 export function PluginSetClipboard(arg1) {
   return window['go']['main']['App']['PluginSetClipboard'](arg1);
 }

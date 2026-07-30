@@ -120,6 +120,8 @@ export function PluginSSHInput(arg1:string,arg2:string):Promise<void>;
 
 export function PluginSSHOpen(arg1:main.PluginConn):Promise<string>;
 
+export function PluginSSHResize(arg1:string,arg2:number,arg3:number):Promise<void>;
+
 export function PluginSetClipboard(arg1:string):Promise<void>;
 
 export function PluginTest(arg1:main.PluginConn):Promise<main.PluginOpResult>;
