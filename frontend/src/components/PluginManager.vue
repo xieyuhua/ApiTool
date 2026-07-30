@@ -45,6 +45,7 @@
           <span class="term-host">{{ selected.username ? selected.username + '@' : '' }}{{ selected.host }}<template v-if="selected.port">:{{ selected.port }}</template></span>
           <span style="flex:1" />
           <el-button size="small" type="danger" plain :disabled="!sshConnected" @click="closeSsh">断开</el-button>
+          <el-button size="small" type="success" @click="pickUpload(uploadToSsh)">上传文件</el-button>
           <el-button size="small" @click="clearSshLog">清屏</el-button>
         </div>
 
@@ -63,6 +64,7 @@
           <el-button size="small" @click="gotoParent">返回上级</el-button>
           <el-button size="small" type="primary" @click="listRemote">刷新</el-button>
           <el-button size="small" @click="remoteMkdirShown = true">新建目录</el-button>
+          <el-button size="small" type="success" @click="pickUpload(uploadToSftp)">上传文件</el-button>
           <span class="pm-path">
             <span v-for="(seg, i) in pathSegments" :key="i" class="pm-path-seg" @click="gotoSeg(seg)">{{ seg.name }}<span v-if="i < pathSegments.length - 1"> / </span></span>
           </span>
@@ -96,6 +98,7 @@
             <el-button type="primary" @click="remoteMkdir">确定</el-button>
           </template>
         </el-dialog>
+        <input ref="fileInputRef" type="file" multiple style="position:absolute;width:0;height:0;opacity:0" @change="onFilePicked" />
       </div>
     </div>
 
@@ -140,8 +143,9 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   PluginTest,
-  PluginSSHOpen, PluginSSHInput, PluginSSHClose, PluginSSHResize,
+  PluginSSHOpen, PluginSSHInput, PluginSSHClose, PluginSSHResize, PluginSSHExec,
   PluginSFTPList, PluginSFTPRead, PluginSFTPWrite, PluginSFTPMkdir, PluginSFTPDelete,
+  PluginSFTPUploadB64,
   PluginFTPList, PluginFTPRead, PluginFTPWrite, PluginFTPMkdir, PluginFTPDelete,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -187,6 +191,8 @@ const remoteContent = ref('')
 const currentRemotePath = ref('')
 const remoteMkdirShown = ref(false)
 const remoteMkdirName = ref('')
+const fileInputRef = ref(null)
+let uploadHandler = null  // 当前上传目标处理回调
 
 // 当前分类标题
 const currentCat = computed(() => (categories.find(c => c.value === props.category) || {}).label || '')
@@ -419,6 +425,59 @@ function gotoSeg(seg) { remotePath.value = seg.path; listRemote() }
 function onRemoteRowDblclick(row) {
   if (row.isDir) gotoSeg({ path: row.path })
   else remoteRead(row)
+}
+
+// ===================== 本地文件上传（SFTP 通道，二进制安全） =====================
+// 选择本地文件并交由指定处理器上传（SFTP 面板或 SSH 终端共用）
+function pickUpload(handler) {
+  uploadHandler = handler
+  if (fileInputRef.value) fileInputRef.value.click()
+}
+async function onFilePicked(e) {
+  const files = Array.from(e.target.files || [])
+  e.target.value = ''           // 重置，允许重复选择同一文件
+  if (uploadHandler && files.length) {
+    try { await uploadHandler(files) }
+    catch (err) { ElMessage.error('上传失败：' + (err && err.message ? err.message : err)) }
+  }
+  uploadHandler = null
+}
+// 本地文件 -> base64（FileReader 读取，兼容任意二进制内容）
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const bytes = new Uint8Array(r.result)
+      let bin = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+      }
+      resolve(btoa(bin))
+    }
+    r.onerror = reject
+    r.readAsArrayBuffer(file)
+  })
+}
+// SFTP 面板：上传到当前浏览目录
+async function uploadToSftp(files) {
+  for (const f of files) {
+    const b64 = await fileToBase64(f)
+    await call(PluginSFTPUploadB64, selected.value, remotePath.value || '/', f.name, b64)
+  }
+  ElMessage.success(`已上传 ${files.length} 个文件到 ${remotePath.value || '/'}`)
+  await listRemote()
+}
+// SSH 终端：上传到远端当前工作目录（通过 pwd 获取），等效 XShell 中 rz 的效果
+async function uploadToSsh(files) {
+  const pwd = (await PluginSSHExec(selected.value, 'pwd') || '').trim()
+  const dir = pwd || '/'
+  for (const f of files) {
+    const b64 = await fileToBase64(f)
+    await call(PluginSFTPUploadB64, selected.value, dir, f.name, b64)
+  }
+  ElMessage.success(`已上传 ${files.length} 个文件到 ${dir}`)
+  if (term) term.writeln(`\r\n[已上传 ${files.length} 个文件到 ${dir}]`)
 }
 
 function removeConn(id) {

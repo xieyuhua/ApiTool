@@ -110,6 +110,8 @@ export function PluginSFTPMkdir(arg1:main.PluginConn,arg2:string):Promise<void>;
 
 export function PluginSFTPRead(arg1:main.PluginConn,arg2:string):Promise<string>;
 
+export function PluginSFTPUploadB64(arg1:main.PluginConn,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function PluginSFTPWrite(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
 
 export function PluginSSHClose(arg1:string):Promise<void>;

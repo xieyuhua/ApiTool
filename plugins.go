@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -828,6 +829,18 @@ func (a *App) PluginSFTPRead(conn PluginConn, path string) (string, error) {
 func (a *App) PluginSFTPWrite(conn PluginConn, path, content string) error {
 	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		return v.(*sftpHolder).sc.writeFile(path, content)
+	})
+}
+
+// PluginSFTPUploadB64 通过 SFTP 上传本地文件（二进制安全，b64 为文件内容的 base64）
+func (a *App) PluginSFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) error {
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return err
+	}
+	remotePath := joinRemotePath(remoteDir, name)
+	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
+		return v.(*sftpHolder).sc.writeFileBytes(remotePath, data)
 	})
 }
 

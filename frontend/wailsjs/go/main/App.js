@@ -218,6 +218,10 @@ export function PluginSFTPRead(arg1, arg2) {
   return window['go']['main']['App']['PluginSFTPRead'](arg1, arg2);
 }
 
+export function PluginSFTPUploadB64(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['PluginSFTPUploadB64'](arg1, arg2, arg3, arg4);
+}
+
 export function PluginSFTPWrite(arg1, arg2, arg3) {
   return window['go']['main']['App']['PluginSFTPWrite'](arg1, arg2, arg3);
 }

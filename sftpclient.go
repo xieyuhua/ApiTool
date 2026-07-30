@@ -350,6 +350,36 @@ func (c *sftpClient) writeFile(path, content string) error {
 	return nil
 }
 
+// writeFileBytes 以二进制方式写入远端文件（任意字节安全，用于上传图片/压缩包等）
+func (c *sftpClient) writeFileBytes(path string, data []byte) error {
+	handle, err := c.openFile(path, 0x2|0x8|0x10) // WRITE|CREAT|TRUNC
+	if err != nil {
+		return err
+	}
+	defer c.closeHandle(handle)
+	var offset uint64
+	const chunkSize = 4096
+	for len(data) > 0 {
+		chunk := data
+		if len(chunk) > chunkSize {
+			chunk = chunk[:chunkSize]
+		}
+		payload := putString(nil, handle)
+		payload = append(payload, packUint64(offset)...)
+		payload = putString(payload, string(chunk))
+		typ, body, err := c.call(6, payload) // SSH_FXP_WRITE
+		if err != nil {
+			return err
+		}
+		if err := expectStatus(typ, body); err != nil {
+			return err
+		}
+		offset += uint64(len(chunk))
+		data = data[len(chunk):]
+	}
+	return nil
+}
+
 func (c *sftpClient) mkdir(path string) error {
 	payload := putString(nil, path)
 	payload = append(payload, 0, 0, 0, 0)
