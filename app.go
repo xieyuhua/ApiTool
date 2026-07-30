@@ -75,7 +75,19 @@ func defaultData() AppData {
 			Version:    AppVersion,
 			UpdateURL:  DefaultUpdateURL,
 		},
+		Plugins:   PluginsData{Connections: []PluginConn{}},
+		Clipboard: ClipData{History: []ClipItem{}},
 	}
+}
+
+// GetClipboardText 读取系统剪贴板文本（供前端轮询记录历史）
+func (a *App) GetClipboardText() (string, error) {
+	return runtime.ClipboardGetText(a.ctx)
+}
+
+// SetClipboardText 写入系统剪贴板
+func (a *App) SetClipboardText(text string) error {
+	return runtime.ClipboardSetText(a.ctx, text)
 }
 
 // readData 从磁盘加载并反序列化全部数据，处理旧版本兼容与默认值补全。

@@ -38,15 +38,15 @@ type ResponseData struct {
 
 // RequestSpec 请求定义
 type RequestSpec struct {
-	Method     string `json:"method"`
-	URL        string `json:"url"`
-	Headers    []KV   `json:"headers"`
-	Query      []KV   `json:"query"`
-	BodyType   string `json:"bodyType"` // none | json | form | text
-	Body       string `json:"body"`
-	FormItems  []KV   `json:"formItems"`
-	TimeoutSec int    `json:"timeoutSec"`
-	Env        []KV   `json:"env"` // 当前环境环境变量（用于 {{var}} 替换）
+	Method      string `json:"method"`
+	URL         string `json:"url"`
+	Headers     []KV   `json:"headers"`
+	Query       []KV   `json:"query"`
+	BodyType    string `json:"bodyType"` // none | json | form | text
+	Body        string `json:"body"`
+	FormItems   []KV   `json:"formItems"`
+	TimeoutSec  int    `json:"timeoutSec"`
+	Env         []KV   `json:"env"`         // 当前环境环境变量（用于 {{var}} 替换）
 	ContentType string `json:"contentType"` // 自定义 Content-Type 覆盖（非空时优先）
 }
 
@@ -81,9 +81,9 @@ type EnvVar struct {
 
 // Environment 环境（变量集合）
 type Environment struct {
-	ID   string    `json:"id"`
-	Name string    `json:"name"`
-	Vars []EnvVar  `json:"vars"`
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Vars []EnvVar `json:"vars"`
 }
 
 // Directory 目录节点
@@ -105,8 +105,8 @@ type Project struct {
 	Common       CommonParams  `json:"common"`
 	UpdatedAt    string        `json:"updatedAt"`
 	// 接口测试
-	TestCases  []TestCase  `json:"testCases,omitempty"`
-	TestPlans  []TestPlan  `json:"testPlans,omitempty"`
+	TestCases   []TestCase   `json:"testCases,omitempty"`
+	TestPlans   []TestPlan   `json:"testPlans,omitempty"`
 	TestReports []TestReport `json:"testReports,omitempty"`
 }
 
@@ -122,9 +122,9 @@ type Assertion struct {
 // TestCase 测试用例（自带完整请求快照 + 断言，运行时不依赖原接口）
 type TestCase struct {
 	ID          string      `json:"id"`
-	ApiID       string      `json:"apiId"`       // 关联接口 ID（可为空）
-	ApiName     string      `json:"apiName"`     // 关联接口名称（展示用）
-	Category    string      `json:"category"`    // 正常流程 | 参数边界 | 异常场景 | 权限安全
+	ApiID       string      `json:"apiId"`    // 关联接口 ID（可为空）
+	ApiName     string      `json:"apiName"`  // 关联接口名称（展示用）
+	Category    string      `json:"category"` // 正常流程 | 参数边界 | 异常场景 | 权限安全
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Method      string      `json:"method"`
@@ -160,14 +160,14 @@ type AssertionResult struct {
 
 // TestResult 单个用例执行结果
 type TestResult struct {
-	CaseID          string            `json:"caseId"`
-	CaseName        string            `json:"caseName"`
-	Category        string            `json:"category"`
-	Passed          bool              `json:"passed"`
-	Status          int               `json:"status"`
-	DurationMs      int64             `json:"durationMs"`
-	Error           string            `json:"error"`
-	ResponseBody    string            `json:"responseBody"`
+	CaseID           string            `json:"caseId"`
+	CaseName         string            `json:"caseName"`
+	Category         string            `json:"category"`
+	Passed           bool              `json:"passed"`
+	Status           int               `json:"status"`
+	DurationMs       int64             `json:"durationMs"`
+	Error            string            `json:"error"`
+	ResponseBody     string            `json:"responseBody"`
 	AssertionResults []AssertionResult `json:"assertionResults"`
 }
 
@@ -179,7 +179,7 @@ type TestReport struct {
 	CreatedAt  string       `json:"createdAt"`
 	Total      int          `json:"total"`
 	Passed     int          `json:"passed"`
-	Failed     int           `json:"failed"`
+	Failed     int          `json:"failed"`
 	DurationMs int64        `json:"durationMs"`
 	Results    []TestResult `json:"results"`
 	Summary    string       `json:"summary"` // AI 分析摘要
@@ -202,7 +202,42 @@ type Settings struct {
 
 // AppData 应用全部数据
 type AppData struct {
-	Projects        []Project `json:"projects"`
-	CurrentProjectID string    `json:"currentProjectId"`
-	Settings        Settings  `json:"settings"`
+	Projects         []Project   `json:"projects"`
+	CurrentProjectID string      `json:"currentProjectId"`
+	Settings         Settings    `json:"settings"`
+	Plugins          PluginsData `json:"plugins"`
+	Clipboard        ClipData    `json:"clipboard"`
+}
+
+// PluginManager 连接配置（按分类管理：数据库 / Redis / ES / XShell(SSH) / FTP / SFTP）
+type PluginConn struct {
+	ID        string `json:"id"`
+	Category  string `json:"category"` // db | redis | es | ssh | ftp | sftp
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Database  string `json:"database"` // 数据库名 / ES 索引（可选）
+	DbType    string `json:"dbType"`   // mysql | postgres（仅 db 分类使用）
+	DbIndex   int    `json:"dbIndex"`  // Redis 默认 DB 序号（仅 redis 分类使用）
+	Encoding  string `json:"encoding"` // 终端编码：utf-8 | gbk | gb18030（仅 ssh 分类使用）
+	UseTLS    bool   `json:"useTLS"`   // es/ftp(s) 等可选
+	Remark    string `json:"remark"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type PluginsData struct {
+	Connections []PluginConn `json:"connections"`
+}
+
+// 剪贴板历史记录
+type ClipItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+	Time string `json:"time"`
+}
+
+type ClipData struct {
+	History []ClipItem `json:"history"`
 }

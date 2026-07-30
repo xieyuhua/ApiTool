@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener } from './store'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, toggleClipboardHistory } from './store'
 import Sidebar from './components/Sidebar.vue'
 import DebugPanel from './components/DebugPanel.vue'
 import ParamsPanel from './components/ParamsPanel.vue'
@@ -12,10 +12,25 @@ import EnvManager from './components/EnvManager.vue'
 import CommonParams from './components/CommonParams.vue'
 import CapturePanel from './components/CapturePanel.vue'
 import AutoTestPanel from './components/AutoTestPanel.vue'
+import Tools from './components/Tools.vue'
+import ClipHistory from './components/ClipHistory.vue'
 
-onMounted(initStore)
+onMounted(() => { initStore(); initClipboardMonitor() })
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
+
+// 全局快捷键：Ctrl/⌘ + Shift + V（或反引号 `）调出剪贴板历史
+function onGlobalKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+    e.preventDefault()
+    toggleClipboardHistory()
+  } else if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    toggleClipboardHistory()
+  }
+}
+window.addEventListener('keydown', onGlobalKey)
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 
 // 目录栏宽度可拖拽调整（持久化到 localStorage）
 const NAV_W = 60
@@ -56,6 +71,7 @@ const navs = [
   { key: 'testing', label: '接口测试', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
   { key: 'autotest', label: '自动化测试', icon: '🤖' },
+  { key: 'tools', label: '工具', icon: '🔧' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
 </script>
@@ -113,7 +129,9 @@ const navs = [
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
     <AutoTestPanel v-else-if="store.view === 'autotest'" />
+    <Tools v-else-if="store.view === 'tools'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
+    <ClipHistory />
   </div>
 
   <div v-if="!store.loaded" class="boot-loading">

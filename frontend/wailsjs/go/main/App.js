@@ -94,6 +94,10 @@ export function GetCapturedRequests() {
   return window['go']['main']['App']['GetCapturedRequests']();
 }
 
+export function GetClipboardText() {
+  return window['go']['main']['App']['GetClipboardText']();
+}
+
 export function GetDataFilePath() {
   return window['go']['main']['App']['GetDataFilePath']();
 }
@@ -130,6 +134,118 @@ export function ParseFields(arg1, arg2) {
   return window['go']['main']['App']['ParseFields'](arg1, arg2);
 }
 
+export function PluginDBConnect(arg1) {
+  return window['go']['main']['App']['PluginDBConnect'](arg1);
+}
+
+export function PluginDBDescribe(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginDBDescribe'](arg1, arg2, arg3);
+}
+
+export function PluginDBQuery(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginDBQuery'](arg1, arg2, arg3);
+}
+
+export function PluginDBRowCount(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginDBRowCount'](arg1, arg2, arg3);
+}
+
+export function PluginDBTables(arg1, arg2) {
+  return window['go']['main']['App']['PluginDBTables'](arg1, arg2);
+}
+
+export function PluginESIndices(arg1) {
+  return window['go']['main']['App']['PluginESIndices'](arg1);
+}
+
+export function PluginESSearch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginESSearch'](arg1, arg2, arg3);
+}
+
+export function PluginFTPDelete(arg1, arg2) {
+  return window['go']['main']['App']['PluginFTPDelete'](arg1, arg2);
+}
+
+export function PluginFTPList(arg1, arg2) {
+  return window['go']['main']['App']['PluginFTPList'](arg1, arg2);
+}
+
+export function PluginFTPMkdir(arg1, arg2) {
+  return window['go']['main']['App']['PluginFTPMkdir'](arg1, arg2);
+}
+
+export function PluginFTPRead(arg1, arg2) {
+  return window['go']['main']['App']['PluginFTPRead'](arg1, arg2);
+}
+
+export function PluginFTPWrite(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginFTPWrite'](arg1, arg2, arg3);
+}
+
+export function PluginRedisDel(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginRedisDel'](arg1, arg2, arg3);
+}
+
+export function PluginRedisKeys(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginRedisKeys'](arg1, arg2, arg3);
+}
+
+export function PluginRedisSet(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['PluginRedisSet'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function PluginRedisTTL(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginRedisTTL'](arg1, arg2, arg3);
+}
+
+export function PluginRedisValue(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginRedisValue'](arg1, arg2, arg3);
+}
+
+export function PluginSFTPDelete(arg1, arg2) {
+  return window['go']['main']['App']['PluginSFTPDelete'](arg1, arg2);
+}
+
+export function PluginSFTPList(arg1, arg2) {
+  return window['go']['main']['App']['PluginSFTPList'](arg1, arg2);
+}
+
+export function PluginSFTPMkdir(arg1, arg2) {
+  return window['go']['main']['App']['PluginSFTPMkdir'](arg1, arg2);
+}
+
+export function PluginSFTPRead(arg1, arg2) {
+  return window['go']['main']['App']['PluginSFTPRead'](arg1, arg2);
+}
+
+export function PluginSFTPWrite(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginSFTPWrite'](arg1, arg2, arg3);
+}
+
+export function PluginSSHClose(arg1) {
+  return window['go']['main']['App']['PluginSSHClose'](arg1);
+}
+
+export function PluginSSHExec(arg1, arg2) {
+  return window['go']['main']['App']['PluginSSHExec'](arg1, arg2);
+}
+
+export function PluginSSHInput(arg1, arg2) {
+  return window['go']['main']['App']['PluginSSHInput'](arg1, arg2);
+}
+
+export function PluginSSHOpen(arg1) {
+  return window['go']['main']['App']['PluginSSHOpen'](arg1);
+}
+
+export function PluginSetClipboard(arg1) {
+  return window['go']['main']['App']['PluginSetClipboard'](arg1);
+}
+
+export function PluginTest(arg1) {
+  return window['go']['main']['App']['PluginTest'](arg1);
+}
+
 export function RunStressTest(arg1, arg2) {
   return window['go']['main']['App']['RunStressTest'](arg1, arg2);
 }
@@ -148,6 +264,10 @@ export function SaveData(arg1) {
 
 export function SendRequest(arg1) {
   return window['go']['main']['App']['SendRequest'](arg1);
+}
+
+export function SetClipboardText(arg1) {
+  return window['go']['main']['App']['SetClipboardText'](arg1);
 }
 
 export function ShareDoc(arg1, arg2) {
@@ -188,4 +308,16 @@ export function SyncServerURL() {
 
 export function SyncShareBackend() {
   return window['go']['main']['App']['SyncShareBackend']();
+}
+
+export function ToolCipher(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['ToolCipher'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+export function ToolHash(arg1, arg2) {
+  return window['go']['main']['App']['ToolHash'](arg1, arg2);
+}
+
+export function ToolHmac(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ToolHmac'](arg1, arg2, arg3);
 }

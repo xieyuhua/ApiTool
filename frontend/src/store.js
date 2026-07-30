@@ -1,6 +1,6 @@
 import { reactive, watch, ref } from 'vue'
 import * as runtime from '../wailsjs/runtime/runtime'
-import { LoadData, SaveData, GetVersion, CheckUpdate } from '../wailsjs/go/main/App'
+import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText } from '../wailsjs/go/main/App'
 
 export function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2))
@@ -55,6 +55,8 @@ export const store = reactive({
     ],
     currentProjectId: 'default',
     settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' },
+    plugins: { connections: [] },
+    clipboard: { history: [] },
   },
 })
 
@@ -170,6 +172,10 @@ async function loadInto() {
   d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' }
   d.settings.version ||= '1.0.0'
   d.settings.updateURL ||= 'http://127.0.0.1:8080'
+  d.plugins ||= { connections: [] }
+  d.plugins.connections ||= []
+  d.clipboard ||= { history: [] }
+  d.clipboard.history ||= []
   store.data = d
   captureSnapshots() // 基线快照 = 已加载（=已保存）的数据，文档预览从此开始即为保存态
 }
@@ -608,4 +614,81 @@ export function initGenListener() {
       // 完成后由调用方重置 running，这里仅更新计数
     }
   }))
+}
+
+// ---------------- 插件管理（连接配置，按分类存储） ----------------
+
+export function pluginConnections() {
+  return store.data.plugins.connections
+}
+
+export function addPluginConn(conn) {
+  store.data.plugins.connections.push(conn)
+  saveNow()
+}
+
+export function updatePluginConn(conn) {
+  const list = store.data.plugins.connections
+  const i = list.findIndex(x => x.id === conn.id)
+  if (i >= 0) list[i] = conn
+  else list.push(conn)
+  saveNow()
+}
+
+export function removePluginConn(id) {
+  store.data.plugins.connections =
+    store.data.plugins.connections.filter(x => x.id !== id)
+  saveNow()
+}
+
+// ---------------- 剪贴板历史 ----------------
+
+export const clipboardHistoryVisible = ref(false)
+export function toggleClipboardHistory(v) {
+  clipboardHistoryVisible.value = (typeof v === 'boolean') ? v : !clipboardHistoryVisible.value
+}
+
+let clipTimer = null
+let lastClip = ''
+// 轮询系统剪贴板，发生变化时追加到历史（去重、上限 200 条）
+export function initClipboardMonitor() {
+  if (clipTimer) return
+  const tick = async () => {
+    try {
+      if (hasGoBridge()) {
+        const t = await GetClipboardText()
+        if (t && t !== lastClip) {
+          lastClip = t
+          addClip(t)
+        }
+      }
+    } catch (e) { /* 忽略轮询异常 */ }
+    clipTimer = setTimeout(tick, 800)
+  }
+  clipTimer = setTimeout(tick, 800)
+}
+
+export function stopClipboardMonitor() {
+  if (clipTimer) { clearTimeout(clipTimer); clipTimer = null }
+}
+
+export function addClip(text) {
+  if (!text) return
+  const hist = store.data.clipboard.history
+  if (hist.length && hist[0].text === text) return
+  hist.unshift({ id: uid(), text, time: new Date().toISOString() })
+  if (hist.length > 200) hist.length = 200
+  saveNow()
+}
+
+export function removeClip(id) {
+  const hist = store.data.clipboard.history
+  const i = hist.findIndex(x => x.id === id)
+  if (i >= 0) hist.splice(i, 1)
+  saveNow()
+}
+
+export function clearClipHistory() {
+  store.data.clipboard.history = []
+  saveNow()
 }

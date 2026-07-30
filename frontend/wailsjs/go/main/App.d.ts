@@ -48,6 +48,8 @@ export function GenerateTestCasesForApis(arg1:Array<string>):Promise<Array<main.
 
 export function GetCapturedRequests():Promise<Array<main.CapturedRequest>>;
 
+export function GetClipboardText():Promise<string>;
+
 export function GetDataFilePath():Promise<string>;
 
 export function GetVersion():Promise<string>;
@@ -66,6 +68,62 @@ export function OpenInBrowser(arg1:string):Promise<void>;
 
 export function ParseFields(arg1:string,arg2:Array<main.Field>):Promise<Array<main.Field>>;
 
+export function PluginDBConnect(arg1:main.PluginConn):Promise<main.DBInfo>;
+
+export function PluginDBDescribe(arg1:main.PluginConn,arg2:string,arg3:string):Promise<main.DBRow>;
+
+export function PluginDBQuery(arg1:main.PluginConn,arg2:string,arg3:string):Promise<main.DBRow>;
+
+export function PluginDBRowCount(arg1:main.PluginConn,arg2:string,arg3:string):Promise<number>;
+
+export function PluginDBTables(arg1:main.PluginConn,arg2:string):Promise<Array<main.DBTable>>;
+
+export function PluginESIndices(arg1:main.PluginConn):Promise<Array<main.ESIndex>>;
+
+export function PluginESSearch(arg1:main.PluginConn,arg2:string,arg3:string):Promise<string>;
+
+export function PluginFTPDelete(arg1:main.PluginConn,arg2:string):Promise<void>;
+
+export function PluginFTPList(arg1:main.PluginConn,arg2:string):Promise<Array<main.FileInfo>>;
+
+export function PluginFTPMkdir(arg1:main.PluginConn,arg2:string):Promise<void>;
+
+export function PluginFTPRead(arg1:main.PluginConn,arg2:string):Promise<string>;
+
+export function PluginFTPWrite(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
+
+export function PluginRedisDel(arg1:main.PluginConn,arg2:string,arg3:number):Promise<void>;
+
+export function PluginRedisKeys(arg1:main.PluginConn,arg2:string,arg3:number):Promise<Array<main.RedisKey>>;
+
+export function PluginRedisSet(arg1:main.PluginConn,arg2:string,arg3:string,arg4:number,arg5:number):Promise<void>;
+
+export function PluginRedisTTL(arg1:main.PluginConn,arg2:string,arg3:number):Promise<number>;
+
+export function PluginRedisValue(arg1:main.PluginConn,arg2:string,arg3:number):Promise<main.RedisValue>;
+
+export function PluginSFTPDelete(arg1:main.PluginConn,arg2:string):Promise<void>;
+
+export function PluginSFTPList(arg1:main.PluginConn,arg2:string):Promise<Array<main.FileInfo>>;
+
+export function PluginSFTPMkdir(arg1:main.PluginConn,arg2:string):Promise<void>;
+
+export function PluginSFTPRead(arg1:main.PluginConn,arg2:string):Promise<string>;
+
+export function PluginSFTPWrite(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
+
+export function PluginSSHClose(arg1:string):Promise<void>;
+
+export function PluginSSHExec(arg1:main.PluginConn,arg2:string):Promise<string>;
+
+export function PluginSSHInput(arg1:string,arg2:string):Promise<void>;
+
+export function PluginSSHOpen(arg1:main.PluginConn):Promise<string>;
+
+export function PluginSetClipboard(arg1:string):Promise<void>;
+
+export function PluginTest(arg1:main.PluginConn):Promise<main.PluginOpResult>;
+
 export function RunStressTest(arg1:Array<main.StressTarget>,arg2:main.StressConfig):Promise<main.StressReport>;
 
 export function RunTestCases(arg1:Array<string>,arg2:string,arg3:number):Promise<main.TestReport>;
@@ -75,6 +133,8 @@ export function RunTestPlan(arg1:string):Promise<main.TestReport>;
 export function SaveData(arg1:main.AppData):Promise<void>;
 
 export function SendRequest(arg1:main.RequestSpec):Promise<main.ResponseData>;
+
+export function SetClipboardText(arg1:string):Promise<void>;
 
 export function ShareDoc(arg1:string,arg2:string):Promise<string>;
 
@@ -95,3 +155,9 @@ export function SyncServerRunning():Promise<boolean>;
 export function SyncServerURL():Promise<string>;
 
 export function SyncShareBackend():Promise<main.ShareBackend>;
+
+export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<main.ToolResult>;
+
+export function ToolHash(arg1:string,arg2:string):Promise<main.ToolResult>;
+
+export function ToolHmac(arg1:string,arg2:string,arg3:string):Promise<main.ToolResult>;
