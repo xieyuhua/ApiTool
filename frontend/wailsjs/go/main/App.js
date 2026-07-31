@@ -38,6 +38,10 @@ export function ClearCapturedRequests() {
   return window['go']['main']['App']['ClearCapturedRequests']();
 }
 
+export function ClearTestData(arg1, arg2) {
+  return window['go']['main']['App']['ClearTestData'](arg1, arg2);
+}
+
 export function CopyDocMarkdown(arg1, arg2) {
   return window['go']['main']['App']['CopyDocMarkdown'](arg1, arg2);
 }

@@ -18,11 +18,12 @@ import (
 
 // App struct
 type App struct {
-	ctx         context.Context
-	dataFile    string
-	syncDir     string
-	mu          sync.Mutex
+	ctx          context.Context
+	dataFile     string
+	syncDir      string
+	mu           sync.Mutex
 	captureToken string // 浏览器扩展回传鉴权 Token（持久化）
+	windowVisible bool  // 主窗口当前是否可见（托盘显隐用）
 }
 
 // NewApp creates a new App application struct
@@ -52,6 +53,21 @@ func (a *App) startup(ctx context.Context) {
 	}
 	// 仅加载/生成捕获服务 Token；捕获服务不再自动启动，改由用户在「请求捕获」页面手动开启
 	a.loadOrCreateCaptureToken()
+	// 启动系统托盘（独立于主界面，提供显隐/测试/退出）
+	a.windowVisible = true
+	go a.startTray()
+	// 安装系统级全局快捷键（即使窗口失焦也能调出剪贴板历史）
+	go a.startGlobalHotkey()
+}
+
+// beforeClose 在用户点击窗口关闭/Alt+F4 时触发。
+// 返回 true 表示阻止退出，改为最小化窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
+// 注意：使用 WindowMinimise 而非 WindowHide，使 WebView 始终存活、全局快捷键事件可被前端接收，
+// 托盘态下按快捷键仍可正常弹出剪贴板。仅当用户通过托盘菜单「退出」时才真正退出。
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	runtime.WindowMinimise(a.ctx)
+	a.windowVisible = false
+	return true
 }
 
 func defaultData() AppData {
@@ -161,6 +177,63 @@ func hasProject(data AppData, id string) bool {
 // LoadData 加载全部数据（上次保存的接口信息）
 func (a *App) LoadData() AppData {
 	return a.readData()
+}
+
+// ClearTestData 一键清空当前项目的测试数据。
+// scope 取值：
+//   - "cases"  仅清空测试用例
+//   - "plans"  仅清空测试计划
+//   - "reports"仅清空测试报告
+//   - "all"    清空以上全部（默认）
+//
+// 返回被清空的数据总条数。
+func (a *App) ClearTestData(projectID string, scope string) (int, error) {
+	data := a.readData()
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	if projectID != "" {
+		found := false
+		for i, p := range data.Projects {
+			if p.ID == projectID {
+				idx = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			return 0, fmt.Errorf("项目不存在：%s", projectID)
+		}
+	}
+	if scope == "" {
+		scope = "all"
+	}
+	removed := 0
+	proj := &data.Projects[idx]
+	switch scope {
+	case "cases":
+		removed = len(proj.TestCases)
+		proj.TestCases = []TestCase{}
+	case "plans":
+		removed = len(proj.TestPlans)
+		proj.TestPlans = []TestPlan{}
+	case "reports":
+		removed = len(proj.TestReports)
+		proj.TestReports = []TestReport{}
+	case "all":
+		removed = len(proj.TestCases) + len(proj.TestPlans) + len(proj.TestReports)
+		proj.TestCases = []TestCase{}
+		proj.TestPlans = []TestPlan{}
+		proj.TestReports = []TestReport{}
+	default:
+		return 0, fmt.Errorf("未知的清空范围：%s", scope)
+	}
+	proj.UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.SaveData(data); err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
 
 // SaveData 保存全部数据

@@ -20,6 +20,8 @@ export function CheckUpdate():Promise<main.CheckUpdateResult>;
 
 export function ClearCapturedRequests():Promise<void>;
 
+export function ClearTestData(arg1:string,arg2:string):Promise<number>;
+
 export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
 
 export function CopyToClipboard(arg1:string):Promise<void>;

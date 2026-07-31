@@ -1,6 +1,6 @@
 import { reactive, watch, ref } from 'vue'
 import * as runtime from '../wailsjs/runtime/runtime'
-import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText, CallAI } from '../wailsjs/go/main/App'
+import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText, CallAI, ClearTestData } from '../wailsjs/go/main/App'
 
 export function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2))
@@ -139,6 +139,13 @@ export function effectiveTheme() {
 export function currentProject() {
   const p = store.data.projects.find(x => x.id === store.data.currentProjectId)
   return p || store.data.projects[0]
+}
+
+// 一键清空测试数据。scope: cases|plans|reports|all；返回被清空的条数。
+export async function clearTestData(scope = 'all') {
+  const removed = await ClearTestData(store.data.currentProjectId || '', scope)
+  await reloadStore() // 重新从后端加载并整体替换 store.data，确保 UI 立即刷新
+  return removed
 }
 
 let saveTimer = null

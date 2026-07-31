@@ -1,6 +1,8 @@
 <script setup>
 import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
 import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, toggleClipboardHistory } from './store'
+import { EventsOn, WindowShow, WindowUnminimise } from '../wailsjs/runtime/runtime'
+import { RunTestCases } from '../wailsjs/go/main/App'
 import Sidebar from './components/Sidebar.vue'
 import DebugPanel from './components/DebugPanel.vue'
 import ParamsPanel from './components/ParamsPanel.vue'
@@ -11,11 +13,30 @@ import TestCenter from './components/TestCenter.vue'
 import EnvManager from './components/EnvManager.vue'
 import CommonParams from './components/CommonParams.vue'
 import CapturePanel from './components/CapturePanel.vue'
-import AutoTestPanel from './components/AutoTestPanel.vue'
 import Tools from './components/Tools.vue'
 import ClipHistory from './components/ClipHistory.vue'
 
-onMounted(() => { initStore(); initClipboardMonitor() })
+onMounted(() => {
+  initStore()
+  initClipboardMonitor()
+  // 系统托盘「运行全部测试」：执行当前项目全部用例
+  EventsOn('apitool:tray-run-tests', async () => {
+    try {
+      const p = currentProject()
+      await RunTestCases({ ProjectID: p.id, TestCaseIDs: [], EnvID: p.activeEnvId || '', Concurrency: 3 })
+    } catch (e) {
+      console.error('托盘触发运行测试失败', e)
+    }
+  })
+  // 系统级全局快捷键（Go 端 WH_KEYBOARD_LL 钩子）调出/收起剪贴板历史
+  // 窗口隐藏到托盘时，先恢复窗口确保 WebView 重新绘制，再切换剪贴板可见性，
+  // 这样即使应用驻留托盘、主窗口不可见，快捷键也能正常弹出记录。
+  EventsOn('apitool:toggle-clipboard', () => {
+    WindowShow()
+    WindowUnminimise()
+    setTimeout(() => toggleClipboardHistory(), 30)
+  })
+})
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
 
@@ -89,9 +110,8 @@ const api = computed(() => currentApi())
 const navs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
-  { key: 'testing', label: '接口测试', icon: '🧪' },
+  { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
-  { key: 'autotest', label: '自动化测试', icon: '🤖' },
   { key: 'tools', label: '工具', icon: '🔧' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
@@ -149,7 +169,6 @@ const navs = [
     <DocCenter v-else-if="store.view === 'docs'" />
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
-    <AutoTestPanel v-else-if="store.view === 'autotest'" />
     <Tools v-else-if="store.view === 'tools'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
     <ClipHistory />

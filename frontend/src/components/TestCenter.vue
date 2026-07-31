@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GenerateTestCasesAsync, RunTestPlan, RunTestCases,
   GenerateReportSummary, ExportTestReport, CopyToClipboard,
+  GetCapturedRequests, ImportCapturedAsTestCases, ImportApisAsTestCases,
 } from '../../wailsjs/go/main/App'
 import {
   saveNow, currentProject, uid, projectApis,
@@ -11,6 +12,7 @@ import {
   removeTestCase, saveTestCase, addTestPlan, removeTestPlan,
   appendReport, removeReport,
   genJobId, genStat, genDoneInfo, genErrorInfo, startGenJob,
+  clearTestData,
 } from '../store'
 import KVEditor from './KVEditor.vue'
 
@@ -120,6 +122,10 @@ function flushGenResult() {
 watch(genJobId, (now, old) => {
   if (old && !now) flushGenResult()
 })
+// 进入「用例导入」页时自动刷新捕获列表
+watch(tab, (now) => {
+  if (now === 'import') refreshCaptured()
+})
 onMounted(flushGenResult)
 
 // ---------------- 用例编辑 ----------------
@@ -205,6 +211,34 @@ function onDeletePlan(plan) {
     ElMessage.success('已删除')
   }).catch(() => {})
 }
+// 一键清空：清空当前项目下的 用例 / 计划 / 报告
+async function clearScope(scope, label) {
+  const p = currentProject()
+  const count = scope === 'cases' ? p.testCases.length
+    : scope === 'plans' ? p.testPlans.length
+    : scope === 'reports' ? p.testReports.length : 0
+  if (count === 0) {
+    ElMessage.info(`当前没有可清空的${label}`)
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定清空当前项目下的全部${label}（共 ${count} 条）？此操作不可恢复。`,
+      '一键清空', { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消' }
+    )
+  } catch (e) {
+    return
+  }
+  try {
+    const removed = await clearTestData(scope)
+    ElMessage.success(`已清空 ${removed} 条${label}`)
+  } catch (e) {
+    ElMessage.error('清空失败：' + (e?.message || e))
+  }
+}
+function clearCases() { return clearScope('cases', '测试用例') }
+function clearPlans() { return clearScope('plans', '测试计划') }
+function clearReports() { return clearScope('reports', '测试报告') }
 function togglePlanCase(id) {
   const arr = editingPlan.value.caseIds || (editingPlan.value.caseIds = [])
   const i = arr.indexOf(id)
@@ -306,12 +340,131 @@ const passRate = computed(() => {
   if (!r || !r.total) return '0%'
   return Math.round((r.passed / r.total) * 100) + '%'
 })
+
+// ---------------- 运行全部用例（功能测试） ----------------
+async function runAll() {
+  if (!cases.value.length) { ElMessage.warning('暂无可运行的用例'); return }
+  running.value = true
+  try {
+    const r = await RunTestCases(cases.value.map(c => c.id), curEnvId.value, runConcurrency.value)
+    appendReport(r)
+    viewingReport.value = r
+    reportVisible.value = true
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    running.value = false
+  }
+}
+
+// ---------------- 用例导入（捕获 / 接口） ----------------
+const capturedList = ref([])
+const capSelected = ref([])
+const apiSelected = ref([])
+const importing = ref(false)
+async function refreshCaptured() {
+  try {
+    capturedList.value = await GetCapturedRequests() || []
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+function toggleCap(id) {
+  const i = capSelected.value.indexOf(id)
+  if (i >= 0) capSelected.value.splice(i, 1)
+  else capSelected.value.push(id)
+}
+function toggleApi(id) {
+  const i = apiSelected.value.indexOf(id)
+  if (i >= 0) apiSelected.value.splice(i, 1)
+  else apiSelected.value.push(id)
+}
+async function importSelectedCap() {
+  if (!capSelected.value.length) { ElMessage.warning('请勾选要导入的捕获请求'); return }
+  importing.value = true
+  try {
+    const n = await ImportCapturedAsTestCases(capSelected.value)
+    ElMessage.success(`已导入 ${n} 条用例`)
+    capSelected.value = []
+    await refreshCaptured()
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    importing.value = false
+  }
+}
+async function importSelectedApis() {
+  if (!apiSelected.value.length) { ElMessage.warning('请勾选要导入的接口'); return }
+  importing.value = true
+  try {
+    const n = await ImportApisAsTestCases(apiSelected.value)
+    ElMessage.success(`已导入 ${n} 条用例`)
+    apiSelected.value = []
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    importing.value = false
+  }
+}
+
+// ---------------- 压力测试 ----------------
+const pressure = ref({
+  running: false,
+  selectedIds: [],
+  concurrency: 5,
+  iterations: 10,
+  current: 0,
+  result: null, // { total, passed, failed, totalMs, avgMs, tps, errorRate, byCode }
+})
+function togglePressureCase(id) {
+  const i = pressure.value.selectedIds.indexOf(id)
+  if (i >= 0) pressure.value.selectedIds.splice(i, 1)
+  else pressure.value.selectedIds.push(id)
+}
+async function runPressure() {
+  const ids = pressure.value.selectedIds
+  if (!ids.length) { ElMessage.warning('请勾选压测用例'); return }
+  pressure.value.running = true
+  pressure.value.current = 0
+  pressure.value.result = null
+  let total = 0, passed = 0, failed = 0, totalMs = 0
+  const byCode = {}
+  const t0 = performance.now()
+  try {
+    for (let it = 1; it <= pressure.value.iterations; it++) {
+      pressure.value.current = it
+      const r = await RunTestCases(ids, curEnvId.value, pressure.value.concurrency)
+      total += r.total
+      passed += r.passed
+      failed += r.failed
+      totalMs += r.durationMs
+      for (const res of (r.results || [])) {
+        const c = String(res.status || (res.error ? 'ERR' : 'NA'))
+        byCode[c] = (byCode[c] || 0) + 1
+      }
+    }
+    const wallMs = performance.now() - t0
+    pressure.value.result = {
+      total, passed, failed, totalMs, avgMs: Math.round(totalMs / total || 0),
+      tps: +(total / (wallMs / 1000)).toFixed(1),
+      errorRate: total ? +((failed / total) * 100).toFixed(1) : 0,
+      byCode,
+    }
+    ElMessage.success('压测完成')
+  } catch (e) {
+    ElMessage.error(String(e))
+  } finally {
+    pressure.value.running = false
+  }
+}
 </script>
 
 <template>
   <div class="test-center">
     <el-tabs v-model="tab" class="tc-tabs">
       <el-tab-pane label="测试用例" name="cases" />
+      <el-tab-pane label="用例导入" name="import" />
+      <el-tab-pane label="压力测试" name="pressure" />
       <el-tab-pane label="执行计划" name="plans" />
       <el-tab-pane label="测试报告" name="reports" />
     </el-tabs>
@@ -322,6 +475,9 @@ const passRate = computed(() => {
         <el-button type="primary" @click="openGenerate">✨ AI 生成用例（选择接口）</el-button>
         <el-button type="success" :loading="running" :disabled="!selectedCaseIds.length" @click="runSelected">
           运行选中用例
+        </el-button>
+        <el-button type="warning" :loading="running" :disabled="!cases.length" @click="runAll">
+          运行全部用例
         </el-button>
         <el-tooltip content="并发执行数（同时发起的请求数），可显著加快大量用例的运行" placement="top">
           <span class="conc-wrap">
@@ -335,6 +491,7 @@ const passRate = computed(() => {
         </el-select>
         <el-button :disabled="!selectedCaseIds.length" @click="addSelectedToPlan">加入计划</el-button>
         <span class="sel-tip">已选 {{ selectedCaseIds.length }} 条</span>
+        <el-button style="margin-left:auto" type="danger" plain @click="clearCases">清空用例</el-button>
       </div>
 
       <el-table :data="cases" style="width:100%" empty-text="暂无测试用例，点击「AI 生成用例」后生成">
@@ -367,11 +524,103 @@ const passRate = computed(() => {
       </el-table>
     </div>
 
+    <!-- ========== 用例导入 ========== -->
+    <div v-show="tab === 'import'" class="tc-page">
+      <el-tabs>
+        <el-tab-pane label="从浏览器捕获导入">
+          <div class="toolbar">
+            <el-button :loading="importing" @click="importSelectedCap" :disabled="!capSelected.length">导入选中（{{ capSelected.length }}）</el-button>
+            <el-button link type="primary" @click="refreshCaptured">刷新捕获列表</el-button>
+            <span class="tip">将「请求捕获」中抓到的请求转为测试用例</span>
+          </div>
+          <el-table :data="capturedList" style="width:100%" empty-text="暂无捕获请求，请先在「请求捕获」中开启捕获">
+            <el-table-column width="46">
+              <template #default="{ row }">
+                <el-checkbox :model-value="capSelected.includes(row.id)" @change="toggleCap(row.id)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="方法" width="90">
+              <template #default="{ row }"><span class="mtag" :class="methodClass(row.method)">{{ row.method }}</span></template>
+            </el-table-column>
+            <el-table-column prop="url" label="URL" min-width="320" />
+            <el-table-column prop="source" label="来源" width="140" />
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane label="从接口导入">
+          <div class="toolbar">
+            <el-button :loading="importing" @click="importSelectedApis" :disabled="!apiSelected.length">导入选中（{{ apiSelected.length }}）</el-button>
+            <span class="tip">将「接口管理」中的接口转为测试用例</span>
+          </div>
+          <el-table :data="projectApis()" style="width:100%" empty-text="暂无接口">
+            <el-table-column width="46">
+              <template #default="{ row }">
+                <el-checkbox :model-value="apiSelected.includes(row.id)" @change="toggleApi(row.id)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="方法" width="90">
+              <template #default="{ row }"><span class="mtag" :class="methodClass(row.method)">{{ row.method }}</span></template>
+            </el-table-column>
+            <el-table-column prop="name" label="接口名称" min-width="200" />
+            <el-table-column prop="url" label="URL" min-width="280" />
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+
+    <!-- ========== 压力测试 ========== -->
+    <div v-show="tab === 'pressure'" class="tc-page">
+      <div class="toolbar">
+        <span class="tip">勾选用例并设置并发数与轮次，对一组用例进行多轮并发压测，统计吞吐与错误率</span>
+      </div>
+      <div class="pressure-config">
+        <div class="pcfg-item">
+          <label>并发数</label>
+          <el-input-number v-model="pressure.concurrency" :min="1" :max="50" size="small" controls-position="right" />
+        </div>
+        <div class="pcfg-item">
+          <label>压测轮次</label>
+          <el-input-number v-model="pressure.iterations" :min="1" :max="100" size="small" controls-position="right" />
+        </div>
+        <el-button type="danger" :loading="pressure.running" :disabled="!pressure.selectedIds.length" @click="runPressure">
+          {{ pressure.running ? `压测中 ${pressure.current}/${pressure.iterations}` : '开始压测' }}
+        </el-button>
+        <span class="tip">已选 {{ pressure.selectedIds.length }} 条用例</span>
+      </div>
+
+      <el-table :data="cases" style="width:100%; margin-top:14px" empty-text="请在下方勾选压测用例">
+        <el-table-column width="46">
+          <template #default="{ row }">
+            <el-checkbox :model-value="pressure.selectedIds.includes(row.id)" @change="togglePressureCase(row.id)" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="用例名称" min-width="200" />
+        <el-table-column label="方法" width="90">
+          <template #default="{ row }"><span class="mtag" :class="methodClass(row.method)">{{ row.method }}</span></template>
+        </el-table-column>
+        <el-table-column prop="url" label="URL" min-width="280" />
+      </el-table>
+
+      <div v-if="pressure.result" class="pressure-result">
+        <div class="rs"><div class="rs-n">{{ pressure.result.total }}</div><div>总请求</div></div>
+        <div class="rs ok"><div class="rs-n">{{ pressure.result.passed }}</div><div>通过</div></div>
+        <div class="rs fail"><div class="rs-n">{{ pressure.result.failed }}</div><div>失败</div></div>
+        <div class="rs"><div class="rs-n">{{ pressure.result.tps }}</div><div>TPS</div></div>
+        <div class="rs"><div class="rs-n">{{ pressure.result.avgMs }}ms</div><div>平均耗时</div></div>
+        <div class="rs"><div class="rs-n">{{ pressure.result.errorRate }}%</div><div>错误率</div></div>
+        <div class="rs"><div class="rs-n">{{ pressure.result.totalMs }}ms</div><div>累计耗时</div></div>
+      </div>
+      <div v-if="pressure.result && pressure.result.byCode && Object.keys(pressure.result.byCode).length" class="pressure-codes">
+        <span class="tip">状态码分布：</span>
+        <el-tag v-for="(v, k) in pressure.result.byCode" :key="k" size="small" class="code-tag">{{ k }}: {{ v }}</el-tag>
+      </div>
+    </div>
+
     <!-- ========== 计划 ========== -->
     <div v-show="tab === 'plans'" class="tc-page">
       <div class="toolbar">
         <el-button type="primary" @click="openPlanEditor(null)">＋ 新建计划</el-button>
         <span class="tip">将用例编排为有序计划并绑定运行环境后统一执行</span>
+        <el-button style="margin-left:auto" type="danger" plain @click="clearPlans">清空计划</el-button>
       </div>
       <el-table :data="plans" style="width:100%" empty-text="暂无测试计划">
         <el-table-column prop="name" label="计划名称" min-width="180" />
@@ -402,6 +651,10 @@ const passRate = computed(() => {
 
     <!-- ========== 报告 ========== -->
     <div v-show="tab === 'reports'" class="tc-page">
+      <div class="toolbar">
+        <span class="tip">运行计划或用例后将生成测试报告</span>
+        <el-button style="margin-left:auto" type="danger" plain @click="clearReports">清空报告</el-button>
+      </div>
       <el-table :data="reports" style="width:100%" empty-text="暂无测试报告，运行计划或用例后将生成">
         <el-table-column prop="planName" label="计划 / 来源" min-width="180" />
         <el-table-column label="通过率" width="120">
@@ -699,4 +952,10 @@ const passRate = computed(() => {
 .report-summary pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 13px; line-height: 1.8; margin: 0; }
 .ar-row { font-size: 12px; padding: 3px 0; color: #4e5969; }
 .ar-error { font-size: 12px; padding: 3px 0; color: #f53f3f; }
+
+.pressure-config { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pcfg-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4e5969; }
+.pressure-result { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.pressure-codes { margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.code-tag { font-family: Consolas, monospace; }
 </style>
