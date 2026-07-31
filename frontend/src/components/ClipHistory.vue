@@ -107,15 +107,15 @@ function onKey(e) {
 }
 .clip-popup {
   width: 640px; max-width: 92vw; max-height: 70vh;
-  background: #fff; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.2);
+  background: var(--surface); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.2);
   display: flex; flex-direction: column; outline: none; overflow: hidden;
 }
 .clip-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid #e5e6eb;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
-.clip-title { font-weight: 600; color: #1d2129; }
-.clip-title small { color: #86909c; font-weight: 400; }
+.clip-title { font-weight: 600; color: var(--text); }
+.clip-title small { color: var(--text-muted); font-weight: 400; }
 .clip-actions :deep(.el-button.is-link) { font-size: 12px; }
 .clip-filter { padding: 10px 16px 0; }
 .clip-list { padding: 8px 8px; overflow-y: auto; flex: 1; }
@@ -123,19 +123,19 @@ function onKey(e) {
   border: 1px solid transparent; border-radius: 8px; padding: 8px 10px;
   cursor: pointer; transition: background .12s;
 }
-.clip-item:hover, .clip-item.active { background: #f2f3f5; border-color: #c9cdd4; }
+.clip-item:hover, .clip-item.active { background: var(--surface-2); border-color: var(--border); }
 .clip-text {
   margin: 0; font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 12px; color: #1d2129; white-space: pre-wrap; word-break: break-all;
+  font-size: 12px; color: var(--text); white-space: pre-wrap; word-break: break-all;
   max-height: 60px; overflow: hidden;
 }
 .clip-meta {
   display: flex; align-items: center; justify-content: space-between;
-  margin-top: 4px; color: #86909c; font-size: 11px;
+  margin-top: 4px; color: var(--text-muted); font-size: 11px;
 }
-.clip-empty { text-align: center; color: #86909c; padding: 30px; }
+.clip-empty { text-align: center; color: var(--text-muted); padding: 30px; }
 .clip-foot {
-  padding: 8px 16px; border-top: 1px solid #e5e6eb; color: #86909c; font-size: 11px;
+  padding: 8px 16px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px;
   text-align: center;
 }
 .clip-fade-enter-active, .clip-fade-leave-active { transition: opacity .15s; }

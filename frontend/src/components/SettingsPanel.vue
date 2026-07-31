@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser } from '../../wailsjs/go/main/App'
-import { store, saveNow, scheduleAutoSync, checkUpdate } from '../store'
+import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, THEMES } from '../store'
 import CloudSync from './CloudSync.vue'
 
 const dataPath = ref('')
@@ -15,6 +15,36 @@ const syncURL = ref('') // 实际可访问地址（http://IP:port），与启动
 // 版本与升级检测状态
 const checking = ref(false)
 const updateResult = ref(null)
+
+// 快捷键录制
+const recording = ref(false)
+const recText = ref('')
+function startRecord() {
+  if (recording.value) return
+  recording.value = true
+  recText.value = '请按下快捷键组合…（Esc 取消）'
+  const handler = (e) => {
+    e.preventDefault(); e.stopPropagation()
+    if (e.key === 'Escape') {
+      recording.value = false; recText.value = ''
+      window.removeEventListener('keydown', handler, true); return
+    }
+    const parts = []
+    if (e.ctrlKey) parts.push('Ctrl')
+    if (e.metaKey) parts.push('Meta')
+    if (e.shiftKey) parts.push('Shift')
+    if (e.altKey) parts.push('Alt')
+    let key = e.key
+    if (key === ' ') key = 'Space'
+    if (['Control', 'Meta', 'Shift', 'Alt'].includes(key)) return // 仅修饰键，继续等待
+    if (key.length === 1) key = key.toUpperCase()
+    parts.push(key)
+    store.data.settings.hotkey = parts.join('+')
+    recording.value = false
+    window.removeEventListener('keydown', handler, true)
+  }
+  window.addEventListener('keydown', handler, true)
+}
 
 onMounted(async () => {
   try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
@@ -204,10 +234,50 @@ async function toggleSync() {
       </div>
 
       <div class="card">
+        <div class="card-title">外观（主题）</div>
+        <el-form label-width="110px" label-position="left">
+          <el-form-item label="主题">
+            <el-radio-group :model-value="store.data.settings.theme" @change="setTheme">
+              <el-radio-button v-for="t in THEMES" :key="t.value" :value="t.value">{{ t.label }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="主题色">
+            <el-color-picker :model-value="store.data.settings.accent" @change="setAccent" />
+            <el-button link style="margin-left:8px" @click="setAccent('#165dff')">恢复默认蓝</el-button>
+            <span style="font-size:12px;color:#86909c;margin-left:10px">用于按钮、高亮等主色</span>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="card">
+        <div class="card-title">剪贴板记录</div>
+        <el-form label-width="120px" label-position="left">
+          <el-form-item label="自动监听">
+            <el-switch :model-value="store.data.settings.clipboard.monitor" @change="setClipboardMonitor" />
+            <span style="font-size:12px;color:#86909c;margin-left:10px">
+              开启后自动记录系统剪贴板中的文本
+            </span>
+          </el-form-item>
+          <el-form-item label="最大条数">
+            <el-input-number v-model="store.data.settings.clipboard.maxItems" :min="10" :max="2000" />
+          </el-form-item>
+          <el-form-item label="打开快捷键">
+            <el-button :type="recording ? 'warning' : 'default'" :loading="false" @click="startRecord">
+              {{ recording ? recText : (store.data.settings.hotkey || 'Ctrl+Shift+V') }}
+            </el-button>
+            <el-button link @click="store.data.settings.hotkey = 'Ctrl+Shift+V'; ElMessage.success('已恢复默认')">恢复默认</el-button>
+            <span style="font-size:12px;color:#86909c;margin-left:10px">
+              全局快捷键，按下即弹出剪贴板历史（Ctrl+` 始终可用）
+            </span>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="card">
         <div class="card-title">数据存储</div>
         <div style="font-size:13px; color:#4e5969">
           所有接口信息（含最近一次请求与响应）自动保存在本地：<br>
-          <code style="font-size:12px; color:#165dff">{{ dataPath }}</code>
+          <code style="font-size:12px; color:var(--primary)">{{ dataPath }}</code>
         </div>
       </div>
 

@@ -19,9 +19,30 @@ onMounted(() => { initStore(); initClipboardMonitor() })
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
 
-// 全局快捷键：Ctrl/⌘ + Shift + V（或反引号 `）调出剪贴板历史
+// 将快捷键组合字符串（如 "Ctrl+Shift+V" / "Meta+Shift+V" / "Ctrl+`"）解析为匹配器
+function matchCombo(e, combo) {
+  if (!combo) return false
+  const parts = combo.split('+').map(s => s.trim())
+  const keyPart = parts[parts.length - 1].toLowerCase()
+  const needCtrl = parts.includes('Ctrl')
+  const needMeta = parts.includes('Meta') || parts.includes('Cmd')
+  const needShift = parts.includes('Shift')
+  const needAlt = parts.includes('Alt')
+  const map = { '`': '`', 'space': ' ', 'esc': 'escape', 'up': 'arrowup', 'down': 'arrowdown', 'left': 'arrowleft', 'right': 'arrowright', 'enter': 'enter' }
+  const raw = e.key === ' ' ? 'space' : e.key
+  const norm = (map[raw.toLowerCase()] || raw).toLowerCase()
+  return (
+    !!e.ctrlKey === needCtrl &&
+    !!e.metaKey === needMeta &&
+    !!e.shiftKey === needShift &&
+    !!e.altKey === needAlt &&
+    norm === keyPart
+  )
+}
+// 全局快捷键：用户可自定义组合（默认 Ctrl+Shift+V）；反引号 ` 始终作为便捷别名保留
 function onGlobalKey(e) {
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+  const combo = store.data.settings.hotkey || 'Ctrl+Shift+V'
+  if (matchCombo(e, combo)) {
     e.preventDefault()
     toggleClipboardHistory()
   } else if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
@@ -147,34 +168,34 @@ const navs = [
   justify-content: flex-end;
   gap: 8px;
   padding: 8px 22px;
-  background: #fff;
-  border-bottom: 1px solid #e5e6eb;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
-.gb-label { font-size: 12px; color: #86909c; margin-right: 2px; }
+.gb-label { font-size: 12px; color: var(--text-muted); margin-right: 2px; }
 .global-bar .gb-env { width: 140px; }
-.global-bar :deep(.el-button.is-text) { color: #86909c; padding: 4px 8px; font-size: 12px; }
-.global-bar :deep(.el-button.is-text:hover) { color: #165dff; background: #f2f3f5; }
+.global-bar :deep(.el-button.is-text) { color: var(--text-muted); padding: 4px 8px; font-size: 12px; }
+.global-bar :deep(.el-button.is-text:hover) { color: var(--primary); background: var(--surface-2); }
 .api-header {
   display: flex; align-items: center; gap: 10px;
-  padding: 12px 22px 0; background: #fff;
+  padding: 12px 22px 0; background: var(--surface);
 }
 .api-name-input { width: 260px; font-weight: 600; }
 .api-desc-input { flex: 1; }
-.main-tabs { background: #fff; padding: 0 22px; border-bottom: 1px solid #e5e6eb; }
+.main-tabs { background: var(--surface); padding: 0 22px; border-bottom: 1px solid var(--border); }
 .main-tabs :deep(.el-tabs__header) { margin-bottom: 0; }
 .sb-resizer {
   width: 5px; flex-shrink: 0; cursor: col-resize; background: transparent;
   position: relative; z-index: 5; transition: background .15s;
 }
-.sb-resizer:hover, .sb-resizer.active { background: #165dff; }
+.sb-resizer:hover, .sb-resizer.active { background: var(--primary); }
 .boot-loading {
-  position: fixed; inset: 0; z-index: 9999; background: #f5f6f8;
+  position: fixed; inset: 0; z-index: 9999; background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
 }
 .boot-loading .spinner {
-  width: 38px; height: 38px; border: 4px solid #e5e6eb; border-top-color: #165dff;
+  width: 38px; height: 38px; border: 4px solid var(--border); border-top-color: var(--primary);
   border-radius: 50%; animation: spin .8s linear infinite;
 }
-.boot-loading .boot-text { color: #86909c; font-size: 14px; }
+.boot-loading .boot-text { color: var(--text-muted); font-size: 14px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ToolHash, ToolHmac, ToolCipher } from '../../wailsjs/go/main/App'
+import { store, callAI } from '../store'
 import SplitPane from './SplitPane.vue'
 
 const props = defineProps({ tool: { type: String, default: 'json' } })
@@ -339,6 +340,136 @@ function doSer() {
 function loadSerExample() {
   serInput.value = serMode.value === 'serialize' ? SER_EXAMPLE_JSON : SER_EXAMPLE_PHP
 }
+
+// ------------------------------------------------------------------
+// AI 命名 / 变量取名：中文描述 → 英文候选 → 驼峰 / 下划线 多风格
+// ------------------------------------------------------------------
+const nameMode = ref('dict') // dict: 词典模式 | ai: AI 模式
+const nameInput = ref('')
+const nameResults = ref([])
+const nameLoading = ref(false)
+const NAME_STYLES = [
+  { key: 'camel', label: '小驼峰', fn: toCamel },
+  { key: 'pascal', label: '大驼峰', fn: toPascal },
+  { key: 'snake', label: '下划线', fn: toSnake },
+  { key: 'const', label: '大写下划线', fn: toConst },
+]
+
+// 内置基础中→英词典（覆盖常见命名场景，可扩展）
+const CN_EN = {
+  用户: 'user', 用户名: 'username', 密码: 'password', 账号: 'account', 邮箱: 'email', 手机: 'phone', 电话: 'tel',
+  名称: 'name', 昵称: 'nickname', 头像: 'avatar', 性别: 'gender', 年龄: 'age', 生日: 'birthday', 地址: 'address',
+  创建: 'create', 创建时间: 'createTime', 更新: 'update', 更新时间: 'updateTime', 删除: 'delete', 修改: 'modify',
+  时间: 'time', 日期: 'date', 开始: 'start', 结束: 'end', 状态: 'status', 类型: 'type', 种类: 'category',
+  数量: 'count', 总数: 'total', 价格: 'price', 金额: 'amount', 金额单位: 'money', 订单: 'order', 商品: 'product',
+  列表: 'list', 详情: 'detail', 信息: 'info', 配置: 'config', 参数: 'param', 编号: 'id', 标识: 'id', 标识码: 'code',
+  编号: 'no', 代码: 'code', 描述: 'description', 备注: 'remark', 标题: 'title', 内容: 'content', 图片: 'image',
+  文件: 'file', 路径: 'path', 链接: 'url', 地址: 'address', 是否: 'is', 启用: 'enable', 禁用: 'disable', 开关: 'switch',
+  最大: 'max', 最小: 'min', 当前: 'current', 默认: 'default', 系统: 'system', 角色: 'role', 权限: 'permission',
+  部门: 'dept', 公司: 'company', 组织: 'org', 分组: 'group', 标签: 'tag', 分类: 'category', 等级: 'level',
+  余额: 'balance', 积分: 'point', 积分值: 'score', 流水: 'log', 记录: 'record', 日志: 'log', 消息: 'message',
+  通知: 'notice', 评论: 'comment', 收藏: 'favorite', 点赞: 'like', 关注: 'follow', 粉丝: 'fans', 访客: 'visitor',
+  登录: 'login', 登出: 'logout', 注册: 'register', 令牌: 'token', 会话: 'session', 缓存: 'cache', 版本: 'version',
+  数据库: 'db', 数据: 'data', 字段: 'field', 表: 'table', 列: 'column', 行: 'row', 主键: 'primaryKey',
+}
+
+// 简单分词：优先匹配长词，再逐字/词处理
+function cnToWords(text) {
+  let s = (text || '').trim().toLowerCase()
+  s = s.replace(/[，,。、；;：:（）()【】\[\]【】{}"'`~!@#$%^&*+=|\\/<>\?]/g, ' ').replace(/\s+/g, ' ').trim()
+  const words = []
+  // 长词优先替换
+  for (const cn of Object.keys(CN_EN).sort((a, b) => b.length - a.length)) {
+    let idx
+    while ((idx = s.indexOf(cn)) !== -1) {
+      const before = s.slice(0, idx).trim()
+      const after = s.slice(idx + cn.length).trim()
+      if (before) words.push(...cnToWords(before))
+      words.push(CN_EN[cn])
+      s = after
+    }
+  }
+  // 剩余逐个字符/拼音式处理：非词典中文按长度忽略，英文/数字原样保留
+  for (const ch of s.split(/\s+/)) {
+    if (!ch) continue
+    if (/^[a-z0-9]+$/i.test(ch)) words.push(ch.toLowerCase())
+  }
+  return words.filter(Boolean)
+}
+
+function toCamel(words) {
+  return words.map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1)).join('')
+}
+function toPascal(words) {
+  return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')
+}
+function toSnake(words) {
+  return words.map(w => w.toLowerCase()).join('_')
+}
+function toConst(words) {
+  return words.map(w => w.toUpperCase()).join('_')
+}
+
+function buildResults(words) {
+  return NAME_STYLES.map(st => ({ label: st.label, style: st.key, value: st.fn(words) }))
+}
+
+function genNames() {
+  if (!nameInput.value.trim()) { ElMessage.warning('请输入中文描述，例如：用户创建时间'); nameResults.value = []; return }
+  if (nameMode.value === 'ai') return genNamesByAI()
+  const words = cnToWords(nameInput.value)
+  if (!words.length) { ElMessage.warning('未识别到可用词汇，请补充描述或切换到 AI 模式'); nameResults.value = []; return }
+  nameResults.value = buildResults(words)
+}
+
+// AI 模式：调用大模型直接产出 4 种风格命名，更地道、可识别业务语义
+async function genNamesByAI() {
+  nameLoading.value = true
+  try {
+    const prompt = `你是一个编程命名助手。请将下面的中文描述转换为英文变量/函数/数据库字段命名，输出严格 4 行 JSON 数组，每个元素是一个对象 {"label":"风格名","value":"命名结果"}，仅包含以下 4 个风格，不要解释、不要多余文字：
+1. 小驼峰 camelCase
+2. 大驼峰 PascalCase
+3. 下划线 snake_case
+4. 大写下划线 CONST_CASE
+要求：命名简洁规范、符合常见编程约定、用英文单词（可缩写）。中文描述是：${nameInput.value.trim()}`
+    const content = await callAI([
+      { role: 'system', content: '你是专业的代码命名助手，只输出符合要求的 JSON，不要任何额外说明。' },
+      { role: 'user', content: prompt },
+    ], { temperature: 0.2 })
+    const parsed = parseAiNames(content)
+    if (!parsed.length) throw new Error('AI 返回内容无法解析')
+    nameResults.value = parsed
+  } catch (e) {
+    ElMessage.error('AI 命名失败：' + (e && e.message ? e.message : e))
+    nameResults.value = []
+  } finally {
+    nameLoading.value = false
+  }
+}
+
+// 从 AI 返回中尽量稳健地提取命名数组（兼容 ```json 代码块 / 裸 JSON / 含噪点）
+function parseAiNames(content) {
+  let s = (content || '').trim()
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) s = fence[1].trim()
+  // 截取第一个 [ 到最后一个 ] 之间的内容
+  const a = s.indexOf('['); const b = s.lastIndexOf(']')
+  if (a !== -1 && b !== -1 && b > a) s = s.slice(a, b + 1)
+  let arr = null
+  try { arr = JSON.parse(s) } catch { return [] }
+  if (!Array.isArray(arr)) return []
+  const valid = arr.filter(x => x && typeof x.value === 'string' && x.value.trim())
+  // 按 4 种风格顺序补全，避免缺失
+  const order = ['camel', 'pascal', 'snake', 'const']
+  const labels = { camel: '小驼峰', pascal: '大驼峰', snake: '下划线', const: '大写下划线' }
+  const map = {}
+  valid.forEach((x, i) => { map[order[i] || ('x' + i)] = { label: x.label || labels[order[i]] || '命名', style: order[i] || ('x' + i), value: x.value.trim() } })
+  const out = []
+  for (const k of order) if (map[k]) out.push(map[k])
+  return out
+}
+function clearNames() { nameInput.value = ''; nameResults.value = [] }
+
 </script>
 
 <template>
@@ -541,6 +672,38 @@ function loadSerExample() {
           </div>
         </div>
       </template>
+
+      <!-- ===================== AI 命名 / 变量取名 ===================== -->
+      <template v-else-if="props.tool === 'namer'">
+        <div class="tb-block">
+          <div class="tb-line">
+            <el-radio-group v-model="nameMode">
+              <el-radio-button value="dict">词典模式</el-radio-button>
+              <el-radio-button value="ai">AI 模式</el-radio-button>
+            </el-radio-group>
+            <span class="tb-tip" v-if="nameMode === 'ai'">
+              使用已配置的 AI（设置 → AI 配置）生成更地道的命名；未配置时请先填写接口地址与 Key。
+            </span>
+            <span class="tb-tip" v-else>本地词典模式，无需联网，内置常用中→英映射。</span>
+          </div>
+          <div class="tb-line">
+            <span class="cf-label">中文描述</span>
+            <el-input v-model="nameInput" style="width: 420px"
+              placeholder="例如：用户创建时间、订单总金额、是否启用" @keyup.enter="genNames" />
+            <el-button type="primary" :loading="nameLoading" @click="genNames">生成命名</el-button>
+            <el-button @click="clearNames">清空</el-button>
+          </div>
+
+          <div v-if="nameResults.length" class="name-list">
+            <div v-for="r in nameResults" :key="r.style" class="name-item" @click="copyText(r.value)">
+              <span class="name-label">{{ r.label }}</span>
+              <code class="name-value">{{ r.value }}</code>
+              <span class="name-copy">点击复制</span>
+            </div>
+          </div>
+          <div v-else-if="!nameLoading" class="tb-empty">在上方输入中文描述，点击「生成命名」获取候选名称</div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -551,7 +714,7 @@ function loadSerExample() {
 
 .tb-row { flex: 1; min-height: 0; display: flex; align-items: stretch; }
 .tb-col { flex: 1; width: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.tb-col-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; color: #4e5969; flex-shrink: 0; }
+.tb-col-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; color: var(--text); flex-shrink: 0; }
 .tb-col :deep(.el-textarea) { flex: 1; display: flex; min-height: 0; }
 .tb-col :deep(.el-textarea__inner) { flex: 1; width: 100%; height: 100%; resize: none; }
 
@@ -559,12 +722,24 @@ function loadSerExample() {
 
 .crypto-form { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
 .cf-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.cf-label { font-size: 13px; color: #4e5969; min-width: 42px; }
+.cf-label { font-size: 13px; color: var(--text); min-width: 42px; }
 
 .tb-block { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
 .tb-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tb-tip { font-size: 12px; color: #86909c; }
-.tb-code { background: #f2f3f5; padding: 3px 8px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; color: #1d2129; }
+.tb-tip { font-size: 12px; color: var(--text-muted); }
+.tb-code { background: var(--surface-2); padding: 3px 8px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; color: var(--text); }
 .tb-code.wide { min-width: 360px; }
-.tb-empty { color: #86909c; font-size: 13px; padding: 8px 0; }
+.tb-empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
+
+.name-list { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.name-item {
+  display: flex; align-items: center; gap: 14px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; transition: all .15s;
+}
+.name-item:hover { border-color: var(--primary); background: var(--primary-soft); }
+.name-label { width: 96px; flex-shrink: 0; color: var(--text-muted); font-size: 13px; }
+.name-value { flex: 1; font-family: Consolas, monospace; font-size: 15px; color: var(--primary); word-break: break-all; }
+.name-copy { flex-shrink: 0; font-size: 12px; color: var(--text-muted); }
+.name-item:hover .name-copy { color: var(--primary); }
 </style>

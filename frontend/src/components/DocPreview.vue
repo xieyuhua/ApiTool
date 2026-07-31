@@ -138,10 +138,10 @@ function highlightVars(text) {
           <template v-if="part.rows.length">
             <h4>{{ part.title }}</h4>
             <table>
-              <thead><tr><th>字段名</th><th>类型</th><th>必填</th><th>说明</th><th>示例</th></tr></thead>
+              <thead><tr><th style="width:32%;min-width:220px">字段名</th><th>类型</th><th>必填</th><th>说明</th><th>示例</th></tr></thead>
               <tbody>
                 <tr v-for="(r, i) in part.rows" :key="i">
-                  <td :style="{ paddingLeft: (10 + r.depth * 18) + 'px', fontFamily: 'Consolas, monospace' }">
+                  <td class="doc-fname" :style="{ paddingLeft: (10 + r.depth * 18) + 'px', fontFamily: 'Consolas, monospace' }">
                     {{ (r.depth ? '└ ' : '') + r.f.name }}
                   </td>
                   <td style="color:#165dff">{{ r.f.type }}</td>
@@ -171,4 +171,6 @@ function highlightVars(text) {
 
 <style scoped>
 .common-tip { font-size: 12px; color: #c2c7cf; font-weight: 400; }
+/* 响应/请求参数：字段名列加宽且不换行，超长时显示省略号 */
+.doc-fname { white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 </style>

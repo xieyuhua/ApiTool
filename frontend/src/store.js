@@ -54,11 +54,86 @@ export const store = reactive({
       { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] }, testCases: [], testPlans: [], testReports: [] },
     ],
     currentProjectId: 'default',
-    settings: { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' },
+    settings: {
+      aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080',
+      theme: 'light',            // light | dark | auto
+      accent: '#165dff',         // 主题色（主色）
+      hotkey: 'Ctrl+Shift+V',    // 调出剪贴板历史的快捷键组合
+      clipboard: { monitor: true, maxItems: 200 },
+    },
     plugins: { connections: [] },
     clipboard: { history: [] },
   },
 })
+
+// ---------------- 主题 ----------------
+export const THEMES = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'auto', label: '跟随系统' },
+]
+
+function hexToRgb(hex) {
+  hex = (hex || '').replace('#', '')
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('')
+  const n = parseInt(hex, 16)
+  if (isNaN(n)) return null
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+function rgbToHex(r, g, b) {
+  const h = x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')
+  return '#' + h(r) + h(g) + h(b)
+}
+function mix(rgb, target, amt) { return rgb.map((c, i) => Math.round(c + (target[i] - c) * amt)) }
+
+// 应用主色：同步写入 Element Plus 主色变量及其衍生明暗档位
+export function applyAccent(hex) {
+  const root = document.documentElement
+  const rgb = hexToRgb(hex)
+  if (!rgb) return
+  root.style.setProperty('--primary', hex)
+  root.style.setProperty('--el-color-primary', hex)
+  const map = {
+    '--el-color-primary-light-3': mix(rgb, [255, 255, 255], 0.3),
+    '--el-color-primary-light-5': mix(rgb, [255, 255, 255], 0.5),
+    '--el-color-primary-light-7': mix(rgb, [255, 255, 255], 0.7),
+    '--el-color-primary-light-8': mix(rgb, [255, 255, 255], 0.8),
+    '--el-color-primary-light-9': mix(rgb, [255, 255, 255], 0.9),
+    '--el-color-primary-dark-2': mix(rgb, [0, 0, 0], 0.2),
+  }
+  for (const k in map) root.style.setProperty(k, rgbToHex(map[k][0], map[k][1], map[k][2]))
+}
+
+// 应用主题：写入 data-theme（light/dark 解析后的值）并切换 Element Plus 的 dark 类
+export function applyTheme() {
+  const s = store.data.settings
+  const choice = s.theme || 'light'
+  let resolved = choice
+  if (choice === 'auto' && window.matchMedia) {
+    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  const root = document.documentElement
+  root.setAttribute('data-theme', resolved)
+  root.classList.toggle('dark', resolved === 'dark')
+  applyAccent(s.accent || '#165dff')
+}
+
+export function setTheme(t) {
+  store.data.settings.theme = t
+  applyTheme()
+  saveNow()
+}
+export function setAccent(c) {
+  if (!c) c = '#165dff'
+  store.data.settings.accent = c
+  applyAccent(c)
+  saveNow()
+}
+
+// 当前生效的明暗（用于 UI 回显）
+export function effectiveTheme() {
+  return document.documentElement.getAttribute('data-theme') || 'light'
+}
 
 // 当前项目（含独立的目录/接口/环境）
 export function currentProject() {
@@ -169,9 +244,15 @@ async function loadInto() {
     p.testReports ||= []
     p.apis.forEach(normalizeApi)
   }
-  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080' }
+  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080', theme: 'light', accent: '#165dff', hotkey: 'Ctrl+Shift+V', clipboard: { monitor: true, maxItems: 200 } }
   d.settings.version ||= '1.0.0'
   d.settings.updateURL ||= 'http://127.0.0.1:8080'
+  d.settings.theme ||= 'light'
+  d.settings.accent ||= '#165dff'
+  d.settings.hotkey ||= 'Ctrl+Shift+V'
+  d.settings.clipboard ||= { monitor: true, maxItems: 200 }
+  if (typeof d.settings.clipboard.maxItems !== 'number') d.settings.clipboard.maxItems = 200
+  if (typeof d.settings.clipboard.monitor !== 'boolean') d.settings.clipboard.monitor = true
   d.plugins ||= { connections: [] }
   d.plugins.connections ||= []
   d.clipboard ||= { history: [] }
@@ -198,6 +279,14 @@ export async function initStore() {
     try { store.appVersion = await GetVersion() } catch {}
   }
   watch(() => store.data, () => { scheduleSave(); scheduleAutoSync() }, { deep: true })
+  applyTheme() // 应用主题（含跟随系统）
+  try {
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if ((store.data.settings.theme || 'light') === 'auto') applyTheme()
+      })
+    }
+  } catch {}
   if (ok) await autoPullOnStart()
 }
 
@@ -239,6 +328,39 @@ export async function cloudApi(path, opts = {}) {
   try { body = await r.json() } catch { /* ignore */ }
   if (!r.ok) throw new Error((body && body.error) || ('请求失败 ' + r.status))
   return body
+}
+
+// ---------------- AI（OpenAI 兼容） ----------------
+// 统一的聊天补全调用，供字段描述生成、命名工具等复用。
+export async function callAI(messages, opts = {}) {
+  const s = store.data.settings
+  const base = (s.aiBaseUrl || '').trim().replace(/\/+$/, '')
+  if (!base) throw new Error('未配置 AI 接口地址（设置 → AI 配置）')
+  if (!s.aiKey) throw new Error('未配置 AI API Key（设置 → AI 配置）')
+  const model = s.aiModel || 'gpt-4o-mini'
+  const url = base.replace(/\/v1$/, '') + '/v1/chat/completions'
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null
+  const timeout = (s.timeoutSec || 30) * 1000
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + s.aiKey,
+      },
+      body: JSON.stringify({ model, messages, temperature: opts.temperature ?? 0.3, stream: false }),
+      signal: ctrl ? ctrl.signal : undefined,
+    })
+    let body = null
+    try { body = await r.json() } catch { /* ignore */ }
+    if (!r.ok) throw new Error((body && body.error && (body.error.message || body.error)) || ('AI 请求失败 ' + r.status))
+    const content = body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content
+    if (!content) throw new Error('AI 返回内容为空')
+    return content
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 // 自动同步是否启用（需开启开关且已登录且已配置地址）
@@ -650,12 +772,13 @@ export function toggleClipboardHistory(v) {
 
 let clipTimer = null
 let lastClip = ''
-// 轮询系统剪贴板，发生变化时追加到历史（去重、上限 200 条）
+// 轮询系统剪贴板，发生变化时追加到历史（去重、上限可自定义）
 export function initClipboardMonitor() {
   if (clipTimer) return
   const tick = async () => {
     try {
-      if (hasGoBridge()) {
+      // 监听开关关闭时不读取系统剪贴板，但仍保持轮询以便随时恢复
+      if (store.data.settings.clipboard.monitor && hasGoBridge()) {
         const t = await GetClipboardText()
         if (t && t !== lastClip) {
           lastClip = t
@@ -672,12 +795,18 @@ export function stopClipboardMonitor() {
   if (clipTimer) { clearTimeout(clipTimer); clipTimer = null }
 }
 
+export function setClipboardMonitor(on) {
+  store.data.settings.clipboard.monitor = !!on
+  saveNow()
+}
+
 export function addClip(text) {
   if (!text) return
   const hist = store.data.clipboard.history
   if (hist.length && hist[0].text === text) return
   hist.unshift({ id: uid(), text, time: new Date().toISOString() })
-  if (hist.length > 200) hist.length = 200
+  const max = (store.data.settings.clipboard && store.data.settings.clipboard.maxItems) || 200
+  if (hist.length > max) hist.length = max
   saveNow()
 }
 

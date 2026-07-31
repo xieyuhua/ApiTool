@@ -2,6 +2,7 @@
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../store'
+import { parseCli } from '../cli'
 import LogPanel from './LogPanel.vue'
 
 // 左侧选项卡：目录 / 日志 切换（持久化）
@@ -21,16 +22,25 @@ const newApiVisible = ref(false)
 const newApiName = ref('')
 const newApiUrl = ref('')
 const newApiParentId = ref('')
+const newApiTab = ref('form')
 
 function openNewApi(parentId) {
   newApiParentId.value = parentId || ''
   newApiName.value = ''
   newApiUrl.value = ''
+  resetNewApi()
   newApiVisible.value = true
 }
 
 function confirmNewApi() {
   const api = addApi(newApiParentId.value)
+  // 命令行导入优先：若解析出完整请求则覆盖
+  if (cliImport.value && cliParsed.value) {
+    applyParsedToApi(api, cliParsed.value)
+    if (newApiName.value.trim()) api.name = newApiName.value.trim()
+    newApiVisible.value = false
+    return
+  }
   const raw = newApiUrl.value.trim()
   if (raw) {
     let u
@@ -52,6 +62,58 @@ function confirmNewApi() {
   if (newApiName.value.trim()) api.name = newApiName.value.trim()
   newApiVisible.value = false
 }
+
+function applyParsedToApi(api, p) {
+  api.method = p.method || 'GET'
+  api.url = p.url
+  api.query = (p.queryArr || []).map(q => ({ key: q.key, value: q.value, description: '', enabled: true }))
+  if (p.headersArr && p.headersArr.length) {
+    for (const h of p.headersArr) {
+      if (/^content-type$/i.test(h.key)) continue
+      api.headers.push({ key: h.key, value: h.value, description: '', enabled: true })
+    }
+  }
+  if (p.body) {
+    api.body = p.body
+    api.bodyType = p.bodyType || 'text'
+  }
+  ElMessage.success('已从命令行解析出 ' + (p.method || 'GET') + ' 请求（含 ' +
+    api.headers.length + ' 个请求头、' + api.query.length + ' 个 Query）')
+}
+
+// 命令行导入
+const cliImport = ref(false)
+const cliText = ref('')
+const cliParsed = ref(null)
+const cliError = ref('')
+
+watch(cliText, (v) => {
+  cliError.value = ''
+  cliParsed.value = null
+  if (!v || !v.trim()) return
+  try {
+    const p = parseCli(v)
+    if (!p || !p.url) {
+      cliError.value = '未能从命令中识别到 URL，请检查格式（支持 curl / httpie / bash / powershell）'
+      return
+    }
+    cliParsed.value = p
+  } catch (e) {
+    cliError.value = '解析失败：' + String(e)
+  }
+})
+
+function resetNewApi() {
+  cliImport.value = false
+  cliText.value = ''
+  cliParsed.value = null
+  cliError.value = ''
+}
+
+const cliPlaceholder = `例如：
+curl -X POST 'https://api.example.com/user' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"name":"tom"}'`
 
 function filterNode(value, node) {
   if (!value) return true
@@ -360,17 +422,35 @@ async function removeProjectNow() {
       <LogPanel />
     </div>
 
-    <el-dialog v-model="newApiVisible" title="新建接口" width="520px">
-      <el-form label-width="80px">
-        <el-form-item label="接口名称">
-          <el-input v-model="newApiName" placeholder="如：获取用户列表" @keyup.enter="confirmNewApi" />
-        </el-form-item>
-        <el-form-item label="接口地址">
-          <el-input v-model="newApiUrl" placeholder="粘贴完整 URL，如 https://api.example.com/user/list?page=1&size=10"
-            @keyup.enter="confirmNewApi" />
-        </el-form-item>
-      </el-form>
-      <div style="font-size:12px;color:#86909c">支持直接粘贴带 Query 参数的 URL，将自动解析出地址与 Query 参数</div>
+    <el-dialog v-model="newApiVisible" title="新建接口" width="560px" @closed="resetNewApi">
+      <el-tabs v-model="newApiTab">
+        <el-tab-pane label="填写 / URL" name="form">
+          <el-form label-width="80px">
+            <el-form-item label="接口名称">
+              <el-input v-model="newApiName" placeholder="如：获取用户列表" @keyup.enter="confirmNewApi" />
+            </el-form-item>
+            <el-form-item label="接口地址">
+              <el-input v-model="newApiUrl" placeholder="粘贴完整 URL，如 https://api.example.com/user/list?page=1&size=10"
+                @keyup.enter="confirmNewApi" />
+            </el-form-item>
+          </el-form>
+          <div style="font-size:12px;color:#86909c">支持直接粘贴带 Query 参数的 URL，将自动解析出地址与 Query 参数</div>
+        </el-tab-pane>
+        <el-tab-pane label="粘贴命令行" name="cli">
+          <div style="font-size:12px;color:#86909c;margin-bottom:8px">
+            粘贴 curl / httpie / bash / powershell 命令，自动解析出方法、地址、请求头、Query 与请求体。
+          </div>
+          <el-input v-model="cliText" type="textarea" :rows="8" :placeholder="cliPlaceholder" />
+          <div v-if="cliError" style="color:#f53f3f;font-size:12px;margin-top:6px">{{ cliError }}</div>
+          <div v-else-if="cliParsed" style="font-size:12px;margin-top:6px;color:#00b42a">
+            已识别：{{ cliParsed.method }} {{ cliParsed.url }}
+            <span v-if="cliParsed.headersArr?.length">（{{ cliParsed.headersArr.length }} 请求头</span>
+            <span v-if="cliParsed.queryArr?.length"> / {{ cliParsed.queryArr.length }} Query</span>
+            <span v-if="cliParsed.headersArr?.length || cliParsed.queryArr?.length">）</span>
+            <span v-if="cliParsed.body"> / 含请求体</span>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
       <template #footer>
         <el-button @click="newApiVisible = false">取消</el-button>
         <el-button type="primary" @click="confirmNewApi">创建</el-button>

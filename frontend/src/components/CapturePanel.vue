@@ -7,6 +7,7 @@ import {
   BuildCapturedOpenAPI, CopyToClipboard, ImportCapturedAsTestCases,
 } from '../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore } from '../store'
+import { FORMATS } from '../cli'
 
 const info = reactive({ running: false, addr: '', port: '', url: '', token: '', count: 0 })
 const list = ref([])
@@ -142,6 +143,31 @@ async function copyOpenAPI() {
   } catch (e) { ElMessage.error(String(e)) }
 }
 
+// 将捕获记录转换为命令行生成所需的请求对象
+function capturedToReq(rec) {
+  const headersArr = (rec.headers || []).map(h => ({ key: h.key, value: h.value }))
+  const queryArr = (rec.query || []).map(q => ({ key: q.key, value: q.value }))
+  return {
+    method: rec.method || 'GET',
+    url: rec.url || '',
+    headersArr,
+    queryArr,
+    body: rec.body || '',
+    bodyType: rec.bodyType || (rec.body ? 'text' : 'none'),
+  }
+}
+
+async function copyAsCommand(key) {
+  if (!detail.value) return
+  const fmt = FORMATS.find(f => f.key === key)
+  if (!fmt) return
+  try {
+    const text = fmt.gen(capturedToReq(detail.value))
+    await CopyToClipboard(text)
+    ElMessage.success(`已复制为 ${fmt.label} 命令`)
+  } catch (e) { ElMessage.error(String(e)) }
+}
+
 onMounted(() => {
   refresh()
   timer.value = setInterval(refresh, 2500)
@@ -269,7 +295,18 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
     <el-dialog v-model="detail" title="请求详情" width="760px" @close="detail = null">
       <template v-if="detail">
         <div class="dt-line"><span>方法</span><b>{{ detail.method }}</b></div>
-        <div class="dt-line"><span>URL</span><b style="word-break:break-all">{{ detail.url }}</b></div>
+        <div class="dt-line">
+          <span>URL</span>
+          <b style="word-break:break-all">{{ detail.url }}</b>
+          <el-dropdown trigger="click" size="small" @command="copyAsCommand" style="margin-left:auto">
+            <el-button size="small" type="primary" plain>复制为 ▾</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="f in FORMATS" :key="f.key" :command="f.key">{{ f.label }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
         <div class="dt-line"><span>页面</span><b style="word-break:break-all">{{ detail.pageUrl }}</b></div>
         <div class="dt-line"><span>状态</span><b>{{ detail.statusCode }} {{ detail.statusText }}</b></div>
         <div v-if="detail.error" class="dt-line"><span>错误</span><b style="color:#f53f3f">{{ detail.error }}</b></div>
