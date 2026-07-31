@@ -54,6 +54,23 @@ func (a *App) startup(ctx context.Context) {
 	a.loadOrCreateCaptureToken()
 }
 
+// showWindow 从后台恢复主窗口
+func (a *App) showWindow() {
+	runtime.WindowShow(a.ctx)
+	runtime.WindowUnminimise(a.ctx)
+}
+
+// hideWindow 隐藏主窗口到后台常驻（点窗口关闭按钮时由 HideWindowOnClose 自动触发；
+// 这里暴露给前端「隐藏窗口」按钮使用）
+func (a *App) hideWindow() {
+	runtime.WindowHide(a.ctx)
+}
+
+// quitApp 彻底退出应用（绕过 HideWindowOnClose 的后台常驻行为）
+func (a *App) quitApp() {
+	runtime.Quit(a.ctx)
+}
+
 func defaultData() AppData {
 	return AppData{
 		Projects: []Project{
@@ -73,6 +90,11 @@ func defaultData() AppData {
 			TimeoutSec: 30,
 			Version:    AppVersion,
 			UpdateURL:  DefaultUpdateURL,
+			Theme:      "light",
+			Accent:     "#165dff",
+			Hotkey:     "Ctrl+Shift+V",
+			AutoSync:   false,
+			Clipboard: ClipSettings{Monitor: true, MaxItems: 200},
 		},
 		Plugins:   PluginsData{Connections: []PluginConn{}},
 		Clipboard: ClipData{History: []ClipItem{}},

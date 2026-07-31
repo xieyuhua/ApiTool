@@ -3,7 +3,7 @@ import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../store'
 import { parseCli, FORMATS } from '../cli'
-import { CopyToClipboard } from '../../wailsjs/go/main/App'
+import { CopyToClipboard, ShowWindow, HideWindow, QuitApp } from '../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
 
 // 左侧选项卡：目录 / 日志 切换（持久化）
@@ -35,8 +35,8 @@ function openNewApi(parentId) {
 
 function confirmNewApi() {
   const api = addApi(newApiParentId.value)
-  // 命令行导入优先：若解析出完整请求则覆盖
-  if (cliImport.value && cliParsed.value) {
+  // 命令行导入分支：当前在「粘贴命令行」标签页且已解析出请求
+  if (newApiTab.value === 'cli' && cliParsed.value) {
     applyParsedToApi(api, cliParsed.value)
     if (newApiName.value.trim()) api.name = newApiName.value.trim()
     newApiVisible.value = false
@@ -83,7 +83,6 @@ function applyParsedToApi(api, p) {
 }
 
 // 命令行导入
-const cliImport = ref(false)
 const cliText = ref('')
 const cliParsed = ref(null)
 const cliError = ref('')
@@ -105,7 +104,6 @@ watch(cliText, (v) => {
 })
 
 function resetNewApi() {
-  cliImport.value = false
   cliText.value = ''
   cliParsed.value = null
   cliError.value = ''
@@ -125,6 +123,18 @@ async function copyParsedAs(key) {
     await CopyToClipboard(text)
     ElMessage.success(`已复制为 ${fmt.label} 命令`)
   } catch (e) { ElMessage.error(String(e)) }
+}
+
+// 窗口控制：关闭即后台常驻，可在此恢复或彻底退出
+async function hideToTray() {
+  try { await HideWindow() } catch (e) { ElMessage.error(String(e)) }
+}
+async function quitApp() {
+  try {
+    await ElMessageBox.confirm('确定要退出 ApiTool 吗？', '退出', { type: 'warning' })
+      .then(() => QuitApp())
+      .catch(() => {})
+  } catch (e) { /* 取消 */ }
 }
 
 function filterNode(value, node) {
@@ -497,10 +507,24 @@ async function removeProjectNow() {
         </template>
       </div>
     </div>
+
+    <div class="sb-footer">
+      <span class="sb-tip">点窗口关闭将后台常驻，不退出</span>
+      <div class="sb-foot-btns">
+        <el-button size="small" text @click="hideToTray">隐藏窗口</el-button>
+        <el-button size="small" text type="danger" @click="quitApp">退出</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.sb-footer {
+  flex-shrink: 0; border-top: 1px solid var(--border);
+  padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.sb-tip { font-size: 11px; color: #86909c; line-height: 1.4; }
+.sb-foot-btns { display: flex; justify-content: flex-end; gap: 4px; }
 .sb-proj { display: flex; gap: 6px; align-items: center; padding: 10px 12px 6px; }
 .sb-tabs { display: flex; border-bottom: 1px solid #f0f1f3; flex-shrink: 0; }
 .sb-tab {

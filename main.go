@@ -22,6 +22,8 @@ func main() {
 		Height: 860,
 		MinWidth:  1080,
 		MinHeight: 700,
+		// 点击窗口关闭时隐藏到后台常驻，而不是直接退出
+		HideWindowOnClose: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

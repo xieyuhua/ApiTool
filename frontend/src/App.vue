@@ -39,16 +39,30 @@ function matchCombo(e, combo) {
     norm === keyPart
   )
 }
-// 全局快捷键：用户可自定义组合（默认 Ctrl+Shift+V）；反引号 ` 始终作为便捷别名保留
+// 全局快捷键：
+// - 用户在「设置」中自定义的快捷键（默认 Ctrl+Shift+V）
+// - Ctrl+` 始终可用，作为弹出剪贴板历史的便捷键（无论设置如何）
 function onGlobalKey(e) {
-  const combo = store.data.settings.hotkey || 'Ctrl+Shift+V'
-  if (matchCombo(e, combo)) {
+  const hasModifier = e.ctrlKey || e.metaKey
+  // 反引号 `：始终弹出剪贴板历史
+  if ((e.key === '`' || e.code === 'Backquote') && hasModifier) {
     e.preventDefault()
     toggleClipboardHistory()
-  } else if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault()
-    toggleClipboardHistory()
+    focusSearch()
+    return
   }
+  const combo = store.data.settings.hotkey || 'Ctrl+Shift+V'
+  if (combo && matchCombo(e, combo)) {
+    e.preventDefault()
+    toggleClipboardHistory()
+    focusSearch()
+  }
+}
+function focusSearch() {
+  setTimeout(() => {
+    const el = document.querySelector('.clip-search input, input[placeholder*="搜索"]')
+    if (el) el.focus()
+  }, 30)
 }
 window.addEventListener('keydown', onGlobalKey)
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))

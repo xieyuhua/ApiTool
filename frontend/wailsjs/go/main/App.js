@@ -357,3 +357,15 @@ export function ToolHash(arg1, arg2) {
 export function ToolHmac(arg1, arg2, arg3) {
   return window['go']['main']['App']['ToolHmac'](arg1, arg2, arg3);
 }
+
+export function ShowWindow() {
+  return window['go']['main']['App']['ShowWindow']();
+}
+
+export function HideWindow() {
+  return window['go']['main']['App']['HideWindow']();
+}
+
+export function QuitApp() {
+  return window['go']['main']['App']['QuitApp']();
+}

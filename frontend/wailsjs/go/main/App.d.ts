@@ -179,3 +179,9 @@ export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:
 export function ToolHash(arg1:string,arg2:string):Promise<main.ToolResult>;
 
 export function ToolHmac(arg1:string,arg2:string,arg3:string):Promise<main.ToolResult>;
+
+export function ShowWindow():Promise<void>;
+
+export function HideWindow():Promise<void>;
+
+export function QuitApp():Promise<void>;
