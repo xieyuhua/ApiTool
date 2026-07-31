@@ -432,10 +432,8 @@ func paramToKV(p map[string]interface{}) KV {
 			if ex, ok := sch["example"]; ok {
 				kv.Value = strVal(ex)
 			}
-			if kv.Value == "" {
-				kv.Value = strVal(sch["type"])
-			}
 		}
+		// 无 example 时不再用类型名兜底，Value 保持为空
 	}
 	return kv
 }
