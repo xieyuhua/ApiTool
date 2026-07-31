@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ToolHash, ToolHmac, ToolCipher } from '../../wailsjs/go/main/App'
+import SplitPane from './SplitPane.vue'
 
 const props = defineProps({ tool: { type: String, default: 'json' } })
 
@@ -345,22 +346,26 @@ function loadSerExample() {
     <div class="tb-panel">
       <!-- ===================== JSON ===================== -->
       <template v-if="props.tool === 'json'">
-        <div class="tb-row">
-          <div class="tb-col">
-            <div class="tb-col-hd">
-              <span>输入</span>
-              <el-button size="small" text @click="jsonInput = jsonOutput">← 取结果</el-button>
+        <SplitPane storage-key="tb-json" class="tb-row">
+          <template #left>
+            <div class="tb-col">
+              <div class="tb-col-hd">
+                <span>输入</span>
+                <el-button size="small" text @click="jsonInput = jsonOutput">← 取结果</el-button>
+              </div>
+              <el-input v-model="jsonInput" type="textarea" placeholder="粘贴 JSON 文本" />
             </div>
-            <el-input v-model="jsonInput" type="textarea" placeholder="粘贴 JSON 文本" />
-          </div>
-          <div class="tb-col">
-            <div class="tb-col-hd">
-              <span>输出</span>
-              <el-button size="small" text type="primary" :disabled="!jsonOutput" @click="copyText(jsonOutput)">复制</el-button>
+          </template>
+          <template #right>
+            <div class="tb-col">
+              <div class="tb-col-hd">
+                <span>输出</span>
+                <el-button size="small" text type="primary" :disabled="!jsonOutput" @click="copyText(jsonOutput)">复制</el-button>
+              </div>
+              <el-input v-model="jsonOutput" type="textarea" readonly placeholder="处理结果" />
             </div>
-            <el-input v-model="jsonOutput" type="textarea" readonly placeholder="处理结果" />
-          </div>
-        </div>
+          </template>
+        </SplitPane>
         <div class="tb-actions">
           <el-button type="primary" @click="fmtJSON">格式化</el-button>
           <el-button @click="cmpJSON">压缩</el-button>
@@ -372,19 +377,23 @@ function loadSerExample() {
 
       <!-- ===================== SQL ===================== -->
       <template v-else-if="props.tool === 'sql'">
-        <div class="tb-row">
-          <div class="tb-col">
-            <div class="tb-col-hd"><span>输入</span></div>
-            <el-input v-model="sqlInput" type="textarea" placeholder="粘贴 SQL 语句" />
-          </div>
-          <div class="tb-col">
-            <div class="tb-col-hd">
-              <span>输出</span>
-              <el-button size="small" text type="primary" :disabled="!sqlOutput" @click="copyText(sqlOutput)">复制</el-button>
+        <SplitPane storage-key="tb-sql" class="tb-row">
+          <template #left>
+            <div class="tb-col">
+              <div class="tb-col-hd"><span>输入</span></div>
+              <el-input v-model="sqlInput" type="textarea" placeholder="粘贴 SQL 语句" />
             </div>
-            <el-input v-model="sqlOutput" type="textarea" readonly placeholder="处理结果" />
-          </div>
-        </div>
+          </template>
+          <template #right>
+            <div class="tb-col">
+              <div class="tb-col-hd">
+                <span>输出</span>
+                <el-button size="small" text type="primary" :disabled="!sqlOutput" @click="copyText(sqlOutput)">复制</el-button>
+              </div>
+              <el-input v-model="sqlOutput" type="textarea" readonly placeholder="处理结果" />
+            </div>
+          </template>
+        </SplitPane>
         <div class="tb-actions">
           <el-button type="primary" @click="fmtSQL">格式化</el-button>
           <el-button @click="cmpSQL">压缩</el-button>
@@ -452,19 +461,23 @@ function loadSerExample() {
           </div>
         </div>
 
-        <div class="tb-row" style="margin-top: 12px">
-          <div class="tb-col">
-            <div class="tb-col-hd"><span>{{ isHash ? '待摘要文本' : (cryptoOp === 'decrypt' ? '密文' : '明文') }}</span></div>
-            <el-input v-model="cryptoText" type="textarea" :rows="12" placeholder="输入内容" />
-          </div>
-          <div class="tb-col">
-            <div class="tb-col-hd">
-              <span>结果</span>
-              <el-button size="small" text type="primary" :disabled="!cryptoOutput" @click="copyText(cryptoOutput)">复制</el-button>
+        <SplitPane storage-key="tb-crypto" class="tb-row" style="margin-top: 12px">
+          <template #left>
+            <div class="tb-col">
+              <div class="tb-col-hd"><span>{{ isHash ? '待摘要文本' : (cryptoOp === 'decrypt' ? '密文' : '明文') }}</span></div>
+              <el-input v-model="cryptoText" type="textarea" :rows="12" placeholder="输入内容" />
             </div>
-            <el-input v-model="cryptoOutput" type="textarea" :rows="12" readonly placeholder="结果" />
-          </div>
-        </div>
+          </template>
+          <template #right>
+            <div class="tb-col">
+              <div class="tb-col-hd">
+                <span>结果</span>
+                <el-button size="small" text type="primary" :disabled="!cryptoOutput" @click="copyText(cryptoOutput)">复制</el-button>
+              </div>
+              <el-input v-model="cryptoOutput" type="textarea" :rows="12" readonly placeholder="结果" />
+            </div>
+          </template>
+        </SplitPane>
         <div class="tb-actions">
           <el-button type="primary" :loading="cryptoLoading" @click="runCrypto">执行</el-button>
         </div>
@@ -506,19 +519,23 @@ function loadSerExample() {
             <el-button size="small" @click="loadSerExample">载入示例</el-button>
             <span class="tb-tip">PHP 序列化格式：s:长度:"值"; i:整数; b:0/1; a:数量:{键;值;…}</span>
           </div>
-          <div class="tb-row" style="margin-top: 12px">
-            <div class="tb-col">
-              <div class="tb-col-hd"><span>{{ serMode === 'serialize' ? 'JSON 输入' : 'PHP 序列化输入' }}</span></div>
-              <el-input v-model="serInput" type="textarea" :rows="14" :placeholder="serMode === 'serialize' ? '粘贴 JSON 对象' : SER_PH_PHP" />
-            </div>
-            <div class="tb-col">
-              <div class="tb-col-hd">
-                <span>结果</span>
-                <el-button size="small" text type="primary" :disabled="!serOutput" @click="copyText(serOutput)">复制</el-button>
+          <SplitPane storage-key="tb-serialize" class="tb-row" style="margin-top: 12px">
+            <template #left>
+              <div class="tb-col">
+                <div class="tb-col-hd"><span>{{ serMode === 'serialize' ? 'JSON 输入' : 'PHP 序列化输入' }}</span></div>
+                <el-input v-model="serInput" type="textarea" :rows="14" :placeholder="serMode === 'serialize' ? '粘贴 JSON 对象' : SER_PH_PHP" />
               </div>
-              <el-input v-model="serOutput" type="textarea" :rows="14" readonly placeholder="转换结果" />
-            </div>
-          </div>
+            </template>
+            <template #right>
+              <div class="tb-col">
+                <div class="tb-col-hd">
+                  <span>结果</span>
+                  <el-button size="small" text type="primary" :disabled="!serOutput" @click="copyText(serOutput)">复制</el-button>
+                </div>
+                <el-input v-model="serOutput" type="textarea" :rows="14" readonly placeholder="转换结果" />
+              </div>
+            </template>
+          </SplitPane>
           <div class="tb-actions">
             <el-button type="primary" @click="doSer">转换</el-button>
           </div>
@@ -532,8 +549,8 @@ function loadSerExample() {
 .toolbox { padding: 12px; height: 100%; box-sizing: border-box; overflow: hidden; }
 .tb-panel { height: 100%; display: flex; flex-direction: column; }
 
-.tb-row { flex: 1; min-height: 0; display: flex; gap: 16px; align-items: stretch; }
-.tb-col { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tb-row { flex: 1; min-height: 0; display: flex; align-items: stretch; }
+.tb-col { flex: 1; width: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .tb-col-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; color: #4e5969; flex-shrink: 0; }
 .tb-col :deep(.el-textarea) { flex: 1; display: flex; min-height: 0; }
 .tb-col :deep(.el-textarea__inner) { flex: 1; width: 100%; height: 100%; resize: none; }
