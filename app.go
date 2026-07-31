@@ -24,6 +24,8 @@ type App struct {
 	mu           sync.Mutex
 	captureToken string // 浏览器扩展回传鉴权 Token（持久化）
 	windowVisible bool  // 主窗口当前是否可见（托盘显隐用）
+	clipWinVisible bool // 剪贴板历史浮层当前是否可见
+	quitting      bool  // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
 }
 
 // NewApp creates a new App application struct
@@ -58,20 +60,40 @@ func (a *App) startup(ctx context.Context) {
 	go a.startTray()
 	// 安装系统级全局快捷键（即使窗口失焦也能调出剪贴板历史）
 	go a.startGlobalHotkey()
+	// 启动剪贴板后台采集（文本 + 图片）
+	go a.StartClipboardCapture()
+}
+
+// shutdown 在应用退出时清理资源（停止采集）。托盘由 systray.Quit 自行退出。
+func (a *App) shutdown(ctx context.Context) {
+	a.StopClipboardCapture()
 }
 
 // beforeClose 在用户点击窗口关闭/Alt+F4 时触发。
-// 返回 true 表示阻止退出，改为最小化窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
-// 注意：使用 WindowMinimise 而非 WindowHide，使 WebView 始终存活、全局快捷键事件可被前端接收，
-// 托盘态下按快捷键仍可正常弹出剪贴板。仅当用户通过托盘菜单「退出」时才真正退出。
+// 返回 true 表示阻止退出，改为隐藏窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
+// 使用 WindowHide 而非 WindowMinimise：隐藏后窗口不在任务栏保留按钮，
+// 托盘图标仍然存在，用户可通过托盘菜单「显示主窗口」恢复。
+// 全局快捷键（Ctrl+Shift+V / Ctrl+`）由 Go 端 WH_KEYBOARD_LL 钩子处理，
+// 不依赖 WebView 存活，因此隐藏窗口不影响剪贴板历史弹出。
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	runtime.WindowMinimise(a.ctx)
+	// 主动退出（托盘「退出」）时跳过隐藏逻辑，直接放行关闭
+	if a.quitting {
+		return false
+	}
+	// 用户点击窗口关闭：隐藏到托盘而非真正退出。
+	// 若剪贴板浮层处于打开状态，一并关闭并复位状态，避免下次 toggle 判断错位。
+	if a.clipWinVisible {
+		a.clipWinVisible = false
+		runtime.WindowSetAlwaysOnTop(a.ctx, false)
+		runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
+	}
+	runtime.		WindowHide(a.ctx)
 	a.windowVisible = false
 	return true
 }
 
 func defaultData() AppData {
-	return AppData{
+	data := AppData{
 		Projects: []Project{
 			{
 				ID:        "default",
@@ -87,12 +109,14 @@ func defaultData() AppData {
 			AIBaseURL:  "https://api.openai.com/v1",
 			AIModel:    "gpt-4o-mini",
 			TimeoutSec: 30,
-			Version:    AppVersion,
-			UpdateURL:  DefaultUpdateURL,
-		},
+		Version:    AppVersion,
+		UpdateURL:  DefaultUpdateURL,
+	},
 		Plugins:   PluginsData{Connections: []PluginConn{}},
 		Clipboard: ClipData{History: []ClipItem{}},
 	}
+	data.Settings.Clipboard = ClipSettings{Monitor: true, MaxItems: 200}
+	return data
 }
 
 // GetClipboardText 读取系统剪贴板文本（供前端轮询记录历史）
@@ -259,6 +283,24 @@ func (a *App) GetDataFilePath() string {
 // CopyToClipboard 复制文本到剪贴板
 func (a *App) CopyToClipboard(text string) error {
 	return runtime.ClipboardSetText(a.ctx, text)
+}
+
+// ClipHistory 返回剪贴板历史（供原生菜单 / 托盘菜单读取）。
+func (a *App) ClipHistory() []ClipItem {
+	data := a.LoadData()
+	return data.Clipboard.History
+}
+
+// ClearClipHistory 清空剪贴板历史并落盘（同时删除图片文件）。
+func (a *App) ClearClipHistory() {
+	data := a.LoadData()
+	for _, it := range data.Clipboard.History {
+		if it.Type == ClipTypeImage && it.ImagePath != "" {
+			_ = os.Remove(filepath.Join(filepath.Dir(a.dataFile), it.ImagePath))
+		}
+	}
+	data.Clipboard.History = nil
+	_ = a.SaveData(data)
 }
 
 // ChatMessage 简单的聊天消息结构（供 CallAI 使用）

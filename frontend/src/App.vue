@@ -1,8 +1,8 @@
 <script setup>
 import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, toggleClipboardHistory } from './store'
-import { EventsOn, WindowShow, WindowUnminimise } from '../wailsjs/runtime/runtime'
-import { RunTestCases } from '../wailsjs/go/main/App'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor } from './store'
+import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
+import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
 import Sidebar from './components/Sidebar.vue'
 import DebugPanel from './components/DebugPanel.vue'
 import ParamsPanel from './components/ParamsPanel.vue'
@@ -14,7 +14,9 @@ import EnvManager from './components/EnvManager.vue'
 import CommonParams from './components/CommonParams.vue'
 import CapturePanel from './components/CapturePanel.vue'
 import Tools from './components/Tools.vue'
-import ClipHistory from './components/ClipHistory.vue'
+import ClipboardHistory from './components/ClipboardHistory.vue'
+
+const clipVisible = ref(false)
 
 onMounted(() => {
   initStore()
@@ -28,15 +30,32 @@ onMounted(() => {
       console.error('托盘触发运行测试失败', e)
     }
   })
-  // 系统级全局快捷键（Go 端 WH_KEYBOARD_LL 钩子）调出/收起剪贴板历史
-  // 窗口隐藏到托盘时，先恢复窗口确保 WebView 重新绘制，再切换剪贴板可见性，
-  // 这样即使应用驻留托盘、主窗口不可见，快捷键也能正常弹出记录。
-  EventsOn('apitool:toggle-clipboard', () => {
-    WindowShow()
-    WindowUnminimise()
-    setTimeout(() => toggleClipboardHistory(), 30)
+  // 全局快捷键（Ctrl+Shift+V / Ctrl+`）与托盘菜单由 Go 端 WH_KEYBOARD_LL 钩子 /
+  // systray 触发，Go 端负责弹出窗口并显示「剪贴板历史」浮层，这里只负责渲染。
+  EventsOn('apitool:show-clipboard-history', () => {
+    clipVisible.value = true
+    initClipboardMonitor() // 重新从 Go 拉取最新历史
+  })
+  EventsOn('apitool:hide-clipboard-history', () => {
+    clipVisible.value = false
+  })
+  EventsOn('apitool:clipboard-updated', () => {
+    if (clipVisible.value) initClipboardMonitor()
   })
 })
+
+onBeforeUnmount(() => {
+  EventsOff('apitool:tray-run-tests')
+  EventsOff('apitool:show-clipboard-history')
+  EventsOff('apitool:hide-clipboard-history')
+  EventsOff('apitool:clipboard-updated')
+})
+
+// 关闭剪贴板历史浮层：隐藏前端覆盖层，并由 Go 端恢复窗口置顶状态/聚焦
+async function closeClip() {
+  clipVisible.value = false
+  try { await CloseClipboardWindow() } catch (e) { /* ignore */ }
+}
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
 
@@ -60,19 +79,9 @@ function matchCombo(e, combo) {
     norm === keyPart
   )
 }
-// 全局快捷键：用户可自定义组合（默认 Ctrl+Shift+V）；反引号 ` 始终作为便捷别名保留
-function onGlobalKey(e) {
-  const combo = store.data.settings.hotkey || 'Ctrl+Shift+V'
-  if (matchCombo(e, combo)) {
-    e.preventDefault()
-    toggleClipboardHistory()
-  } else if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault()
-    toggleClipboardHistory()
-  }
-}
-window.addEventListener('keydown', onGlobalKey)
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
+// 注：剪贴板历史全局快捷键（Ctrl+Shift+V / Ctrl+`）已由 Go 端 WH_KEYBOARD_LL 钩子
+// 直接弹出「原生剪贴板历史菜单」，不依赖 WebView，窗口隐藏到托盘时也能用，
+// 因此前端不再监听该组合键，避免与 Go 端重复触发。
 
 // 目录栏宽度可拖拽调整（持久化到 localStorage）
 const NAV_W = 60
@@ -171,8 +180,9 @@ const navs = [
     <CapturePanel v-else-if="store.view === 'capture'" />
     <Tools v-else-if="store.view === 'tools'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
-    <ClipHistory />
   </div>
+
+  <ClipboardHistory v-if="clipVisible" @close="closeClip" />
 
   <div v-if="!store.loaded" class="boot-loading">
     <div class="spinner"></div>

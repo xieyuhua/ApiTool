@@ -267,7 +267,7 @@ async function toggleSync() {
             </el-button>
             <el-button link @click="store.data.settings.hotkey = 'Ctrl+Shift+V'; ElMessage.success('已恢复默认')">恢复默认</el-button>
             <span style="font-size:12px;color:#86909c;margin-left:10px">
-              全局快捷键，按下即弹出剪贴板历史（Ctrl+` 始终可用）
+              全局快捷键为「连续按两次 Ctrl」弹出剪贴板历史（已固定）
             </span>
           </el-form-item>
         </el-form>

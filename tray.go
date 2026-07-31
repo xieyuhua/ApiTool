@@ -27,6 +27,9 @@ func (a *App) onTrayReady() {
 	mShow := systray.AddMenuItem("显示主窗口", "显示/恢复 ApiTool 主窗口")
 	mHide := systray.AddMenuItem("隐藏主窗口", "将主窗口最小化到托盘")
 	systray.AddSeparator()
+	mClip := systray.AddMenuItem("剪贴板历史…", "弹出剪贴板历史，点击条目即可复制")
+	mClipClear := systray.AddMenuItem("清空剪贴板历史", "清空全部剪贴板历史记录")
+	systray.AddSeparator()
 	mRun := systray.AddMenuItem("运行全部测试", "执行当前项目全部测试用例")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("退出", "退出 ApiTool")
@@ -41,6 +44,11 @@ func (a *App) onTrayReady() {
 		case <-mHide.ClickedCh:
 			runtime.WindowHide(a.ctx)
 			a.windowVisible = false
+		case <-mClip.ClickedCh:
+			// 切换剪贴板历史浮层窗口（Vue 渲染，支持文本与图片）
+			a.toggleClipboardWindow()
+		case <-mClipClear.ClickedCh:
+			a.ClearClipHistory()
 		case <-mRun.ClickedCh:
 			// 通知前端触发「运行全部测试」
 			runtime.EventsEmit(a.ctx, "apitool:tray-run-tests", nil)
@@ -53,6 +61,7 @@ func (a *App) onTrayReady() {
 
 func (a *App) onTrayExit() {
 	// 托盘退出时关闭应用，确保无残留进程
+	a.quitting = true
 	runtime.Quit(a.ctx)
 }
 

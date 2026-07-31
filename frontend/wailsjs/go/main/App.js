@@ -38,8 +38,24 @@ export function ClearCapturedRequests() {
   return window['go']['main']['App']['ClearCapturedRequests']();
 }
 
+export function ClearClipHistory() {
+  return window['go']['main']['App']['ClearClipHistory']();
+}
+
 export function ClearTestData(arg1, arg2) {
   return window['go']['main']['App']['ClearTestData'](arg1, arg2);
+}
+
+export function ClipHistory() {
+  return window['go']['main']['App']['ClipHistory']();
+}
+
+export function CloseClipboardWindow() {
+  return window['go']['main']['App']['CloseClipboardWindow']();
+}
+
+export function CopyClipItem(arg1) {
+  return window['go']['main']['App']['CopyClipItem'](arg1);
 }
 
 export function CopyDocMarkdown(arg1, arg2) {
@@ -52,6 +68,10 @@ export function CopyToClipboard(arg1) {
 
 export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
+}
+
+export function DeleteClipItem(arg1) {
+  return window['go']['main']['App']['DeleteClipItem'](arg1);
 }
 
 export function DeleteTestCases(arg1) {
@@ -104,6 +124,14 @@ export function GenerateTestCasesForApis(arg1) {
 
 export function GetCapturedRequests() {
   return window['go']['main']['App']['GetCapturedRequests']();
+}
+
+export function GetClipImageData(arg1) {
+  return window['go']['main']['App']['GetClipImageData'](arg1);
+}
+
+export function GetClipItems() {
+  return window['go']['main']['App']['GetClipItems']();
 }
 
 export function GetClipboardText() {
@@ -318,8 +346,16 @@ export function ShareTestReport(arg1, arg2, arg3) {
   return window['go']['main']['App']['ShareTestReport'](arg1, arg2, arg3);
 }
 
+export function ShowClipboardWindow() {
+  return window['go']['main']['App']['ShowClipboardWindow']();
+}
+
 export function StartCaptureServer(arg1, arg2) {
   return window['go']['main']['App']['StartCaptureServer'](arg1, arg2);
+}
+
+export function StartClipboardCapture() {
+  return window['go']['main']['App']['StartClipboardCapture']();
 }
 
 export function StartSyncServer(arg1) {
@@ -328,6 +364,10 @@ export function StartSyncServer(arg1) {
 
 export function StopCaptureServer() {
   return window['go']['main']['App']['StopCaptureServer']();
+}
+
+export function StopClipboardCapture() {
+  return window['go']['main']['App']['StopClipboardCapture']();
 }
 
 export function StopShare(arg1) {

@@ -1,0 +1,5 @@
+clipboard_windows.go:181:20: possible misuse of unsafe.Pointer
+clipboard_windows.go:219:31: possible misuse of unsafe.Pointer
+clipboard_windows.go:574:26: possible misuse of unsafe.Pointer
+hotkey_windows.go:95:29: possible misuse of unsafe.Pointer
+plugins.go:1021:19: non-constant format string in call to (*net/textproto.Writer).PrintfLine

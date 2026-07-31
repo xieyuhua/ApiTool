@@ -1,24 +1,22 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { store, removeClip, clearClipHistory, toggleClipboardHistory } from '../store'
+import { store, removeClip, clearClipHistory, copyClipItem, clipImageURL } from '../store'
 
 const kw = ref('')
 const list = computed(() => {
   const all = store.data.clipboard.history || []
   if (!kw.value.trim()) return all
   const q = kw.value.toLowerCase()
-  return all.filter(x => (x.text || '').toLowerCase().includes(q))
+  return all.filter(x => x.type === 'text' && (x.text || '').toLowerCase().includes(q))
 })
 const total = computed(() => (store.data.clipboard.history || []).length)
 const maxItems = computed(() => (store.data.settings.clipboard.maxItems) || 200)
 const monitor = computed(() => store.data.settings.clipboard.monitor)
 
-function fmtTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  const p = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+function thumbUrl(it) {
+  if (it.type !== 'image') return ''
+  return clipImageURL(it)
 }
 function preview(text) {
   const s = (text || '').replace(/\s+/g, ' ')
@@ -26,15 +24,8 @@ function preview(text) {
 }
 
 async function copyItem(it) {
-  const text = it.text || ''
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text)
-    } else if (window.go && window.go.main && window.go.main.App && window.go.main.App.SetClipboardText) {
-      await window.go.main.App.SetClipboardText(text)
-    } else {
-      throw new Error('当前环境不支持复制')
-    }
+    await copyClipItem(it.id)
     ElMessage.success('已复制到剪贴板')
   } catch (e) {
     ElMessage.error('复制失败：' + (e && e.message ? e.message : e))
@@ -48,7 +39,9 @@ async function clearAll() {
   clearClipHistory()
   ElMessage.success('已清空')
 }
-function openPopup() { toggleClipboardHistory(true) }
+function openPopup() {
+  ElMessage.info('连续按两次 Ctrl（或右键托盘 → 剪贴板历史…）即可弹出剪贴板历史')
+}
 </script>
 
 <template>
@@ -63,7 +56,7 @@ function openPopup() { toggleClipboardHistory(true) }
       </div>
       <div class="clip-actions">
         <el-input v-model="kw" placeholder="搜索内容…" clearable size="default" style="width:220px" />
-        <el-button @click="openPopup">弹出浮窗</el-button>
+        <el-button @click="openPopup">使用说明</el-button>
         <el-button type="danger" plain :disabled="!total" @click="clearAll">清空</el-button>
       </div>
     </div>
@@ -76,11 +69,15 @@ function openPopup() { toggleClipboardHistory(true) }
 
     <div v-else class="clip-list">
       <div v-for="it in list" :key="it.id" class="clip-item">
+        <img v-if="it.type === 'image'" :src="thumbUrl(it)" class="ci-thumb" alt="" />
         <div class="ci-main">
-          <div class="ci-text" :title="it.text" @click="copyItem(it)">{{ preview(it.text) }}</div>
+          <div v-if="it.type === 'image'" class="ci-text" @click="copyItem(it)">
+            图片 · {{ it.width }}×{{ it.height }}
+          </div>
+          <div v-else class="ci-text" :title="it.text" @click="copyItem(it)">{{ preview(it.text) }}</div>
           <div class="ci-meta">
-            <span>{{ fmtTime(it.time) }}</span>
-            <span class="ci-len">{{ (it.text || '').length }} 字符</span>
+            <span>{{ it.time }}</span>
+            <span v-if="it.type === 'text'" class="ci-len">{{ (it.text || '').length }} 字符</span>
           </div>
         </div>
         <div class="ci-ops">
@@ -118,6 +115,10 @@ function openPopup() { toggleClipboardHistory(true) }
 }
 .clip-item:hover { border-color: var(--primary); }
 .ci-main { flex: 1; min-width: 0; }
+.ci-thumb {
+  width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
 .ci-text {
   font-size: 13px; color: var(--text); line-height: 1.5; cursor: pointer;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;

@@ -193,6 +193,8 @@ type Settings struct {
 	AIKey      string `json:"aiKey"`
 	AIModel    string `json:"aiModel"`
 	TimeoutSec int    `json:"timeoutSec"`
+	// 剪贴板
+	Clipboard ClipSettings `json:"clipboard"`
 	// 云同步
 	CloudURL   string `json:"cloudURL"`
 	CloudToken string `json:"cloudToken"`
@@ -233,13 +235,30 @@ type PluginsData struct {
 	Connections []PluginConn `json:"connections"`
 }
 
+// 剪贴板条目类型
+const (
+	ClipTypeText  = "text"
+	ClipTypeImage = "image"
+)
+
 // 剪贴板历史记录
 type ClipItem struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	Time string `json:"time"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`      // text | image
+	Text      string `json:"text"`      // 文本类型内容
+	ImagePath string `json:"imagePath"` // 图片类型：本地 PNG 相对路径
+	Width     int    `json:"width"`     // 图片宽度
+	Height    int    `json:"height"`    // 图片高度
+	Time      string `json:"time"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 type ClipData struct {
 	History []ClipItem `json:"history"`
+}
+
+// ClipSettings 剪贴板相关设置
+type ClipSettings struct {
+	Monitor  bool `json:"monitor"`  // 是否监听剪贴板自动记录
+	MaxItems int  `json:"maxItems"` // 历史保留上限
 }

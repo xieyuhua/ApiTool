@@ -20,13 +20,23 @@ export function CheckUpdate():Promise<main.CheckUpdateResult>;
 
 export function ClearCapturedRequests():Promise<void>;
 
+export function ClearClipHistory():Promise<void>;
+
 export function ClearTestData(arg1:string,arg2:string):Promise<number>;
+
+export function ClipHistory():Promise<Array<main.ClipItem>>;
+
+export function CloseClipboardWindow():Promise<void>;
+
+export function CopyClipItem(arg1:string):Promise<void>;
 
 export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
 
 export function CopyToClipboard(arg1:string):Promise<void>;
 
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
+
+export function DeleteClipItem(arg1:string):Promise<void>;
 
 export function DeleteTestCases(arg1:Array<string>):Promise<number>;
 
@@ -53,6 +63,10 @@ export function GenerateTestCasesAsync(arg1:Array<string>):Promise<string>;
 export function GenerateTestCasesForApis(arg1:Array<string>):Promise<Array<main.TestCase>>;
 
 export function GetCapturedRequests():Promise<Array<main.CapturedRequest>>;
+
+export function GetClipImageData(arg1:string):Promise<Record<string, string>>;
+
+export function GetClipItems():Promise<Array<main.ClipItem>>;
 
 export function GetClipboardText():Promise<string>;
 
@@ -160,11 +174,17 @@ export function ShareDoc(arg1:string,arg2:string):Promise<string>;
 
 export function ShareTestReport(arg1:string,arg2:string,arg3:number):Promise<string>;
 
+export function ShowClipboardWindow():Promise<void>;
+
 export function StartCaptureServer(arg1:string,arg2:string):Promise<string>;
+
+export function StartClipboardCapture():Promise<void>;
 
 export function StartSyncServer(arg1:string):Promise<string>;
 
 export function StopCaptureServer():Promise<void>;
+
+export function StopClipboardCapture():Promise<void>;
 
 export function StopShare(arg1:string):Promise<void>;
 
