@@ -18,6 +18,10 @@ export function BuildSharedTitle(arg1, arg2) {
   return window['go']['main']['App']['BuildSharedTitle'](arg1, arg2);
 }
 
+export function CallAI(arg1) {
+  return window['go']['main']['App']['CallAI'](arg1);
+}
+
 export function CaptureInfo() {
   return window['go']['main']['App']['CaptureInfo']();
 }

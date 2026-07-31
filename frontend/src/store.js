@@ -1,6 +1,6 @@
 import { reactive, watch, ref } from 'vue'
 import * as runtime from '../wailsjs/runtime/runtime'
-import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText } from '../wailsjs/go/main/App'
+import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText, CallAI } from '../wailsjs/go/main/App'
 
 export function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2))
@@ -334,32 +334,26 @@ export async function cloudApi(path, opts = {}) {
 // 统一的聊天补全调用，供字段描述生成、命名工具等复用。
 export async function callAI(messages, opts = {}) {
   const s = store.data.settings
-  const base = (s.aiBaseUrl || '').trim().replace(/\/+$/, '')
+  const base = (s.aiBaseUrl || '').trim()
   if (!base) throw new Error('未配置 AI 接口地址（设置 → AI 配置）')
   if (!s.aiKey) throw new Error('未配置 AI API Key（设置 → AI 配置）')
   const model = s.aiModel || 'gpt-4o-mini'
-  const url = base.replace(/\/v1$/, '') + '/v1/chat/completions'
-  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null
-  const timeout = (s.timeoutSec || 30) * 1000
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null
   try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + s.aiKey,
-      },
-      body: JSON.stringify({ model, messages, temperature: opts.temperature ?? 0.3, stream: false }),
-      signal: ctrl ? ctrl.signal : undefined,
+    // 优先走 Go 后端代发，规避 Wails webview 的 CORS 限制
+    return await CallAI({
+      baseUrl: base,
+      apiKey: s.aiKey,
+      model,
+      timeoutSec: s.timeoutSec || 30,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
     })
-    let body = null
-    try { body = await r.json() } catch { /* ignore */ }
-    if (!r.ok) throw new Error((body && body.error && (body.error.message || body.error)) || ('AI 请求失败 ' + r.status))
-    const content = body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content
-    if (!content) throw new Error('AI 返回内容为空')
-    return content
-  } finally {
-    if (timer) clearTimeout(timer)
+  } catch (e) {
+    // 后端不可用时的兜底提示（极少触发）
+    const msg = String(e && e.message ? e.message : e)
+    if (/Failed to fetch|NetworkError|CORS/i.test(msg)) {
+      throw new Error('AI 请求失败（网络/CORS）：' + msg)
+    }
+    throw e
   }
 }
 

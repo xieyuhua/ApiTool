@@ -2,7 +2,8 @@
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../store'
-import { parseCli } from '../cli'
+import { parseCli, FORMATS } from '../cli'
+import { CopyToClipboard } from '../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
 
 // 左侧选项卡：目录 / 日志 切换（持久化）
@@ -114,6 +115,17 @@ const cliPlaceholder = `例如：
 curl -X POST 'https://api.example.com/user' \\
   -H 'Content-Type: application/json' \\
   -d '{"name":"tom"}'`
+
+async function copyParsedAs(key) {
+  if (!cliParsed.value) return
+  const fmt = FORMATS.find(f => f.key === key)
+  if (!fmt) return
+  try {
+    const text = fmt.gen(cliParsed.value)
+    await CopyToClipboard(text)
+    ElMessage.success(`已复制为 ${fmt.label} 命令`)
+  } catch (e) { ElMessage.error(String(e)) }
+}
 
 function filterNode(value, node) {
   if (!value) return true
@@ -448,6 +460,14 @@ async function removeProjectNow() {
             <span v-if="cliParsed.queryArr?.length"> / {{ cliParsed.queryArr.length }} Query</span>
             <span v-if="cliParsed.headersArr?.length || cliParsed.queryArr?.length">）</span>
             <span v-if="cliParsed.body"> / 含请求体</span>
+            <el-dropdown trigger="click" size="small" @command="copyParsedAs" style="margin-left:8px">
+              <el-button size="small" type="primary" plain>复制为 ▾</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="f in FORMATS" :key="f.key" :command="f.key">{{ f.label }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </el-tab-pane>
       </el-tabs>

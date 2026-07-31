@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -184,6 +186,117 @@ func (a *App) GetDataFilePath() string {
 // CopyToClipboard 复制文本到剪贴板
 func (a *App) CopyToClipboard(text string) error {
 	return runtime.ClipboardSetText(a.ctx, text)
+}
+
+// ChatMessage 简单的聊天消息结构（供 CallAI 使用）
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// CallAIArgs CallAI 入参（由前端传入已解析好的配置，避免在 Go 端读取前端 store）
+type CallAIArgs struct {
+	BaseURL string          `json:"baseUrl"`
+	APIKey  string          `json:"apiKey"`
+	Model   string          `json:"model"`
+	Timeout int             `json:"timeoutSec"`
+	Messages []ChatMessage  `json:"messages"`
+}
+
+// callAIRequest / callAIResponse 对应 OpenAI 兼容接口的请求与响应
+type callAIRequest struct {
+	Model       string        `json:"model"`
+	Messages    []ChatMessage `json:"messages"`
+	Temperature float64       `json:"temperature"`
+	Stream      bool          `json:"stream"`
+}
+type callAIChoice struct {
+	Message ChatMessage `json:"message"`
+}
+type callAIResult struct {
+	Choices []callAIChoice `json:"choices"`
+	Error   interface{}    `json:"error"`
+}
+
+// CallAI 由 Go 后端代发 AI 请求，规避前端 webview 的 CORS 限制。
+// 返回模型回复的文本内容；失败时返回错误。
+func (a *App) CallAI(args CallAIArgs) (string, error) {
+	base := strings.TrimSpace(args.BaseURL)
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
+	}
+	if args.APIKey == "" {
+		return "", fmt.Errorf("未配置 AI API Key（设置 → AI 配置）")
+	}
+	model := strings.TrimSpace(args.Model)
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	// 兼容以 /v1 结尾的地址
+	url := base
+	if !strings.HasSuffix(url, "/chat/completions") {
+		if strings.HasSuffix(url, "/v1") {
+			url = url + "/chat/completions"
+		} else {
+			url = url + "/v1/chat/completions"
+		}
+	}
+
+	payload, err := json.Marshal(callAIRequest{
+		Model:       model,
+		Messages:    args.Messages,
+		Temperature: 0.3,
+		Stream:      false,
+	})
+	if err != nil {
+		return "", fmt.Errorf("构造请求失败: %w", err)
+	}
+
+	timeout := args.Timeout
+	if timeout <= 0 {
+		timeout = 30
+	}
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("构造请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+args.APIKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("AI 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var r callAIResult
+		_ = json.Unmarshal(body, &r)
+		if r.Error != nil {
+			if m, ok := r.Error.(map[string]interface{}); ok {
+				if msg, ok := m["message"].(string); ok {
+					return "", fmt.Errorf("AI 请求失败: %s", msg)
+				}
+			}
+		}
+		return "", fmt.Errorf("AI 请求失败 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var r callAIResult
+	if err := json.Unmarshal(body, &r); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+	if len(r.Choices) == 0 {
+		return "", fmt.Errorf("AI 返回内容为空")
+	}
+	return r.Choices[0].Message.Content, nil
 }
 
 // OpenInBrowser 使用系统浏览器打开

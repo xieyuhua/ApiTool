@@ -10,6 +10,8 @@ export function BuildSharedHTML(arg1:string,arg2:string):Promise<string>;
 
 export function BuildSharedTitle(arg1:string,arg2:string):Promise<string>;
 
+export function CallAI(arg1:main.CallAIArgs):Promise<string>;
+
 export function CaptureInfo():Promise<main.CaptureServerInfo>;
 
 export function CaptureServerRunning():Promise<boolean>;
