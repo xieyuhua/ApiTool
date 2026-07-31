@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/textproto"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -844,6 +845,63 @@ func (a *App) PluginSFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) 
 	})
 }
 
+// PluginSFTPRename 重命名 / 移动远端文件或目录
+func (a *App) PluginSFTPRename(conn PluginConn, oldPath, newPath string) error {
+	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
+		return fmt.Errorf("原路径与新路径不能为空")
+	}
+	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
+		return v.(*sftpHolder).sc.rename(oldPath, newPath)
+	})
+}
+
+// PluginSFTPDownload 下载远端文件到本地（弹出保存对话框），返回本地保存路径
+func (a *App) PluginSFTPDownload(conn PluginConn, remotePath, name string) (string, error) {
+	var data []byte
+	err := withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
+		var e error
+		data, e = v.(*sftpHolder).sc.readFileBytes(remotePath)
+		return e
+	})
+	if err != nil {
+		return "", err
+	}
+	return saveDownloadedFile(a, name, remotePath, data)
+}
+
+// saveDownloadedFile 弹出保存对话框并将字节写入本地文件，返回本地路径（用户取消返回空串）
+func saveDownloadedFile(a *App, name, remotePath string, data []byte) (string, error) {
+	if name == "" {
+		name = pathBaseName(remotePath)
+	}
+	local, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "保存文件",
+		DefaultFilename: name,
+	})
+	if err != nil {
+		return "", err
+	}
+	if local == "" {
+		return "", nil
+	}
+	if err := os.WriteFile(local, data, 0o644); err != nil {
+		return "", err
+	}
+	return local, nil
+}
+
+// pathBaseName 取远端路径的文件名部分
+func pathBaseName(p string) string {
+	p = strings.TrimRight(p, "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	if p == "" {
+		return "download"
+	}
+	return p
+}
+
 // PluginSFTPMkdir 创建远端目录
 func (a *App) PluginSFTPMkdir(conn PluginConn, path string) error {
 	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
@@ -1032,6 +1090,83 @@ func (a *App) PluginFTPWrite(conn PluginConn, path, content string) error {
 		fc.c.ReadResponse(150)
 		dc.Write([]byte(content))
 		_, _, e = fc.c.ReadResponse(226)
+		return e
+	})
+}
+
+// PluginFTPUploadB64 通过 FTP 上传本地文件（二进制安全，b64 为文件内容的 base64）
+func (a *App) PluginFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) error {
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return err
+	}
+	remotePath := joinRemotePath(remoteDir, name)
+	return withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
+		fc := v.(*ftpConn)
+		dc, e := fc.pasv()
+		if e != nil {
+			return e
+		}
+		fc.c.PrintfLine("STOR %s", remotePath)
+		if _, _, e = fc.c.ReadResponse(150); e != nil {
+			dc.Close()
+			return e
+		}
+		_, e = dc.Write(data)
+		dc.Close()
+		if e != nil {
+			return e
+		}
+		_, _, e = fc.c.ReadResponse(226)
+		return e
+	})
+}
+
+// PluginFTPDownload 下载远端文件到本地（弹出保存对话框），返回本地保存路径
+func (a *App) PluginFTPDownload(conn PluginConn, remotePath, name string) (string, error) {
+	var data []byte
+	err := withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
+		fc := v.(*ftpConn)
+		dc, e := fc.pasv()
+		if e != nil {
+			return e
+		}
+		defer dc.Close()
+		fc.c.PrintfLine("RETR %s", remotePath)
+		if _, _, e = fc.c.ReadResponse(150); e != nil {
+			return e
+		}
+		b, e := io.ReadAll(io.LimitReader(dc, 200*1024*1024))
+		if e != nil {
+			return e
+		}
+		data = b
+		fc.c.ReadResponse(226)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return saveDownloadedFile(a, name, remotePath, data)
+}
+
+// PluginFTPRename 重命名 / 移动远端文件或目录（RNFR + RNTO）
+func (a *App) PluginFTPRename(conn PluginConn, oldPath, newPath string) error {
+	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
+		return fmt.Errorf("原路径与新路径不能为空")
+	}
+	return withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
+		fc := v.(*ftpConn)
+		if e := fc.c.PrintfLine("RNFR %s", strings.TrimRight(oldPath, "/")); e != nil {
+			return e
+		}
+		if _, _, e := fc.c.ReadResponse(350); e != nil {
+			return e
+		}
+		if e := fc.c.PrintfLine("RNTO %s", strings.TrimRight(newPath, "/")); e != nil {
+			return e
+		}
+		_, _, e := fc.c.ReadResponse(250)
 		return e
 	})
 }

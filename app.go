@@ -48,11 +48,8 @@ func (a *App) startup(ctx context.Context) {
 	if _, err := os.Stat(a.dataFile); err != nil {
 		_ = a.SaveData(defaultData())
 	}
-	// 加载/生成捕获服务 Token，并自动启动独立捕获服务（供浏览器扩展回传数据）
+	// 仅加载/生成捕获服务 Token；捕获服务不再自动启动，改由用户在「请求捕获」页面手动开启
 	a.loadOrCreateCaptureToken()
-	if _, err := a.StartCaptureServer(defaultCaptureAddr, a.captureToken); err != nil {
-		fmt.Println("警告：自动启动请求捕获服务失败：", err)
-	}
 }
 
 func defaultData() AppData {

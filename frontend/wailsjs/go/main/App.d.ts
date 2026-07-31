@@ -24,6 +24,8 @@ export function CopyToClipboard(arg1:string):Promise<void>;
 
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
+export function DeleteTestCases(arg1:Array<string>):Promise<number>;
+
 export function ExportCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<string>;
 
 export function ExportDoc(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -84,11 +86,17 @@ export function PluginESSearch(arg1:main.PluginConn,arg2:string,arg3:string):Pro
 
 export function PluginFTPDelete(arg1:main.PluginConn,arg2:string):Promise<void>;
 
+export function PluginFTPDownload(arg1:main.PluginConn,arg2:string,arg3:string):Promise<string>;
+
 export function PluginFTPList(arg1:main.PluginConn,arg2:string):Promise<Array<main.FileInfo>>;
 
 export function PluginFTPMkdir(arg1:main.PluginConn,arg2:string):Promise<void>;
 
 export function PluginFTPRead(arg1:main.PluginConn,arg2:string):Promise<string>;
+
+export function PluginFTPRename(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
+
+export function PluginFTPUploadB64(arg1:main.PluginConn,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function PluginFTPWrite(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
 
@@ -104,11 +112,15 @@ export function PluginRedisValue(arg1:main.PluginConn,arg2:string,arg3:number):P
 
 export function PluginSFTPDelete(arg1:main.PluginConn,arg2:string):Promise<void>;
 
+export function PluginSFTPDownload(arg1:main.PluginConn,arg2:string,arg3:string):Promise<string>;
+
 export function PluginSFTPList(arg1:main.PluginConn,arg2:string):Promise<Array<main.FileInfo>>;
 
 export function PluginSFTPMkdir(arg1:main.PluginConn,arg2:string):Promise<void>;
 
 export function PluginSFTPRead(arg1:main.PluginConn,arg2:string):Promise<string>;
+
+export function PluginSFTPRename(arg1:main.PluginConn,arg2:string,arg3:string):Promise<void>;
 
 export function PluginSFTPUploadB64(arg1:main.PluginConn,arg2:string,arg3:string,arg4:string):Promise<void>;
 

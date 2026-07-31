@@ -195,6 +195,7 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
           <el-button @click="refresh">刷新列表</el-button>
         </div>
         <div class="hint">
+          说明：捕获服务<b>不会随应用自动启动</b>，需在此手动点击「启动服务」；关闭应用或点击「停止服务」即可释放端口。<br />
           提示：浏览器扩展需配置与上方一致的「捕获地址」和「Token」。扩展仅在命中所配置的监控网址（支持 * 通配）时才上报请求，
           包括方法、URL、请求头、Query、请求体以及响应状态、响应头与响应体（用于自动生成请求/响应字段文档）。
         </div>
@@ -218,13 +219,15 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
           <el-divider direction="vertical" />
           <el-button size="small" @click="doExport">导出 OpenAPI</el-button>
           <el-button size="small" @click="copyOpenAPI">复制 OpenAPI</el-button>
-          <el-button size="small" type="danger" plain @click="clearAll">清空</el-button>
         </div>
       </div>
 
       <!-- 捕获列表 -->
       <div class="card">
-        <div class="card-title">已捕获请求（{{ list.length }}）</div>
+        <div class="card-title">
+          <span>已捕获请求（{{ list.length }}）</span>
+          <el-button size="small" type="danger" plain :disabled="!list.length" @click="clearAll">一键清空</el-button>
+        </div>
         <el-table ref="tableRef" v-loading="loading" :data="list" row-key="id" style="width:100%" @selection-change="rows => selected = rows.map(r => r.id)">
           <el-table-column type="selection" width="46" reserve-selection />
           <el-table-column label="方法" width="84">
@@ -288,7 +291,7 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
 
 <style scoped>
 .card { background:#fff; border:1px solid #e5e6eb; border-radius:10px; padding:16px 18px; margin-bottom:16px; }
-.card-title { font-weight:600; font-size:14px; margin-bottom:12px; }
+.card-title { font-weight:600; font-size:14px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .svc-row { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
 .svc-item { display:flex; flex-direction:column; gap:6px; }
 .svc-label { font-size:12px; color:#86909c; }

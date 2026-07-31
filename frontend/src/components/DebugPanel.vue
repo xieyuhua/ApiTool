@@ -28,6 +28,36 @@ const contentTypeOptions = [
 
 const resp = computed(() => getLiveResponse(props.api.id) || null)
 
+// 响应体展示：JSON 默认美化展示，可切换回原文；复制时复制当前展示的内容
+const respPretty = ref(true)
+const respBodyText = computed(() => {
+  const r = resp.value
+  if (!r || !r.body) return ''
+  if (!r.isJson || !respPretty.value) return r.body
+  try { return JSON.stringify(JSON.parse(r.body), null, 2) } catch (e) { return r.body }
+})
+function toggleRespPretty() { respPretty.value = !respPretty.value }
+
+// 复制响应体到剪贴板（优先 Clipboard API，降级 execCommand，兼容 WebView 无权限场景）
+async function copyRespBody() {
+  const text = respBodyText.value
+  if (!text) { ElMessage.warning('响应体为空'); return }
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('响应体已复制')
+    return
+  } catch (e) { /* 降级处理 */ }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy'); ElMessage.success('响应体已复制') }
+  catch (e) { ElMessage.error('复制失败') }
+  document.body.removeChild(ta)
+}
+
 // 标签计数只统计“有参数名”的行，忽略空白占位行
 const queryCount = computed(() => (props.api.query || []).filter(q => (q.key || '').trim()).length)
 const headerCount = computed(() => (props.api.headers || []).filter(h => (h.key || '').trim()).length)
@@ -410,8 +440,12 @@ function buildRespDetail(r) {
             <span class="resp-meta">{{ resp.durationMs }} ms · {{ fmtSize(resp.size) }}</span>
           </template>
         </span>
-        <span v-if="resp && resp.isJson">
-          <el-button size="small" type="primary" plain @click="respToRespFields">导入为响应参数文档</el-button>
+        <span v-if="resp && !resp.error" class="resp-acts">
+          <el-button size="small" @click="copyRespBody">复制响应体</el-button>
+          <el-button v-if="resp.isJson" size="small" @click="toggleRespPretty">
+            {{ respPretty ? '显示原文' : '格式化' }}
+          </el-button>
+          <el-button v-if="resp.isJson" size="small" type="primary" plain @click="respToRespFields">导入为响应参数文档</el-button>
         </span>
       </div>
 
@@ -422,7 +456,7 @@ function buildRespDetail(r) {
       <template v-else>
         <el-tabs v-model="respTab">
           <el-tab-pane label="响应体" name="body">
-            <pre class="resp-body">{{ resp.body }}</pre>
+            <pre class="resp-body" @dblclick="copyRespBody" title="双击可复制全部内容">{{ respBodyText }}</pre>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -436,6 +470,8 @@ function buildRespDetail(r) {
 .url-row .el-input { flex: 1; min-width: 0; }
 .mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
 .resp-meta { color: #86909c; font-size: 12px; font-weight: 400; margin-left: 10px; }
+.resp-acts { display: inline-flex; gap: 8px; align-items: center; }
+.resp-body { user-select: text; cursor: text; }
 .script-tip { font-size: 12px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.7; }
 .script-tip code { background: #e5e6eb; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; color: #165dff; }
 </style>

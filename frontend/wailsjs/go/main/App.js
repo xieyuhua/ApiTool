@@ -46,6 +46,10 @@ export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
 }
 
+export function DeleteTestCases(arg1) {
+  return window['go']['main']['App']['DeleteTestCases'](arg1);
+}
+
 export function ExportCapturedOpenAPI(arg1, arg2) {
   return window['go']['main']['App']['ExportCapturedOpenAPI'](arg1, arg2);
 }
@@ -166,6 +170,10 @@ export function PluginFTPDelete(arg1, arg2) {
   return window['go']['main']['App']['PluginFTPDelete'](arg1, arg2);
 }
 
+export function PluginFTPDownload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginFTPDownload'](arg1, arg2, arg3);
+}
+
 export function PluginFTPList(arg1, arg2) {
   return window['go']['main']['App']['PluginFTPList'](arg1, arg2);
 }
@@ -176,6 +184,14 @@ export function PluginFTPMkdir(arg1, arg2) {
 
 export function PluginFTPRead(arg1, arg2) {
   return window['go']['main']['App']['PluginFTPRead'](arg1, arg2);
+}
+
+export function PluginFTPRename(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginFTPRename'](arg1, arg2, arg3);
+}
+
+export function PluginFTPUploadB64(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['PluginFTPUploadB64'](arg1, arg2, arg3, arg4);
 }
 
 export function PluginFTPWrite(arg1, arg2, arg3) {
@@ -206,6 +222,10 @@ export function PluginSFTPDelete(arg1, arg2) {
   return window['go']['main']['App']['PluginSFTPDelete'](arg1, arg2);
 }
 
+export function PluginSFTPDownload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginSFTPDownload'](arg1, arg2, arg3);
+}
+
 export function PluginSFTPList(arg1, arg2) {
   return window['go']['main']['App']['PluginSFTPList'](arg1, arg2);
 }
@@ -216,6 +236,10 @@ export function PluginSFTPMkdir(arg1, arg2) {
 
 export function PluginSFTPRead(arg1, arg2) {
   return window['go']['main']['App']['PluginSFTPRead'](arg1, arg2);
+}
+
+export function PluginSFTPRename(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginSFTPRename'](arg1, arg2, arg3);
 }
 
 export function PluginSFTPUploadB64(arg1, arg2, arg3, arg4) {

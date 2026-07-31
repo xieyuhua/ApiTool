@@ -135,9 +135,11 @@ type TestCase struct {
 	Body        string      `json:"body"`
 	FormItems   []KV        `json:"formItems"`
 	ContentType string      `json:"contentType"`
-	Assertions  []Assertion `json:"assertions"`
+		Assertions  []Assertion `json:"assertions"`
 	Enabled     bool        `json:"enabled"`
 	CreatedAt   string      `json:"createdAt"`
+	DirID       string      `json:"dirId,omitempty"`
+	DirName     string      `json:"dirName,omitempty"`
 }
 
 // TestPlan 测试执行计划（有序用例 + 运行环境）

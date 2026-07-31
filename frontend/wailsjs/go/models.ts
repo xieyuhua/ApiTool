@@ -462,6 +462,8 @@ export namespace main {
 	    assertions: Assertion[];
 	    enabled: boolean;
 	    createdAt: string;
+	    dirId?: string;
+	    dirName?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TestCase(source);
@@ -486,6 +488,8 @@ export namespace main {
 	        this.assertions = this.convertValues(source["assertions"], Assertion);
 	        this.enabled = source["enabled"];
 	        this.createdAt = source["createdAt"];
+	        this.dirId = source["dirId"];
+	        this.dirName = source["dirName"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

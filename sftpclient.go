@@ -320,6 +320,58 @@ func (c *sftpClient) readFile(path string) (string, error) {
 	return buf.String(), nil
 }
 
+// readFileBytes 以二进制方式读取远端文件（用于下载任意类型文件，最大 200MB）
+func (c *sftpClient) readFileBytes(path string) ([]byte, error) {
+	handle, err := c.openFile(path, 0x1) // READ
+	if err != nil {
+		return nil, err
+	}
+	defer c.closeHandle(handle)
+	var buf bytes.Buffer
+	var offset uint64
+	const chunkSize = 32768
+	const maxSize = 200 * 1024 * 1024
+	for {
+		payload := putString(nil, handle)
+		payload = append(payload, packUint64(offset)...)
+		payload = append(payload, putUint32(uint32(chunkSize))...)
+		typ, body, err := c.call(5, payload) // SSH_FXP_READ
+		if err != nil {
+			return nil, err
+		}
+		if typ == 101 { // EOF / 结束
+			break
+		}
+		if typ != 103 { // DATA
+			return nil, fmt.Errorf("READ 返回类型 %d", typ)
+		}
+		data, _ := readString(body)
+		if len(data) == 0 {
+			break
+		}
+		buf.WriteString(data)
+		offset += uint64(len(data))
+		if len(data) < chunkSize {
+			break
+		}
+		if buf.Len() > maxSize {
+			return nil, fmt.Errorf("文件过大（>200MB），暂不支持下载")
+		}
+	}
+	return buf.Bytes(), nil
+}
+
+// rename 重命名 / 移动远端文件或目录（SSH_FXP_RENAME）
+func (c *sftpClient) rename(oldPath, newPath string) error {
+	payload := putString(nil, oldPath)
+	payload = putString(payload, newPath)
+	typ, body, err := c.call(18, payload) // SSH_FXP_RENAME
+	if err != nil {
+		return err
+	}
+	return expectStatus(typ, body)
+}
+
 func (c *sftpClient) writeFile(path, content string) error {
 	handle, err := c.openFile(path, 0x2|0x8|0x10) // WRITE|CREAT|TRUNC
 	if err != nil {

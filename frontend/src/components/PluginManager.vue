@@ -64,23 +64,32 @@
           <el-button size="small" @click="gotoParent">返回上级</el-button>
           <el-button size="small" type="primary" @click="listRemote">刷新</el-button>
           <el-button size="small" @click="remoteMkdirShown = true">新建目录</el-button>
-          <el-button size="small" type="success" @click="pickUpload(uploadToSftp)">上传文件</el-button>
+          <el-button size="small" type="success" @click="pickUpload(uploadToRemote)">上传文件</el-button>
+          <el-button size="small" type="danger" plain :disabled="!remoteChecked.length" @click="remoteDeleteBatch">
+            批量删除<template v-if="remoteChecked.length">（{{ remoteChecked.length }}）</template>
+          </el-button>
           <span class="pm-path">
             <span v-for="(seg, i) in pathSegments" :key="i" class="pm-path-seg" @click="gotoSeg(seg)">{{ seg.name }}<span v-if="i < pathSegments.length - 1"> / </span></span>
           </span>
         </div>
         <div class="pm-tbl-grow">
-          <el-table :data="remoteFiles" size="small" height="100%" @row-dblclick="onRemoteRowDblclick">
+          <el-table :data="remoteFiles" size="small" height="100%" @row-dblclick="onRemoteRowDblclick"
+                    @selection-change="v => remoteChecked = v">
+            <el-table-column type="selection" width="40" />
             <el-table-column label="名称">
               <template #default="{ row }">
                 <span>{{ row.isDir ? '📁' : '📄' }} {{ row.name }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="size" label="大小" width="110" />
-            <el-table-column label="操作" width="200">
+            <el-table-column label="大小" width="110">
+              <template #default="{ row }">{{ row.isDir ? '-' : fmtSize(row.size) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="290">
               <template #default="{ row }">
-                <el-button v-if="!row.isDir" size="small" @click="remoteRead(row)">查看</el-button>
                 <el-button v-if="row.isDir" size="small" @click="gotoSeg({ path: row.path })">进入</el-button>
+                <el-button v-else size="small" @click="remoteRead(row)">查看</el-button>
+                <el-button v-if="!row.isDir" size="small" type="primary" plain @click="remoteDownload(row)">下载</el-button>
+                <el-button size="small" @click="openRename(row)">重命名</el-button>
                 <el-button size="small" type="danger" plain @click="remoteDelete(row)">删除</el-button>
               </template>
             </el-table-column>
@@ -96,6 +105,15 @@
           <template #footer>
             <el-button @click="remoteMkdirShown = false">取消</el-button>
             <el-button type="primary" @click="remoteMkdir">确定</el-button>
+          </template>
+        </el-dialog>
+
+        <el-dialog v-model="renameShown" title="重命名" width="380px">
+          <el-input v-model="renameName" placeholder="新名称" @keyup.enter="doRename" />
+          <div style="margin-top:6px;color:#86909c;font-size:12px">原名称：{{ renameRow && renameRow.name }}</div>
+          <template #footer>
+            <el-button @click="renameShown = false">取消</el-button>
+            <el-button type="primary" @click="doRename">确定</el-button>
           </template>
         </el-dialog>
         <input ref="fileInputRef" type="file" multiple style="position:absolute;width:0;height:0;opacity:0" @change="onFilePicked" />
@@ -131,8 +149,8 @@
         <el-button type="primary" @click="saveConn">保存</el-button>
         <el-button type="success" plain @click="testConn">测试连接</el-button>
       </template>
-      <div v-if="testResult" style="margin-top:8px" :style="{ color: testResult.Ok ? '#67c23a' : '#f56c6c' }">
-        {{ testResult.Ok ? '连接成功' : ('失败：' + (testResult.Error || '未知错误（请检查连接参数）')) }}
+      <div v-if="testResult" style="margin-top:8px" :style="{ color: testResult.ok ? '#67c23a' : '#f56c6c' }">
+        {{ testResult.ok ? (testResult.info || '连接成功') : ('失败：' + (testResult.error || '未知错误（请检查连接参数）')) }}
       </div>
     </el-dialog>
   </div>
@@ -140,13 +158,14 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   PluginTest,
   PluginSSHOpen, PluginSSHInput, PluginSSHClose, PluginSSHResize, PluginSSHExec,
   PluginSFTPList, PluginSFTPRead, PluginSFTPWrite, PluginSFTPMkdir, PluginSFTPDelete,
-  PluginSFTPUploadB64,
+  PluginSFTPUploadB64, PluginSFTPRename, PluginSFTPDownload,
   PluginFTPList, PluginFTPRead, PluginFTPWrite, PluginFTPMkdir, PluginFTPDelete,
+  PluginFTPUploadB64, PluginFTPRename, PluginFTPDownload,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 // 标准终端引擎：完整支持 ANSI/VT100、真彩色、交替屏，能正确渲染 htop/vim/top 等全屏 TUI
@@ -191,6 +210,10 @@ const remoteContent = ref('')
 const currentRemotePath = ref('')
 const remoteMkdirShown = ref(false)
 const remoteMkdirName = ref('')
+const remoteChecked = ref([])      // 表格多选中的文件行（批量删除用）
+const renameShown = ref(false)     // 重命名弹窗
+const renameRow = ref(null)        // 待重命名的行
+const renameName = ref('')
 const fileInputRef = ref(null)
 let uploadHandler = null  // 当前上传目标处理回调
 
@@ -237,7 +260,8 @@ async function call(fn, ...args) {
   loading.value = true
   try {
     const r = await fn(...args)
-    if (r && r.Ok === false) ElMessage.error(r.Error || '操作失败')
+    // 后端 PluginOpResult 的 JSON 字段为小写：ok / error / info
+    if (r && r.ok === false) ElMessage.error(r.error || '操作失败')
     return r
   } catch (e) {
     ElMessage.error((e && e.message) ? e.message : String(e))
@@ -384,8 +408,27 @@ function updateTermSize() {
 // 根据连接类别返回对应的后端 API 集合
 function api() {
   return selected.value.category === 'sftp'
-    ? { list: PluginSFTPList, read: PluginSFTPRead, write: PluginSFTPWrite, mkdir: PluginSFTPMkdir, del: PluginSFTPDelete }
-    : { list: PluginFTPList, read: PluginFTPRead, write: PluginFTPWrite, mkdir: PluginFTPMkdir, del: PluginFTPDelete }
+    ? {
+        list: PluginSFTPList, read: PluginSFTPRead, write: PluginSFTPWrite, mkdir: PluginSFTPMkdir,
+        del: PluginSFTPDelete, rename: PluginSFTPRename, download: PluginSFTPDownload, upload: PluginSFTPUploadB64,
+      }
+    : {
+        list: PluginFTPList, read: PluginFTPRead, write: PluginFTPWrite, mkdir: PluginFTPMkdir,
+        del: PluginFTPDelete, rename: PluginFTPRename, download: PluginFTPDownload, upload: PluginFTPUploadB64,
+      }
+}
+// 字节数转可读大小
+function fmtSize(n) {
+  const v = Number(n) || 0
+  if (v < 1024) return v + ' B'
+  if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB'
+  if (v < 1024 * 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + ' MB'
+  return (v / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+}
+// 拼接远端路径
+function joinRemote(dir, name) {
+  const d = (dir || '/').replace(/\/+$/, '')
+  return (d === '' ? '' : d) + '/' + name
 }
 async function listRemote() {
   const r = await call(api().list, selected.value, remotePath.value)
@@ -410,9 +453,62 @@ async function remoteMkdir() {
   await listRemote()
 }
 async function remoteDelete(row) {
-  await call(api().del, selected.value, row.path)
+  try {
+    await ElMessageBox.confirm(`确认删除「${row.name}」？该操作不可恢复`, '删除确认', { type: 'warning' })
+  } catch (e) { return }
+  // FTP 删除目录需以 / 结尾，后端据此区分 DELE / RMD
+  await call(api().del, selected.value, row.isDir ? row.path.replace(/\/+$/, '') + '/' : row.path)
   ElMessage.success('已删除')
+  remoteChecked.value = []
   await listRemote()
+}
+// 批量删除选中的文件 / 目录
+async function remoteDeleteBatch() {
+  const rows = remoteChecked.value.slice()
+  if (!rows.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${rows.length} 项？该操作不可恢复`, '批量删除', { type: 'warning' })
+  } catch (e) { return }
+  let ok = 0
+  for (const row of rows) {
+    try {
+      await api().del(selected.value, row.isDir ? row.path.replace(/\/+$/, '') + '/' : row.path)
+      ok++
+    } catch (e) { /* 单项失败继续处理其余项 */ }
+  }
+  ElMessage.success(`已删除 ${ok}/${rows.length} 项`)
+  remoteChecked.value = []
+  await listRemote()
+}
+// 下载：由后端弹出保存对话框并写入本地
+async function remoteDownload(row) {
+  if (row.isDir) { ElMessage.warning('暂不支持下载整个目录'); return }
+  try {
+    const local = await api().download(selected.value, row.path, row.name)
+    if (local) ElMessage.success('已保存到：' + local)
+  } catch (err) {
+    ElMessage.error('下载失败：' + (err && err.message ? err.message : err))
+  }
+}
+// 重命名
+function openRename(row) {
+  renameRow.value = row
+  renameName.value = row.name
+  renameShown.value = true
+}
+async function doRename() {
+  const row = renameRow.value
+  const name = (renameName.value || '').trim()
+  if (!row || !name || name === row.name) { renameShown.value = false; return }
+  if (name.includes('/')) { ElMessage.warning('名称不能包含 /'); return }
+  try {
+    await api().rename(selected.value, row.path, joinRemote(remotePath.value, name))
+    renameShown.value = false
+    ElMessage.success('已重命名')
+    await listRemote()
+  } catch (err) {
+    ElMessage.error('重命名失败：' + (err && err.message ? err.message : err))
+  }
 }
 function gotoParent() {
   const p = remotePath.value || '/'
@@ -459,11 +555,12 @@ function fileToBase64(file) {
     r.readAsArrayBuffer(file)
   })
 }
-// SFTP 面板：上传到当前浏览目录
-async function uploadToSftp(files) {
+// SFTP / FTP 面板：上传到当前浏览目录
+async function uploadToRemote(files) {
+  const up = api().upload
   for (const f of files) {
     const b64 = await fileToBase64(f)
-    await call(PluginSFTPUploadB64, selected.value, remotePath.value || '/', f.name, b64)
+    await call(up, selected.value, remotePath.value || '/', f.name, b64)
   }
   ElMessage.success(`已上传 ${files.length} 个文件到 ${remotePath.value || '/'}`)
   await listRemote()

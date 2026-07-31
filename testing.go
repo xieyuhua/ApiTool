@@ -38,6 +38,16 @@ func buildApiBrief(api ApiInfo, common CommonParams, envKeys []string) string {
 }
 
 // genCasesForApi 针对单个接口调用 AI 生成测试用例
+// dirNameOf 按目录 ID 查找目录名称（用于测试用例的目录归属展示）
+func dirNameOf(dirs []Directory, id string) string {
+	for _, d := range dirs {
+		if d.ID == id {
+			return d.Name
+		}
+	}
+	return ""
+}
+
 func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []string) ([]TestCase, error) {
 	brief := buildApiBrief(api, common, envKeys)
 	system := `你是一名资深 API 测试专家。根据提供的接口信息，生成覆盖全面的自动化测试用例。
@@ -128,6 +138,7 @@ func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []stri
 			ID:          genID(),
 			ApiID:       api.ID,
 			ApiName:     api.Name,
+			DirID:       api.DirID,
 			Category:    cat,
 			Name:        c.Name,
 			Description: c.Description,
@@ -169,7 +180,14 @@ func (a *App) GenerateTestCases(apiID string) ([]TestCase, error) {
 		return nil, fmt.Errorf("未找到指定的接口")
 	}
 	envKeys := activeEnvKeys(data, idx)
-	return genCasesForApi(data.Settings, *api, data.Projects[idx].Common, envKeys)
+	cases, err := genCasesForApi(data.Settings, *api, data.Projects[idx].Common, envKeys)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cases {
+		cases[i].DirName = dirNameOf(data.Projects[idx].Dirs, api.DirID)
+	}
+	return cases, nil
 }
 
 // GenerateTestCasesForApis 批量生成（可先导入 OpenAPI，再对多个接口生成）
@@ -198,6 +216,9 @@ func (a *App) GenerateTestCasesForApis(apiIDs []string) ([]TestCase, error) {
 		if err != nil {
 			return out, err
 		}
+		for j := range cases {
+			cases[j].DirName = dirNameOf(data.Projects[idx].Dirs, api.DirID)
+		}
 		out = append(out, cases...)
 	}
 	if len(out) == 0 {
@@ -212,6 +233,7 @@ func apiToTestCase(api ApiInfo) TestCase {
 		ID:          genID(),
 		ApiID:       api.ID,
 		ApiName:     api.Name,
+		DirID:       api.DirID,
 		Category:    "正常流程",
 		Name:        api.Method + " " + firstNonEmpty(api.Name, api.URL),
 		Description: api.Description,
@@ -252,7 +274,9 @@ func (a *App) ImportApisAsTestCases(apiIDs []string) (int, error) {
 		if !idSet[api.ID] {
 			continue
 		}
-		data.Projects[idx].TestCases = append(data.Projects[idx].TestCases, apiToTestCase(api))
+		tc := apiToTestCase(api)
+		tc.DirName = dirNameOf(data.Projects[idx].Dirs, api.DirID)
+		data.Projects[idx].TestCases = append(data.Projects[idx].TestCases, tc)
 		count++
 	}
 	if count == 0 {
@@ -348,6 +372,9 @@ func (a *App) runGenJob(job genJobReq) {
 			continue
 		}
 		allCases = append(allCases, cases...)
+		for k := range allCases {
+			allCases[k].DirName = dirNameOf(proj.Dirs, allCases[k].DirID)
+		}
 		a.emitGenProgress(job.jobID, total, done, api.Name, "ok")
 	}
 	runtime.EventsEmit(a.ctx, "apitool:gen-done", map[string]interface{}{
@@ -697,6 +724,34 @@ func (a *App) runCase(c TestCase, env []KV, common CommonParams, timeout int) Te
 
 // RunTestCases 执行指定用例（可跨计划），支持并发执行（并发数 concurrency<=0 时退化为串行）。
 // 返回测试报告（不持久化，由前端负责保存）。结果按入参用例顺序返回。
+// DeleteTestCases 按 ID 批量删除当前项目的测试用例
+func (a *App) DeleteTestCases(caseIDs []string) (int, error) {
+	data := a.readData()
+	idx := activeProjectIndex(data)
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	idSet := map[string]bool{}
+	for _, id := range caseIDs {
+		idSet[id] = true
+	}
+	kept := make([]TestCase, 0)
+	removed := 0
+	for _, c := range data.Projects[idx].TestCases {
+		if idSet[c.ID] {
+			removed++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	data.Projects[idx].TestCases = kept
+	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.SaveData(data); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (TestReport, error) {
 	data := a.readData()
 	idx := activeProjectIndex(data)
