@@ -5,8 +5,8 @@ import {
   BuildSharedHTML, BuildSharedTitle, ExportDoc, ShareDoc,
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
   SyncShareBackend,
-} from '../../wailsjs/go/main/App'
-import { store, cloudBase } from '../store'
+} from '../../../wailsjs/go/main/App'
+import { store, cloudBase } from '../../store'
 
 const props = defineProps({
   dirId: { type: String, default: '' },

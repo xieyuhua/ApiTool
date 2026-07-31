@@ -1,9 +1,9 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../store'
-import { parseCli, FORMATS } from '../cli'
-import { CopyToClipboard } from '../../wailsjs/go/main/App'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../../store'
+import { parseCli, FORMATS } from '../../cli'
+import { CopyToClipboard } from '../../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
 
 // 左侧选项卡：目录 / 日志 切换（持久化）

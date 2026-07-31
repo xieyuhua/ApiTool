@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../wailsjs/go/main/App'
-import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports } from '../store'
+import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
+import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 
 const scopeDirId = ref('')

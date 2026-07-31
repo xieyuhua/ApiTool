@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { uid, currentProject } from '../store'
-import KVEditor from './KVEditor.vue'
+import { uid, currentProject } from '../../store'
+import KVEditor from '../test/KVEditor.vue'
 
 const visible = defineModel('visible')
 const activeId = ref('')

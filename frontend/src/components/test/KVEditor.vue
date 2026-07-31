@@ -1,5 +1,5 @@
 <script setup>
-import { newKV } from '../store'
+import { newKV } from '../../store'
 
 const props = defineProps({
   items: { type: Array, required: true },

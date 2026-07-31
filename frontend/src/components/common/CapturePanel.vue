@@ -5,9 +5,9 @@ import {
   CaptureInfo, StartCaptureServer, StopCaptureServer, GetCapturedRequests,
   ClearCapturedRequests, GenerateApiFromCaptured, ExportCapturedOpenAPI,
   BuildCapturedOpenAPI, CopyToClipboard, ImportCapturedAsTestCases,
-} from '../../wailsjs/go/main/App'
-import { store, saveNow, reloadStore } from '../store'
-import { FORMATS } from '../cli'
+} from '../../../wailsjs/go/main/App'
+import { store, saveNow, reloadStore } from '../../store'
+import { FORMATS } from '../../cli'
 
 const info = reactive({ running: false, addr: '', port: '', url: '', token: '', count: 0 })
 const list = ref([])

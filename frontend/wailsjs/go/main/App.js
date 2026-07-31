@@ -350,6 +350,10 @@ export function ShowClipboardWindow() {
   return window['go']['main']['App']['ShowClipboardWindow']();
 }
 
+export function ShowMainWindow() {
+  return window['go']['main']['App']['ShowMainWindow']();
+}
+
 export function StartCaptureServer(arg1, arg2) {
   return window['go']['main']['App']['StartCaptureServer'](arg1, arg2);
 }

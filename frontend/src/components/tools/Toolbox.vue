@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ToolHash, ToolHmac, ToolCipher } from '../../wailsjs/go/main/App'
-import { store, callAI } from '../store'
+import { ToolHash, ToolHmac, ToolCipher } from '../../../wailsjs/go/main/App'
+import { store, callAI } from '../../store'
 import SplitPane from './SplitPane.vue'
 
 const props = defineProps({ tool: { type: String, default: 'json' } })

@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { newField } from '../store'
+import { newField } from '../../store'
 
 const props = defineProps({
   fields: { type: Array, required: true },

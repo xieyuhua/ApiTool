@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { store, removeClip, clearClipHistory, copyClipItem, clipImageURL } from '../store'
+import { store, removeClip, clearClipHistory, copyClipItem, clipImageURL } from '../../store'
 
 const kw = ref('')
 const list = computed(() => {
@@ -40,7 +40,7 @@ async function clearAll() {
   ElMessage.success('已清空')
 }
 function openPopup() {
-  ElMessage.info('连续按两次 Ctrl（或右键托盘 → 剪贴板历史…）即可弹出剪贴板历史')
+  ElMessage.info('Ctrl+B 弹出剪贴板历史（或右键托盘 → 剪贴板历史…）；连续按两次 Ctrl 打开主窗体')
 }
 </script>
 

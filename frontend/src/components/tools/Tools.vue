@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import PluginManager from './PluginManager.vue'
 import Toolbox from './Toolbox.vue'
-import ToolClipboard from './ToolClipboard.vue'
+import ToolClipboard from '../clipboard/ToolClipboard.vue'
 
 const PLUGIN_KEYS = ['ssh', 'ftp', 'sftp']
 

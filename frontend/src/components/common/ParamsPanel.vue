@@ -1,10 +1,10 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ParseFields, FormatJSON, GenerateDescriptions } from '../../wailsjs/go/main/App'
-import { getLiveResponse, markDebugDirty, debugDirty, saveDebugNow } from '../store'
+import { ParseFields, FormatJSON, GenerateDescriptions } from '../../../wailsjs/go/main/App'
+import { getLiveResponse, markDebugDirty, debugDirty, saveDebugNow } from '../../store'
 import FieldTable from './FieldTable.vue'
-import KVEditor from './KVEditor.vue'
+import KVEditor from '../test/KVEditor.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
 

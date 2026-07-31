@@ -12,6 +12,7 @@
 - 两种分享方式：**网页代码（独立 HTML）** 与 **在线链接（本地或云服务器）**
 - 云同步 / 多端共享、内置同步服务
 - 本地 JSON 配置 + 客户端自动升级检测
+- **剪贴板历史**：系统级监听，连续按两次 Ctrl 调出浮层，自动记录复制过的文本与图片，支持搜索、快捷复制/删除
 
 ---
 
@@ -32,6 +33,7 @@
 | 自动同步 | 可开关；开启后编辑自动备份到云端、启动自动拉取 |
 | 内置同步 | 桌面端可一键启动内置同步服务，供局域网/公网连接 |
 | AI 配置 | 配置 OpenAI 兼容接口，自动生成字段描述 |
+| 剪贴板历史 | 系统级监听复制内容（文本 + 图片），连续两次 Ctrl 调出浮层，支持搜索、复制、删除 |
 | 版本与升级 | 本地 JSON 记录版本号与升级地址，支持一键检测更新 |
 
 ---
@@ -233,6 +235,28 @@ request.body.data.page = 1
   - 客户端按语义化版本号比较，服务端版本更高时提示「发现新版本」并给出下载入口。
 - 升级服务端约定：`GET <升级地址>/version`，建议开启跨域 `Access-Control-Allow-Origin: *` 便于桌面端访问。
 
+### 12. 剪贴板历史
+
+桌面端在系统层面监听剪贴板变化，自动记录你**复制过的文本与图片**，无需打开主窗口即可随时调出、检索与复用。
+
+**如何打开**
+- **连续按两次 Ctrl**（两次间隔 ≤ 500ms）即可弹出 / 收起剪贴板历史浮层；
+  该监听是全局的，即使主窗口最小化、隐藏到托盘甚至未聚焦也能触发。
+- 也可在**系统托盘右键菜单 → 「剪贴板历史…」**打开。
+
+**浮层操作**
+- **搜索**：顶部输入框按内容实时过滤（图片项也可按时间检索）。
+- **键盘导航**：`↑` / `↓` 在条目间移动，`Enter` 复制当前条目，`Delete` 删除当前条目，`Esc` 关闭浮层。
+- **鼠标操作**：单击条目直接复制回剪贴板；右侧删除按钮移除该条。
+- **文本**：复制后写入系统剪贴板，可粘贴到任意程序。
+- **图片**：记录复制的图片缩略图，复制时以图片形式写回剪贴板（可在微信、文档等中粘贴）。
+
+**设置**
+- 入口：设置 → 「剪贴板」。`监控剪贴板`（开关）控制是否记录；`最大保留条数`限制历史上限，超出后自动丢弃最旧的条目。
+- 记录保存在本地数据目录下的 `clipimg/` 子目录（图片以 PNG 存储），应用退出时清理被删除图片的文件。
+
+> 说明：全局快捷键（双击 Ctrl）为固定行为，不依赖设置；其实现见 `hotkey_windows.go`（Windows 低级键盘钩子）+ `clipboard_windows.go`（剪贴板捕获 / 浮层窗口控制）。
+
 ---
 
 ## 四、部署云分享服务器（公网访问文档）
@@ -320,20 +344,40 @@ A：说明 Wails 桥接未正确注入。请确认用 `wails build` / `wails dev
 
 ```
 apitool/
-├── main.go              # Wails 应用入口
-├── app.go               # 数据读写、文档生成、剪贴板/浏览器、升级检测等后端方法
-├── share.go             # 本地分享服务（localhost 托管）
-├── syncserver.go        # 桌面端内置同步服务
-├── import.go            # 外部文档导入（OpenAPI/Swagger/Postman）+ 空目录剪枝
-├── models.go            # 数据模型（含公共参数、版本字段）
-├── server/              # 可独立部署的云同步/分享服务器
+├── main.go               # Wails 应用入口
+├── app.go                # 数据读写、文档生成、剪贴板/浏览器、升级检测等后端方法
+├── models.go             # 数据模型（含公共参数、剪贴板、版本字段）
+├── share.go              # 本地分享服务（localhost 托管）
+├── syncserver.go         # 桌面端内置同步服务
+├── import.go             # 外部文档导入（OpenAPI/Swagger/Postman）+ 空目录剪枝
+├── clipboard_windows.go  # 剪贴板捕获（文本+图片）、浮层窗口控制、复制回写
+├── hotkey_windows.go     # 全局快捷键（连续两次 Ctrl）低级键盘钩子
+├── tray.go               # 系统托盘菜单（含「剪贴板历史…」入口）
+├── ai.go / capture.go / dbclient.go / export.go / httpclient.go
+├── plugins.go / jsonparse.go / tools.go / testing.go / stresstest.go
+├── server/               # 可独立部署的云同步/分享服务器
 │   ├── server.go
 │   └── cmd/main.go
-└── frontend/            # Vue 前端
-    └── src/components/  # 各功能组件
-        ├── DebugPanel.vue     # 接口调试（含公共参数/环境变量入口、请求区）
-        ├── ParamsPanel.vue    # 参数设置（请求参数/响应参数/请求头）
-        ├── CommonParams.vue   # 公共参数弹窗
-        ├── EnvManager.vue     # 环境变量管理
-        └── ...
+└── frontend/             # Vue 前端
+    └── src/
+        ├── App.vue
+        ├── store.js      # 全局状态（含剪贴板历史加载/复制/删除）
+        └── components/   # 按功能分组的组件
+            ├── clipboard/   # 剪贴板历史相关
+            │   ├── ClipboardHistory.vue   # 浮层（搜索/导航/复制/删除）
+            │   └── ToolClipboard.vue      # 调试页内的剪贴板入口
+            ├── test/        # 测试中心
+            │   ├── TestCenter.vue
+            │   └── KVEditor.vue
+            ├── doc/         # 文档中心 / 预览 / 分享
+            │   ├── DocCenter.vue / DocPreview.vue / ShareDialog.vue
+            ├── tools/       # 工具箱 / 插件
+            │   ├── Tools.vue / Toolbox.vue / PluginManager.vue / SplitPane.vue
+            ├── settings/    # 设置 / 云同步
+            │   ├── SettingsPanel.vue / CloudSync.vue
+            ├── layout/      # 布局
+            │   ├── Sidebar.vue / LogPanel.vue
+            └── common/      # 通用面板（参数/环境变量/调试等）
+                ├── ParamsPanel.vue / DebugPanel.vue / FieldTable.vue
+                ├── EnvManager.vue / CommonParams.vue / CapturePanel.vue
 ```

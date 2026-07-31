@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { logStore, clearLogs } from '../store'
+import { logStore, clearLogs } from '../../store'
 
 const levelMeta = {
   request:  { label: '请求', color: '#165dff', bg: '#e8f0ff' },

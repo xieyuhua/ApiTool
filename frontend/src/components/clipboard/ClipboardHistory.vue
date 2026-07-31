@@ -68,8 +68,8 @@
 
 <script>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { store } from '../store'
-import { copyClipItem, removeClip, clearClipHistory, clipImageURL } from '../store'
+import { store } from '../../store'
+import { copyClipItem, removeClip, clearClipHistory, clipImageURL } from '../../store'
 
 export default {
   name: 'ClipboardHistory',

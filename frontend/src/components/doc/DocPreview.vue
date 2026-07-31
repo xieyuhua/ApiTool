@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ExportDoc, CopyDocMarkdown } from '../../wailsjs/go/main/App'
-import { saveNow, currentProject, savedApiSnapshots } from '../store'
+import { ExportDoc, CopyDocMarkdown } from '../../../wailsjs/go/main/App'
+import { saveNow, currentProject, savedApiSnapshots } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })

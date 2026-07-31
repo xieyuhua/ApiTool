@@ -166,13 +166,13 @@ import {
   PluginSFTPUploadB64, PluginSFTPRename, PluginSFTPDownload,
   PluginFTPList, PluginFTPRead, PluginFTPWrite, PluginFTPMkdir, PluginFTPDelete,
   PluginFTPUploadB64, PluginFTPRename, PluginFTPDownload,
-} from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+} from '../../../wailsjs/go/main/App'
+import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 // 标准终端引擎：完整支持 ANSI/VT100、真彩色、交替屏，能正确渲染 htop/vim/top 等全屏 TUI
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../store.js'
+import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../../store.js'
 
 // 连接分类定义
 const categories = [

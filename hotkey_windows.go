@@ -9,15 +9,20 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// 全局快捷键：在 Windows 系统层面监听键盘（即使主窗口失焦 / 隐藏到托盘也能触发），
-// 连续按两次 Ctrl（默认 500ms 内）即调出剪贴板历史浮层（Vue 渲染，支持文本与图片）。
+// 全局快捷键：在 Windows 系统层面监听键盘（即使主窗口失焦 / 隐藏到托盘也能触发）。
+//   - 连续按两次 Ctrl（默认 500ms 内）→ 打开主窗体
+//   - Ctrl+B → 打开剪贴板历史浮层
+//
 // 写死，不依赖设置。
 
 const (
 	whKeyboardLL = 13
 	wmKeydown    = 0x0100
-	vkControl    = 0xA2 // VK_CONTROL / VK_LCONTROL
-	vkRControl   = 0xA3 // VK_RCONTROL
+	wmKeyup      = 0x0101
+
+	vkControl  = 0xA2 // VK_CONTROL / VK_LCONTROL
+	vkRControl = 0xA3 // VK_RCONTROL
+	vkB        = 0x42 // B
 
 	doubleCtrlWindow = 500 * time.Millisecond // 两次 Ctrl 按下的最大间隔
 )
@@ -36,9 +41,10 @@ var (
 	procGetMsg  = user32.NewProc("GetMessageW")
 	procNextHook = user32.NewProc("CallNextHookEx")
 
-	hotkeyHook    windows.Handle
-	hotkeyApp     *App // 钩子回调使用的 App 实例（NewCallback 不支持闭包，故用包级变量）
-	lastCtrlTime  time.Time
+	hotkeyHook   windows.Handle
+	hotkeyApp    *App // 钩子回调使用的 App 实例（NewCallback 不支持闭包，故用包级变量）
+	lastCtrlTime time.Time
+	ctrlDown     bool
 )
 
 // startGlobalHotkey 安装全局键盘钩子（应在独立 goroutine 中运行）。
@@ -64,15 +70,30 @@ func (a *App) startGlobalHotkey() {
 func lowLevelKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		kh := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
-		if wParam == wmKeydown && (kh.VkCode == vkControl || kh.VkCode == vkRControl) {
+		vk := kh.VkCode
+		down := wParam == wmKeydown
+		up := wParam == wmKeyup
+
+		switch {
+		case down && (vk == vkControl || vk == vkRControl):
+			ctrlDown = true
 			now := time.Now()
 			if now.Sub(lastCtrlTime) <= doubleCtrlWindow {
-				// 连续两次 Ctrl：调出剪贴板历史浮层
+				// 连续两次 Ctrl：打开主窗体
 				lastCtrlTime = time.Time{} // 复位，避免三次连按立即再触发
-				go hotkeyApp.toggleClipboardWindow()
+				ctrlDown = false
+				go hotkeyApp.ShowMainWindow()
 				return 1
 			}
 			lastCtrlTime = now
+
+		case up && (vk == vkControl || vk == vkRControl):
+			ctrlDown = false
+
+		case down && vk == vkB && ctrlDown:
+			// Ctrl+B：打开剪贴板历史浮层
+			go hotkeyApp.toggleClipboardWindow()
+			return 1
 		}
 	}
 	r, _, _ := procNextHook.Call(0, uintptr(nCode), wParam, lParam)

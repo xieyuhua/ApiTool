@@ -176,6 +176,8 @@ export function ShareTestReport(arg1:string,arg2:string,arg3:number):Promise<str
 
 export function ShowClipboardWindow():Promise<void>;
 
+export function ShowMainWindow():Promise<void>;
+
 export function StartCaptureServer(arg1:string,arg2:string):Promise<string>;
 
 export function StartClipboardCapture():Promise<void>;

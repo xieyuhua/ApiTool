@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { SendRequest, FormatJSON, ParseFields } from '../../wailsjs/go/main/App'
-import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../store'
-import { runScript } from '../script'
-import KVEditor from './KVEditor.vue'
+import { SendRequest, FormatJSON, ParseFields } from '../../../wailsjs/go/main/App'
+import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../../store'
+import { runScript } from '../../script'
+import KVEditor from '../test/KVEditor.vue'
 
 const props = defineProps({ api: { type: Object, required: true } })
 

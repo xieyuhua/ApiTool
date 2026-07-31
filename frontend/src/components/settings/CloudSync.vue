@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { store, currentProject, saveNow, scheduleAutoSync, cloudBase } from '../store'
+import { store, currentProject, saveNow, scheduleAutoSync, cloudBase } from '../../store'
 
 const visible = defineModel('visible')
 const username = ref('')

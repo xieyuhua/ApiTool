@@ -512,6 +512,15 @@ func (a *App) CloseClipboardWindow() {
 	runtime.WindowHide(a.ctx)
 }
 
+// ShowMainWindow 显示主窗体（与托盘「显示主窗口」一致：取消置顶、恢复显示）。
+// 连续两次 Ctrl 调用，用于打开主窗体（而非剪贴板历史浮层）。
+func (a *App) ShowMainWindow() {
+	runtime.WindowSetAlwaysOnTop(a.ctx, false)
+	runtime.WindowShow(a.ctx)
+	runtime.WindowUnminimise(a.ctx)
+	a.windowVisible = true
+}
+
 // ----- 剪贴板写入（DIB）-----
 
 // pngToDIB 将 PNG 字节转换为 BITMAPINFOHEADER + 像素（BGRA，自下而上）

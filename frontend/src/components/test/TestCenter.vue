@@ -5,7 +5,7 @@ import {
   GenerateTestCasesAsync, RunTestPlan, RunTestCases,
   GenerateReportSummary, ExportTestReport, CopyToClipboard,
   GetCapturedRequests, ImportCapturedAsTestCases, ImportApisAsTestCases,
-} from '../../wailsjs/go/main/App'
+} from '../../../wailsjs/go/main/App'
 import {
   saveNow, currentProject, uid, projectApis,
   projectTestCases, projectTestPlans, projectReports,
@@ -13,7 +13,7 @@ import {
   appendReport, removeReport,
   genJobId, genStat, genDoneInfo, genErrorInfo, startGenJob,
   clearTestData,
-} from '../store'
+} from '../../store'
 import KVEditor from './KVEditor.vue'
 
 const tab = ref('cases')
