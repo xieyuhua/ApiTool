@@ -79,19 +79,21 @@ async function refresh() {
     if (sb.running && sb.url) { base = sb.url; token = sb.token; pub = sb.publicUrl }
     else if (cloudReady.value) { base = cloudBase(); token = settings.cloudToken; pub = cloudBase() }
     if (base) {
-      const r = await fetch(base + '/api/share', {
-        headers: { Authorization: 'Bearer ' + token },
-      })
-      const list = await r.json().catch(() => [])
-      if (Array.isArray(list)) {
-        shares.value = list.map(s => ({
-          token: s.token,
-          title: s.title,
-          hasPassword: s.hasPassword,
-          expireAt: s.expireAt,
-          link: pub + '/s/' + s.token,
-        }))
-      }
+      try {
+        const r = await fetch(base + '/api/share', {
+          headers: { Authorization: 'Bearer ' + token },
+        })
+        const list = await r.json().catch(() => [])
+        if (Array.isArray(list)) {
+          shares.value = list.map(s => ({
+            token: s.token,
+            title: s.title,
+            hasPassword: s.hasPassword,
+            expireAt: s.expireAt,
+            link: pub + '/s/' + s.token,
+          }))
+        }
+      } catch { shares.value = await ListShares().catch(() => []) }
     } else {
       shares.value = await ListShares()
     }
@@ -115,33 +117,52 @@ async function create() {
   try {
     const html = await BuildSharedHTML(props.dirId, props.apiId)
     const sb = syncShare.value
+    let token = ''
+    let link = ''
+
+    // 1) 优先使用内置同步服务（同一 :8080 端口，多端共享）
     if (sb.running && sb.url) {
-      // 内置同步服务托管（同一 8080 端口，启动内部服务即可多端共享）
-      const title = await BuildSharedTitle(props.dirId, props.apiId)
-      const r = await fetch(sb.url + '/api/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sb.token },
-        body: JSON.stringify({ title, html, password: password.value, expireMinutes: expire.value }),
-      })
-      const b = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(b.error || ('分享失败 ' + r.status))
-      resultToken.value = b.token
-      result.value = sb.publicUrl + '/s/' + b.token
-    } else if (cloudReady.value) {
-      const r = await fetch(cloudBase() + '/api/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.cloudToken },
-        body: JSON.stringify({ html, password: password.value, expireMinutes: expire.value }),
-      })
-      const b = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(b.error || ('云端分享失败 ' + r.status))
-      resultToken.value = b.token
-      result.value = cloudBase() + '/s/' + b.token
-    } else {
-      const link = await CreateShareLink(props.dirId, props.apiId, password.value, expire.value)
-      resultToken.value = tokenFromLink(link)
-      result.value = link
+      try {
+        const title = await BuildSharedTitle(props.dirId, props.apiId)
+        const r = await fetch(sb.url + '/api/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sb.token },
+          body: JSON.stringify({ title, html, password: password.value, expireMinutes: expire.value }),
+        })
+        const b = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(b.error || ('分享失败 ' + r.status))
+        token = b.token
+        link = sb.publicUrl + '/s/' + b.token
+      } catch (e) {
+        // 仅网络层错误（连接不上）才回退；HTTP 错误（401/400 等）直接抛出提示
+        if (!(e instanceof TypeError)) throw e
+      }
     }
+    // 2) 否则尝试云分享
+    if (!link && cloudReady.value) {
+      try {
+        const r = await fetch(cloudBase() + '/api/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.cloudToken },
+          body: JSON.stringify({ html, password: password.value, expireMinutes: expire.value }),
+        })
+        const b = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(b.error || ('云端分享失败 ' + r.status))
+        token = b.token
+        link = cloudBase() + '/s/' + b.token
+      } catch (e) {
+        if (!(e instanceof TypeError)) throw e
+      }
+    }
+    // 3) 回退到进程内本地分享服务（无需外网，必定可用）；若是由配置后端不可用回退，给出提示
+    if (!link) {
+      const fallback = !!(sb.running && sb.url) || cloudReady.value
+      link = await CreateShareLink(props.dirId, props.apiId, password.value, expire.value)
+      token = tokenFromLink(link)
+      if (fallback) ElMessage.warning('配置的分享服务暂不可达，已回退到本地临时分享（应用退出后失效）')
+    }
+    resultToken.value = token
+    result.value = link
     ElMessage.success('分享链接已生成')
     refresh()
   } catch (e) {
@@ -151,19 +172,25 @@ async function create() {
 async function stop(token) {
   try {
     const sb = syncShare.value
+    let done = false
     if (sb.running && sb.url) {
-      await fetch(sb.url + '/api/share/' + token, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + sb.token },
-      })
+      try {
+        await fetch(sb.url + '/api/share/' + token, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer ' + sb.token },
+        })
+        done = true
+      } catch { /* 网络不可达时回退本地 */ }
     } else if (cloudReady.value) {
-      await fetch(cloudBase() + '/api/share/' + token, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + settings.cloudToken },
-      })
-    } else {
-      await StopShare(token)
+      try {
+        await fetch(cloudBase() + '/api/share/' + token, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer ' + settings.cloudToken },
+        })
+        done = true
+      } catch { /* 网络不可达时回退本地 */ }
     }
+    if (!done) await StopShare(token)
     ElMessage.success('已停止该分享')
     refresh()
   } catch (e) { ElMessage.error(String(e)) }

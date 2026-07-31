@@ -1,7 +1,7 @@
 <script setup>
-import { computed, ref, reactive } from 'vue'
+import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, logStore } from '../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../store'
 import LogPanel from './LogPanel.vue'
 
 // 左侧选项卡：目录 / 日志 切换（持久化）
@@ -66,6 +66,98 @@ function onKeyword(v) { treeRef.value?.filter(v) }
 function onNodeClick(node) {
   if (node.type === 'api') {
     store.currentApiId = node.id
+  }
+}
+
+// ---------------- 批量选中 / 批量删除 ----------------
+const multiSelect = ref(false)
+const checkedApiIds = ref([])
+const checkedCount = computed(() => checkedApiIds.value.length)
+
+function onCheck() {
+  if (!treeRef.value) { checkedApiIds.value = []; return }
+  const nodes = treeRef.value.getCheckedNodes().filter(n => n.type === 'api')
+  checkedApiIds.value = nodes.map(n => n.id)
+}
+// 切换项目时清空选择
+function onSwitchProject(id) {
+  switchProject(id)
+  checkedApiIds.value = []
+}
+// 目录重建（增删/切换项目）后同步勾选状态
+watch(treeData, () => { nextTick(onCheck) })
+
+async function delSelected() {
+  if (!checkedCount.value) return
+  try {
+    await ElMessageBox.confirm(
+      '确定删除选中的 ' + checkedCount.value + ' 个接口？此操作不可恢复。',
+      '批量删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    const p = currentProject()
+    p.apis = p.apis.filter(a => !checkedApiIds.value.includes(a.id))
+    for (const id of checkedApiIds.value) delete savedApiSnapshots[id]
+    if (checkedApiIds.value.includes(store.currentApiId)) store.currentApiId = ''
+    checkedApiIds.value = []
+    saveNow()
+    ElMessage.success('已删除选中接口')
+  } catch { /* 取消 */ }
+}
+
+// ---------------- 目录 / 接口 拖拽排序 / 移动 ----------------
+// 目录与接口都允许拖动
+function allowDrag(node) { return node.data && (node.data.type === 'dir' || node.data.type === 'api') }
+// 校验放置：目录不能拖进它自己的子孙目录
+function allowDrop(dragNode, dropNode, type) {
+  if (!dragNode || !dragNode.data) return false
+  if (dragNode.data.type === 'dir' && dropNode && dropNode.data.type === 'dir') {
+    let p = dropNode
+    while (p) {
+      if (p.data.id === dragNode.data.id) return false
+      p = p.parent
+    }
+  }
+  return true
+}
+
+// 拖拽结束后，按 el-tree 当前展示顺序回写 p.apis / p.dirs 的顺序与归属目录
+function onNodeDrop() {
+  try {
+    const p = currentProject()
+    if (!treeRef.value) return
+    const root = treeRef.value.store.root
+    const dirOrder = {}
+    const apiOrder = {}
+    const collect = (childNodes, parentId) => {
+      dirOrder[parentId] ||= []
+      apiOrder[parentId] ||= []
+      for (const cn of childNodes) {
+        if (cn.data.type === 'dir') {
+          dirOrder[parentId].push(cn.data.id)
+          const d = p.dirs.find(x => x.id === cn.data.id)
+          if (d) d.parentId = parentId
+          collect(cn.childNodes, cn.data.id)
+        } else {
+          apiOrder[parentId].push(cn.data.id)
+          const a = p.apis.find(x => x.id === cn.data.id)
+          if (a) a.dirId = parentId
+        }
+      }
+    }
+    collect(root.childNodes, '')
+    // 在每个父级组内按树中的顺序重排，跨组相对顺序保持不变
+    const reorderByGroup = (items, keyOf, orderMap) => {
+      const groups = {}
+      for (const it of items) (groups[keyOf(it)] ||= []).push(it)
+      for (const key in groups) {
+        const ids = orderMap[key] || []
+        groups[key].sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id))
+      }
+    }
+    reorderByGroup(p.dirs, d => d.parentId, dirOrder)
+    reorderByGroup(p.apis, a => a.dirId, apiOrder)
+    saveNow()
+  } catch (e) {
+    console.error('拖拽回写失败', e)
   }
 }
 
@@ -197,7 +289,7 @@ async function removeProjectNow() {
   <div class="sidebar">
     <div class="sb-proj">
       <el-select v-model="store.data.currentProjectId" size="small" style="flex:1; min-width:0"
-        @change="switchProject" title="切换项目">
+        @change="onSwitchProject" title="切换项目">
         <el-option v-for="p in store.data.projects" :key="p.id" :label="p.name" :value="p.id" />
       </el-select>
       <el-dropdown trigger="click" @command="onProjCmd">
@@ -223,15 +315,19 @@ async function removeProjectNow() {
     <div v-show="sidebarTab === 'tree'" class="sb-body">
       <div class="sb-head">
         <el-input v-model="keyword" placeholder="搜索接口 / 目录" size="small" clearable @input="onKeyword" />
+        <el-button size="small" :type="multiSelect ? 'primary' : 'default'" :plain="!multiSelect"
+          title="进入后可勾选多个接口批量操作" @click="multiSelect = !multiSelect">多选</el-button>
         <el-button size="small" @click="newDir('')">+ 目录</el-button>
         <el-button size="small" type="primary" @click="openNewApi('')">+ 接口</el-button>
       </div>
       <div class="sb-tree" v-loading="store.treeLoading" element-loading-text="加载目录中…" @contextmenu.prevent>
         <el-tree ref="treeRef" :data="treeData" node-key="id" :props="{ label: 'label', children: 'children' }"
           :filter-node-method="filterNode" :expand-on-click-node="true" highlight-current
+          :show-checkbox="multiSelect" @check="onCheck"
+          draggable :allow-drag="allowDrag" :allow-drop="allowDrop" @node-drop="onNodeDrop"
           :current-node-key="store.currentApiId" @node-click="onNodeClick" @node-contextmenu="onCtxMenu">
           <template #default="{ data }">
-            <div class="tree-node" :class="{ selected: data.type === 'api' && data.id === store.currentApiId }">
+            <div class="tree-node" :class="{ selected: data.type === 'api' && data.id === store.currentApiId, 'drag-node': data.type === 'api' }">
               <span v-if="data.type === 'dir'" class="dir-icon">📁</span>
               <span v-else class="method-tag" :class="'m-' + (data.method || 'GET')">{{ data.method || 'GET' }}</span>
               <span class="node-label" :title="data.label">{{ data.label }}</span>
@@ -284,6 +380,10 @@ async function removeProjectNow() {
     <!-- 右键上下文菜单 -->
     <div v-if="ctx.visible" class="ctx-mask" @click="closeCtx" @contextmenu.prevent="closeCtx">
       <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }">
+        <template v-if="checkedCount > 0">
+          <div class="ctx-item danger" @click="delSelected">批量删除选中 ({{ checkedCount }})</div>
+          <div class="ctx-sep"></div>
+        </template>
         <template v-if="ctx.node && ctx.node.type === 'dir'">
           <div class="ctx-item" @click="ctxCmd('addApi')">新建接口</div>
           <div class="ctx-item" @click="ctxCmd('addDir')">新建子目录</div>
@@ -324,6 +424,8 @@ async function removeProjectNow() {
 .sb-head .el-button + .el-button { margin-left: 0; }
 .sb-tree { flex: 1; overflow: auto; padding: 8px 6px; }
 .tree-node { display: flex; align-items: center; gap: 6px; width: 100%; overflow: hidden; padding-right: 4px; }
+.tree-node.drag-node { cursor: grab; }
+.tree-node.drag-node:active { cursor: grabbing; }
 .node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .dir-icon { font-size: 13px; }
 .more-btn {
@@ -341,4 +443,5 @@ async function removeProjectNow() {
 .ctx-item:hover { background: #f2f3f5; }
 .ctx-item.danger { color: #f53f3f; }
 .ctx-item.danger:hover { background: #ffece8; }
+.ctx-sep { height: 1px; background: #f0f1f3; margin: 4px 0; }
 </style>
