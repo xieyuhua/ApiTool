@@ -71,9 +71,11 @@ const DefaultUpdateURL = "http://127.0.0.1" + syncsrv.DefaultSyncAddr
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
+	// 数据目录使用「程序可执行文件所在目录」下的 apitool 子目录，
+	// 便于随程序整体迁移/打包，不再依赖系统用户配置目录（%APPDATA% 等）。
+	dir := "."
+	if exe, err := os.Executable(); err == nil {
+		dir = filepath.Dir(exe)
 	}
 	dataDir := filepath.Join(dir, "apitool")
 	_ = os.MkdirAll(dataDir, 0o755)

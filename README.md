@@ -227,7 +227,7 @@ request.body.data.page = 1
 
 ### 11. 版本与升级
 
-- **本地配置文件**：数据保存在用户配置目录（如 Windows `%APPDATA%/apitool/data.json`），
+- **本地配置文件**：数据保存在**程序启动目录下的 `apitool/` 子目录**（如 `apitool/data.json`），
   其中 `settings.version` 记录客户端版本号，`settings.updateURL` 记录升级服务地址
   （默认 `http://127.0.0.1:8080`）。首次启动若无配置文件会自动生成默认配置。
 - **检测更新**：设置页「版本与升级」卡片显示当前版本、可编辑升级地址，点击「检测更新」
@@ -403,15 +403,29 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 应用支持两种后端存储，**结构化数据（项目/接口/目录/用例/计划/报告/设置/插件连接/剪贴板等）统一入库**，
 接口文档（Markdown / HTML / Word / OpenAPI）以及 Agent 数据仍按原方式以文件保存（见 5.3）。
 
+### 5.0 数据根目录
+
+所有本地数据文件统一存放在**「程序可执行文件所在目录」下的 `apitool/` 子目录**（即 exe 同级 `apitool/`，
+不占用系统用户配置目录如 `%APPDATA%`）。该目录下包含：
+
+- `apitool.db` —— SQLite 主数据库（默认）
+- `data.json` / `storage.json` —— JSON 回退 / MySQL 切换配置
+- `agent.json` —— Agent（MCP / 会话）数据
+- `syncserver/` —— 内置同步服务数据
+- `clipimg/` —— 剪贴板图片缓存
+
+因此**迁移 / 打包程序时，只需把整个 `apitool/` 目录连同 exe 一起复制**即可带走所有数据。
+旧版本位于 `%APPDATA%/apitool` 的数据，整体复制到 exe 同级的 `apitool/` 目录即可沿用。
+
 ### 5.1 默认：SQLite（本地文件）
 
-- 数据保存在用户配置目录（如 Windows：`%APPDATA%/apitool/apitool.db`），首次启动自动建表。
+- 数据保存在程序启动目录下的 `apitool/apitool.db`，首次启动自动建表。
 - 若同目录存在旧版 `data.json`，会在首次启动时**自动导入** SQLite（原 `data.json` 保留作为备份）。
 - 采用纯 Go 实现的 SQLite 驱动（modernc.org/sqlite），无需额外运行时，跨平台一致。
 
 ### 5.2 可选：MySQL（远程 / 共享）
 
-- 在配置目录放置 `storage.json` 即可切换到 MySQL：
+- 在 `apitool/`（程序启动目录下的数据子目录）放置 `storage.json` 即可切换到 MySQL：
   ```json
   { "type": "mysql", "dsn": "user:pass@tcp(127.0.0.1:3306)/apitool?parseTime=true&charset=utf8mb4" }
   ```
