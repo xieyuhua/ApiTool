@@ -4,10 +4,10 @@ import {main} from '../models';
 import {capture} from '../models';
 import {model} from '../models';
 import {agent} from '../models';
+import {share} from '../models';
 import {frontend} from '../models';
 import {plugins} from '../models';
 import {stress} from '../models';
-import {share} from '../models';
 import {store} from '../models';
 import {sync} from '../models';
 
@@ -20,6 +20,10 @@ export function BuildCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<str
 export function BuildReportHTMLContent(arg1:string):Promise<string>;
 
 export function BuildShareDoc(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function BuildSharedHTML(arg1:string,arg2:string):Promise<string>;
+
+export function BuildSharedTitle(arg1:string,arg2:string):Promise<string>;
 
 export function CallAI(arg1:main.CallAIArgs):Promise<string>;
 
@@ -54,6 +58,8 @@ export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
 export function CopyToClipboard(arg1:string):Promise<void>;
 
 export function CreateAgentSession(arg1:string):Promise<string>;
+
+export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
 export function DeleteAgentSession(arg1:string):Promise<void>;
 
@@ -106,6 +112,8 @@ export function ImportCapturedAsTestCases(arg1:Array<string>):Promise<number>;
 export function ImportDoc():Promise<string>;
 
 export function ListAllMCPTools():Promise<Array<agent.MCPTool>>;
+
+export function ListShares():Promise<Array<share.ShareItemView>>;
 
 export function LoadAgentData():Promise<agent.AgentData>;
 
@@ -260,6 +268,8 @@ export function StartSyncServer():Promise<string>;
 export function StopCaptureServer():Promise<void>;
 
 export function StopClipboardCapture():Promise<void>;
+
+export function StopShare(arg1:string):Promise<void>;
 
 export function StopShareServer():Promise<void>;
 

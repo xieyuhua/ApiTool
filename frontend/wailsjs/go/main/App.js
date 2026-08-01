@@ -22,6 +22,14 @@ export function BuildShareDoc(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildShareDoc'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildSharedHTML(arg1, arg2) {
+  return window['go']['main']['App']['BuildSharedHTML'](arg1, arg2);
+}
+
+export function BuildSharedTitle(arg1, arg2) {
+  return window['go']['main']['App']['BuildSharedTitle'](arg1, arg2);
+}
+
 export function CallAI(arg1) {
   return window['go']['main']['App']['CallAI'](arg1);
 }
@@ -88,6 +96,10 @@ export function CopyToClipboard(arg1) {
 
 export function CreateAgentSession(arg1) {
   return window['go']['main']['App']['CreateAgentSession'](arg1);
+}
+
+export function CreateShareLink(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
 }
 
 export function DeleteAgentSession(arg1) {
@@ -192,6 +204,10 @@ export function ImportDoc() {
 
 export function ListAllMCPTools() {
   return window['go']['main']['App']['ListAllMCPTools']();
+}
+
+export function ListShares() {
+  return window['go']['main']['App']['ListShares']();
 }
 
 export function LoadAgentData() {
@@ -500,6 +516,10 @@ export function StopCaptureServer() {
 
 export function StopClipboardCapture() {
   return window['go']['main']['App']['StopClipboardCapture']();
+}
+
+export function StopShare(arg1) {
+  return window['go']['main']['App']['StopShare'](arg1);
 }
 
 export function StopShareServer() {

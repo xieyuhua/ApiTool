@@ -1770,6 +1770,24 @@ export namespace plugins {
 
 export namespace share {
 	
+	export class ShareItemView {
+	    token: string;
+	    title: string;
+	    hasPassword: boolean;
+	    expireAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareItemView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.token = source["token"];
+	        this.title = source["title"];
+	        this.hasPassword = source["hasPassword"];
+	        this.expireAt = source["expireAt"];
+	    }
+	}
 	export class ShareServerInfo {
 	    running: boolean;
 	    addr: string;

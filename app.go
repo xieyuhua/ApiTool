@@ -583,6 +583,36 @@ func (a *App) ShareTestReport(reportJSON, format, openType string) (string, erro
 }
 
 // ----------------------------------------------------------------------------
+// 多分享链接绑定（实现在 internal/share），对齐前端 ShareDialog 契约
+// ----------------------------------------------------------------------------
+
+// BuildSharedHTML 构建指定目录/接口的完整 HTML 网页源码（前端"网页代码"页）。
+func (a *App) BuildSharedHTML(dirID, apiID string) (string, error) {
+	return share.BuildHTMLByAPI(a.store, dirID, apiID)
+}
+
+// BuildSharedTitle 返回指定目录/接口的分享文档标题。
+func (a *App) BuildSharedTitle(dirID, apiID string) (string, error) {
+	return share.BuildTitleByAPI(a.store, dirID, apiID)
+}
+
+// CreateShareLink 创建一条本地分享链接（应用退出后失效），返回可访问 URL。
+func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
+	_, link, err := share.CreateShare(a.store, dirID, apiID, password, expireMinutes)
+	return link, err
+}
+
+// ListShares 返回当前有效分享链接列表。
+func (a *App) ListShares() []share.ShareItemView {
+	return share.ListShares()
+}
+
+// StopShare 停止单条分享链接。
+func (a *App) StopShare(token string) error {
+	return share.StopShare(token)
+}
+
+// ----------------------------------------------------------------------------
 // 压测转发层（实现在 internal/stress）
 // ----------------------------------------------------------------------------
 
