@@ -14,6 +14,7 @@ import EnvManager from './components/common/EnvManager.vue'
 import CommonParams from './components/common/CommonParams.vue'
 import CapturePanel from './components/common/CapturePanel.vue'
 import Tools from './components/tools/Tools.vue'
+import AgentChat from './components/agent/AgentChat.vue'
 import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
 
 const clipVisible = ref(false)
@@ -122,6 +123,7 @@ const navs = [
   { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
   { key: 'tools', label: '工具', icon: '🔧' },
+  { key: 'agent', label: 'AI Agent', icon: '🤖' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
 </script>
@@ -179,6 +181,7 @@ const navs = [
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
     <Tools v-else-if="store.view === 'tools'" />
+    <AgentChat v-else-if="store.view === 'agent'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
   </div>
 

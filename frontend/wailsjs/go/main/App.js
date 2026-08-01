@@ -34,6 +34,14 @@ export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
+export function ClearAgentLogs() {
+  return window['go']['main']['App']['ClearAgentLogs']();
+}
+
+export function ClearAgentMessages() {
+  return window['go']['main']['App']['ClearAgentMessages']();
+}
+
 export function ClearCapturedRequests() {
   return window['go']['main']['App']['ClearCapturedRequests']();
 }
@@ -66,8 +74,16 @@ export function CopyToClipboard(arg1) {
   return window['go']['main']['App']['CopyToClipboard'](arg1);
 }
 
+export function CreateAgentSession(arg1) {
+  return window['go']['main']['App']['CreateAgentSession'](arg1);
+}
+
 export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
+}
+
+export function DeleteAgentSession(arg1) {
+  return window['go']['main']['App']['DeleteAgentSession'](arg1);
 }
 
 export function DeleteClipItem(arg1) {
@@ -158,8 +174,16 @@ export function ImportDoc() {
   return window['go']['main']['App']['ImportDoc']();
 }
 
+export function ListAllMCPTools() {
+  return window['go']['main']['App']['ListAllMCPTools']();
+}
+
 export function ListShares() {
   return window['go']['main']['App']['ListShares']();
+}
+
+export function LoadAgentData() {
+  return window['go']['main']['App']['LoadAgentData']();
 }
 
 export function LoadData() {
@@ -314,6 +338,22 @@ export function PluginTest(arg1) {
   return window['go']['main']['App']['PluginTest'](arg1);
 }
 
+export function PolishText(arg1) {
+  return window['go']['main']['App']['PolishText'](arg1);
+}
+
+export function QueryAgentLogs(arg1) {
+  return window['go']['main']['App']['QueryAgentLogs'](arg1);
+}
+
+export function RenameAgentSession(arg1, arg2) {
+  return window['go']['main']['App']['RenameAgentSession'](arg1, arg2);
+}
+
+export function RunAgent(arg1) {
+  return window['go']['main']['App']['RunAgent'](arg1);
+}
+
 export function RunStressTest(arg1, arg2) {
   return window['go']['main']['App']['RunStressTest'](arg1, arg2);
 }
@@ -326,8 +366,24 @@ export function RunTestPlan(arg1) {
   return window['go']['main']['App']['RunTestPlan'](arg1);
 }
 
+export function SaveAgentConfig(arg1) {
+  return window['go']['main']['App']['SaveAgentConfig'](arg1);
+}
+
+export function SaveAgentSkills(arg1) {
+  return window['go']['main']['App']['SaveAgentSkills'](arg1);
+}
+
+export function SaveAgentUsers(arg1) {
+  return window['go']['main']['App']['SaveAgentUsers'](arg1);
+}
+
 export function SaveData(arg1) {
   return window['go']['main']['App']['SaveData'](arg1);
+}
+
+export function SaveMCPServers(arg1) {
+  return window['go']['main']['App']['SaveMCPServers'](arg1);
 }
 
 export function SendRequest(arg1) {
@@ -382,6 +438,10 @@ export function StopSyncServer() {
   return window['go']['main']['App']['StopSyncServer']();
 }
 
+export function SwitchAgentSession(arg1) {
+  return window['go']['main']['App']['SwitchAgentSession'](arg1);
+}
+
 export function SyncServerRunning() {
   return window['go']['main']['App']['SyncServerRunning']();
 }
@@ -392,6 +452,10 @@ export function SyncServerURL() {
 
 export function SyncShareBackend() {
   return window['go']['main']['App']['SyncShareBackend']();
+}
+
+export function TestMCPServer(arg1) {
+  return window['go']['main']['App']['TestMCPServer'](arg1);
 }
 
 export function ToolCipher(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {

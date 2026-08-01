@@ -22,6 +22,7 @@ type App struct {
 	dataFile     string
 	syncDir      string
 	mu           sync.Mutex
+	agentMu      sync.Mutex // 保护 agent.json 读写
 	captureToken string // 浏览器扩展回传鉴权 Token（持久化）
 	windowVisible bool  // 主窗口当前是否可见（托盘显隐用）
 	clipWinVisible bool // 剪贴板历史浮层当前是否可见
@@ -320,10 +321,14 @@ type CallAIArgs struct {
 
 // callAIRequest / callAIResponse 对应 OpenAI 兼容接口的请求与响应
 type callAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	Stream      bool          `json:"stream"`
+	Model          string                 `json:"model"`
+	Messages       []ChatMessage          `json:"messages"`
+	Temperature    float64                `json:"temperature"`
+	Stream         bool                   `json:"stream"`
+	StreamOptions  *callAIStreamOptions   `json:"stream_options,omitempty"`
+}
+type callAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 type callAIChoice struct {
 	Message ChatMessage `json:"message"`

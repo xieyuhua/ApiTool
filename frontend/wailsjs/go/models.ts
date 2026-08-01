@@ -1,5 +1,339 @@
 export namespace main {
 	
+	export class ToolFlags {
+	    enabled: Record<string, boolean>;
+	    desc: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolFlags(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.desc = source["desc"];
+	    }
+	}
+	export class AgentConfig {
+	    systemPrompt: string;
+	    mode: string;
+	    maxLoops: number;
+	    contextLimit: number;
+	    showThinking: boolean;
+	    enablePolish: boolean;
+	    enableChart: boolean;
+	    temperature: number;
+	    currentUserId: string;
+	    tools: ToolFlags;
+	    maxToolOutput: number;
+	    maxFileRead: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.systemPrompt = source["systemPrompt"];
+	        this.mode = source["mode"];
+	        this.maxLoops = source["maxLoops"];
+	        this.contextLimit = source["contextLimit"];
+	        this.showThinking = source["showThinking"];
+	        this.enablePolish = source["enablePolish"];
+	        this.enableChart = source["enableChart"];
+	        this.temperature = source["temperature"];
+	        this.currentUserId = source["currentUserId"];
+	        this.tools = this.convertValues(source["tools"], ToolFlags);
+	        this.maxToolOutput = source["maxToolOutput"];
+	        this.maxFileRead = source["maxFileRead"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AgentLog {
+	    id: string;
+	    time: string;
+	    timestamp: number;
+	    level: string;
+	    category: string;
+	    title: string;
+	    detail: string;
+	    durationMs: number;
+	    userId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentLog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.time = source["time"];
+	        this.timestamp = source["timestamp"];
+	        this.level = source["level"];
+	        this.category = source["category"];
+	        this.title = source["title"];
+	        this.detail = source["detail"];
+	        this.durationMs = source["durationMs"];
+	        this.userId = source["userId"];
+	    }
+	}
+	export class TokenUsage {
+	    promptTokens: number;
+	    completionTokens: number;
+	    totalTokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TokenUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.promptTokens = source["promptTokens"];
+	        this.completionTokens = source["completionTokens"];
+	        this.totalTokens = source["totalTokens"];
+	    }
+	}
+	export class AgentStep {
+	    type: string;
+	    name: string;
+	    server?: string;
+	    input?: string;
+	    output?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.name = source["name"];
+	        this.server = source["server"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.error = source["error"];
+	    }
+	}
+	export class AgentMsg {
+	    id: string;
+	    role: string;
+	    content: string;
+	    thinking?: string;
+	    steps?: AgentStep[];
+	    time: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentMsg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.thinking = source["thinking"];
+	        this.steps = this.convertValues(source["steps"], AgentStep);
+	        this.time = source["time"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AgentSession {
+	    id: string;
+	    title: string;
+	    createdAt: string;
+	    updatedAt: string;
+	    messages: AgentMsg[];
+	    usage: TokenUsage;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.messages = this.convertValues(source["messages"], AgentMsg);
+	        this.usage = this.convertValues(source["usage"], TokenUsage);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AgentUser {
+	    id: string;
+	    name: string;
+	    token: string;
+	    roles: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentUser(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.token = source["token"];
+	        this.roles = source["roles"];
+	    }
+	}
+	export class MCPServer {
+	    id: string;
+	    name: string;
+	    transport: string;
+	    command: string;
+	    args: string[];
+	    env: Record<string, string>;
+	    url: string;
+	    headers: Record<string, string>;
+	    enabled: boolean;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.transport = source["transport"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.env = source["env"];
+	        this.url = source["url"];
+	        this.headers = source["headers"];
+	        this.enabled = source["enabled"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class AgentSkill {
+	    id: string;
+	    name: string;
+	    description: string;
+	    prompt: string;
+	    enabled: boolean;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentSkill(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.prompt = source["prompt"];
+	        this.enabled = source["enabled"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class AgentData {
+	    config: AgentConfig;
+	    skills: AgentSkill[];
+	    servers: MCPServer[];
+	    users: AgentUser[];
+	    sessions: AgentSession[];
+	    activeSession: string;
+	    usage: TokenUsage;
+	    messages: AgentMsg[];
+	    logs: AgentLog[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.config = this.convertValues(source["config"], AgentConfig);
+	        this.skills = this.convertValues(source["skills"], AgentSkill);
+	        this.servers = this.convertValues(source["servers"], MCPServer);
+	        this.users = this.convertValues(source["users"], AgentUser);
+	        this.sessions = this.convertValues(source["sessions"], AgentSession);
+	        this.activeSession = source["activeSession"];
+	        this.usage = this.convertValues(source["usage"], TokenUsage);
+	        this.messages = this.convertValues(source["messages"], AgentMsg);
+	        this.logs = this.convertValues(source["logs"], AgentLog);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	
+	
+	
 	export class ResponseData {
 	    status: number;
 	    statusText: string;
@@ -1003,6 +1337,27 @@ export namespace main {
 	}
 	
 	
+	export class MCPTool {
+	    name: string;
+	    description: string;
+	    inputSchema: number[];
+	    server: string;
+	    serverName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPTool(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.inputSchema = source["inputSchema"];
+	        this.server = source["server"];
+	        this.serverName = source["serverName"];
+	    }
+	}
+	
 	export class PluginOpResult {
 	    ok: boolean;
 	    error: string;
@@ -1021,6 +1376,24 @@ export namespace main {
 	}
 	
 	
+	export class QueryAgentLogsArgs {
+	    keyword: string;
+	    level: string;
+	    category: string;
+	    limit: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryAgentLogsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keyword = source["keyword"];
+	        this.level = source["level"];
+	        this.category = source["category"];
+	        this.limit = source["limit"];
+	    }
+	}
 	export class RedisItem {
 	    field: string;
 	    value: string;
@@ -1134,6 +1507,66 @@ export namespace main {
 		}
 	}
 	
+	export class RunAgentArgs {
+	    input: string;
+	    baseUrl: string;
+	    apiKey: string;
+	    model: string;
+	    timeoutSec: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunAgentArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.input = source["input"];
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
+	        this.timeoutSec = source["timeoutSec"];
+	    }
+	}
+	export class RunAgentResult {
+	    content: string;
+	    thinking: string;
+	    steps: AgentStep[];
+	    plan?: string;
+	    error?: string;
+	    usage: TokenUsage;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunAgentResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.thinking = source["thinking"];
+	        this.steps = this.convertValues(source["steps"], AgentStep);
+	        this.plan = source["plan"];
+	        this.error = source["error"];
+	        this.usage = this.convertValues(source["usage"], TokenUsage);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class ShareBackend {
 	    url: string;
@@ -1320,6 +1753,8 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	
 	
 	
 	

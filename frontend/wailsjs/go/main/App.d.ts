@@ -18,6 +18,10 @@ export function CaptureServerRunning():Promise<boolean>;
 
 export function CheckUpdate():Promise<main.CheckUpdateResult>;
 
+export function ClearAgentLogs():Promise<void>;
+
+export function ClearAgentMessages():Promise<void>;
+
 export function ClearCapturedRequests():Promise<void>;
 
 export function ClearClipHistory():Promise<void>;
@@ -34,7 +38,11 @@ export function CopyDocMarkdown(arg1:string,arg2:string):Promise<void>;
 
 export function CopyToClipboard(arg1:string):Promise<void>;
 
+export function CreateAgentSession(arg1:string):Promise<string>;
+
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
+
+export function DeleteAgentSession(arg1:string):Promise<void>;
 
 export function DeleteClipItem(arg1:string):Promise<void>;
 
@@ -80,7 +88,11 @@ export function ImportCapturedAsTestCases(arg1:Array<string>):Promise<number>;
 
 export function ImportDoc():Promise<string>;
 
+export function ListAllMCPTools():Promise<Array<main.MCPTool>>;
+
 export function ListShares():Promise<Array<main.ShareInfo>>;
+
+export function LoadAgentData():Promise<main.AgentData>;
 
 export function LoadData():Promise<main.AppData>;
 
@@ -158,13 +170,29 @@ export function PluginSetClipboard(arg1:string):Promise<void>;
 
 export function PluginTest(arg1:main.PluginConn):Promise<main.PluginOpResult>;
 
+export function PolishText(arg1:main.RunAgentArgs):Promise<string>;
+
+export function QueryAgentLogs(arg1:main.QueryAgentLogsArgs):Promise<Array<main.AgentLog>>;
+
+export function RenameAgentSession(arg1:string,arg2:string):Promise<void>;
+
+export function RunAgent(arg1:main.RunAgentArgs):Promise<main.RunAgentResult>;
+
 export function RunStressTest(arg1:Array<main.StressTarget>,arg2:main.StressConfig):Promise<main.StressReport>;
 
 export function RunTestCases(arg1:Array<string>,arg2:string,arg3:number):Promise<main.TestReport>;
 
 export function RunTestPlan(arg1:string):Promise<main.TestReport>;
 
+export function SaveAgentConfig(arg1:main.AgentConfig):Promise<void>;
+
+export function SaveAgentSkills(arg1:Array<main.AgentSkill>):Promise<void>;
+
+export function SaveAgentUsers(arg1:Array<main.AgentUser>):Promise<void>;
+
 export function SaveData(arg1:main.AppData):Promise<void>;
+
+export function SaveMCPServers(arg1:Array<main.MCPServer>):Promise<void>;
 
 export function SendRequest(arg1:main.RequestSpec):Promise<main.ResponseData>;
 
@@ -192,11 +220,15 @@ export function StopShare(arg1:string):Promise<void>;
 
 export function StopSyncServer():Promise<void>;
 
+export function SwitchAgentSession(arg1:string):Promise<void>;
+
 export function SyncServerRunning():Promise<boolean>;
 
 export function SyncServerURL():Promise<string>;
 
 export function SyncShareBackend():Promise<main.ShareBackend>;
+
+export function TestMCPServer(arg1:main.MCPServer):Promise<Array<main.MCPTool>>;
 
 export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<main.ToolResult>;
 

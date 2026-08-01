@@ -541,10 +541,14 @@ func esRequest(conn PluginConn, method, path, body string) (string, error) {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	if n <= 0 {
 		return s
 	}
-	return s[:n] + "..."
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
 
 // PluginESIndices 列出索引
