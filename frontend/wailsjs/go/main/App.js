@@ -138,6 +138,10 @@ export function GenerateTestCasesForApis(arg1) {
   return window['go']['main']['App']['GenerateTestCasesForApis'](arg1);
 }
 
+export function GetBuiltinTools() {
+  return window['go']['main']['App']['GetBuiltinTools']();
+}
+
 export function GetCapturedRequests() {
   return window['go']['main']['App']['GetCapturedRequests']();
 }

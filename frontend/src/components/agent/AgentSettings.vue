@@ -14,17 +14,17 @@ const emit = defineEmits(['update:visible', 'saved'])
 
 const tab = ref('config')
 
-// 内置工具静态元信息（与后端 BuiltinToolMeta 顺序一致），展示用
-const toolList = [
-  { name: 'read_file', icon: '📄', group: '文件操作', def: '读取文本文件内容（可指定行数上限）。' },
-  { name: 'write_file', icon: '✏️', group: '文件操作', def: '写入文本文件（覆盖原内容）。' },
-  { name: 'list_dir', icon: '📂', group: '文件操作', def: '列出目录内容（文件/文件夹）。' },
-  { name: 'web_search', icon: '🔍', group: '网页搜索', def: '网页搜索，返回结果标题、摘要与链接。' },
-  { name: 'system_info', icon: '💻', group: '系统信息', def: '查看本机系统信息（OS/CPU/内存/主机名/时间/目录）。' },
-  { name: 'get_time', icon: '⏰', group: '常用工具', def: '获取当前日期时间（支持指定时区）。' },
-  { name: 'calc', icon: '🧮', group: '常用工具', def: '计算四则运算表达式（仅 + - * / ()）。' },
-  { name: 'run_command', icon: '⌨️', group: '常用工具', def: '执行一条本地 shell 命令并返回输出（请谨慎使用）。' },
-]
+// 内置工具清单【唯一数据源在后端 BuiltinToolMeta()】。前端不硬编码，完全由
+// GetBuiltinTools() 拉取，确保新增/修改工具只改后端一处即可，前后端始终一致。
+const toolList = ref([])
+
+// 从后端拉取内置工具元信息（设置页唯一来源，无本地兜底副本）
+async function loadBuiltinTools() {
+  const list = await AgentAPI.getBuiltinTools()
+  if (Array.isArray(list)) {
+    toolList.value = list
+  }
+}
 
 const local = reactive({
   config: {},
@@ -36,8 +36,14 @@ const local = reactive({
 // 工具描述编辑状态：key=工具名，true 表示正在编辑（默认只读查看）
 const editing = reactive({})
 
-watch(() => props.visible, (v) => {
+watch(() => props.visible, async (v) => {
   if (v) {
+    // 先拉取内置工具清单（唯一数据源），再基于它填充配置，避免竞态导致工具为空
+    try {
+      await loadBuiltinTools()
+    } catch (e) {
+      console.warn('拉取内置工具失败', e)
+    }
     local.config = JSON.parse(JSON.stringify(props.config || {}))
     // 工具开关：从旧版的分组布尔迁移为各工具独立 enabled/desc
     if (typeof local.config.tools !== 'object' || local.config.tools === null) {
@@ -58,7 +64,7 @@ watch(() => props.visible, (v) => {
       '系统信息': !hadOldGroup ? true : !!old.sysInfo,
       '常用工具': !hadOldGroup ? true : !!old.common,
     }
-    for (const t of toolList) {
+    for (const t of toolList.value) {
       if (typeof old.enabled[t.name] !== 'boolean') {
         local.config.tools.enabled[t.name] = groupOn[t.group]
       } else {
@@ -91,7 +97,7 @@ function saveEdit(name) {
 function cancelEdit(name) {
   editing[name] = false
   // 还原为当前配置中的值（丢弃未保存修改）
-  for (const t of toolList) {
+  for (const t of toolList.value) {
     if (t.name === name) {
       local.config.tools.desc[name] = t.def
     }

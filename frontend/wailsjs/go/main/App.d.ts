@@ -70,6 +70,8 @@ export function GenerateTestCasesAsync(arg1:Array<string>):Promise<string>;
 
 export function GenerateTestCasesForApis(arg1:Array<string>):Promise<Array<main.TestCase>>;
 
+export function GetBuiltinTools():Promise<Array<main.BuiltinToolDef>>;
+
 export function GetCapturedRequests():Promise<Array<main.CapturedRequest>>;
 
 export function GetClipImageData(arg1:string):Promise<Record<string, string>>;

@@ -21,6 +21,7 @@ export const AgentAPI = {
   run(args) { return app().RunAgent(args) },
   polish(args) { return app().PolishText(args) },
   listTools() { return app().ListAllMCPTools() },
+  getBuiltinTools() { return app().GetBuiltinTools() },
   testServer(srv) { return app().TestMCPServer(srv) },
   queryLogs(args) { return app().QueryAgentLogs(args) },
   clearLogs() { return app().ClearAgentLogs() },

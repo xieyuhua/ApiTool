@@ -1078,6 +1078,24 @@ export namespace main {
 	}
 	
 	
+	export class BuiltinToolDef {
+	    name: string;
+	    icon: string;
+	    group: string;
+	    default: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BuiltinToolDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.icon = source["icon"];
+	        this.group = source["group"];
+	        this.default = source["default"];
+	    }
+	}
 	export class ChatMessage {
 	    role: string;
 	    content: string;

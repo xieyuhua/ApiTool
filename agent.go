@@ -79,6 +79,11 @@ func BuiltinToolMeta() []BuiltinToolDef {
 	}
 }
 
+// GetBuiltinTools 返回全部内置工具的静态元信息（供前端设置页动态罗列，保证前后端一致）。
+func (a *App) GetBuiltinTools() []BuiltinToolDef {
+	return BuiltinToolMeta()
+}
+
 // ToolFlags 内置工具开关（无需 MCP 服务器，Agent 本地执行）。
 // Enabled 为各工具独立开关（key=工具名），Desc 为各工具的自定义描述（缺省用默认）。
 type ToolFlags struct {
