@@ -33,6 +33,7 @@
 | 自动同步 | 可开关；开启后编辑自动备份到云端、启动自动拉取 |
 | 内置同步 | 桌面端可一键启动内置同步服务，供局域网/公网连接 |
 | AI 配置 | 配置 OpenAI 兼容接口，自动生成字段描述 |
+| AI Agent | 多会话对话助手，可调用本地内置工具（文件/目录/网页搜索/系统信息等），独立开关与描述可编辑；实时累计 Token 统计 |
 | 剪贴板历史 | 系统级监听复制内容（文本 + 图片），连续两次 Ctrl 调出浮层，支持搜索、复制、删除 |
 | 版本与升级 | 本地 JSON 记录版本号与升级地址，支持一键检测更新 |
 
@@ -257,6 +258,71 @@ request.body.data.page = 1
 
 > 说明：全局快捷键（双击 Ctrl）为固定行为，不依赖设置；其实现见 `hotkey_windows.go`（Windows 低级键盘钩子）+ `clipboard_windows.go`（剪贴板捕获 / 浮层窗口控制）。
 
+### 13. AI Agent（智能助手）
+
+左侧导航栏点击 **「Agent」** 进入 AI 智能助手，支持多轮对话、调用本地工具、累计 Token 统计。
+Agent 复用「设置 → AI 配置」中的 OpenAI 兼容接口（兼容 OpenAI / DeepSeek / 通义千问 / 本地 Ollama 等）。
+
+#### 13.1 多会话管理
+
+- **新建会话**：点击左侧栏「+ 新建会话」按钮，每个会话独立保存上下文与历史。
+- **切换 / 重命名 / 删除**：左侧会话列表中，点击切换；重命名、删除通过条目上的操作按钮完成。
+- **继续对话**：在当前会话中直接发送新消息，Agent 会携带**本会话**的历史上下文（不会串到其他会话）。
+- **会话隔离**：每个会话的对话内容、工具调用步骤、Token 消耗都独立记录，互不干扰。
+
+#### 13.2 Token 统计
+
+- 每次对话自动从流式响应中解析 `usage`（prompt / completion / total tokens），并实时累计。
+- 每条会话显示**该会话累计 Token**；左侧栏底部显示**全局累计 Token**（输入 / 输出 / 合计）。
+- 兼容性：请求时自动携带 `stream_options.include_usage=true`，并兼容 OpenAI 蛇形字段 `prompt_tokens`/`completion_tokens`/`total_tokens`，也兼容把 usage 放在任意分片（含最后一个带 `finish_reason` 的事件）的服务。
+  > 注意：少数本地 / 老旧模型即使开启 `include_usage` 也不返回 usage，那种情况下 Token 会显示 0（属服务端限制）。
+
+#### 13.3 内置工具（无需 MCP 服务器，本地直接执行）
+
+设置页切到 **「内置工具」** 选项卡，可对每个工具**单独开关**、并**编辑其描述**（描述会作为工具说明传给模型，影响它何时调用）。工具以紧凑标签展示在对话中（仅显示名字，不展开大段内容）。
+
+| 工具 | 图标 | 功能 | 关键参数 |
+| --- | --- | --- | --- |
+| `read_file` | 📄 | 读取文本文件内容（按 rune 截断，避免中文乱码） | `path`、`limit`（行数上限） |
+| `write_file` | ✏️ | 写入文本文件（覆盖原内容） | `path`、`content` |
+| `list_dir` | 📂 | 列出目录内容（文件/文件夹） | `path` |
+| `make_dir` | 📁 | 创建目录（递归） | `path`、`all`(bool, 默认 true 递归) |
+| `remove_dir` | 🗑️ | 删除目录 | `path`、`all`(bool, 默认 false 仅删空目录) |
+| `remove_file` | ❌ | 删除文件 | `path` |
+| `rename_path` | 🔀 | 重命名 / 移动文件或目录 | `src`、`dst` |
+| `web_search` | 🔍 | 网页搜索（DuckDuckGo HTML），返回标题/摘要/链接 | `query`、`limit` |
+| `system_info` | 💻 | 查看本机系统信息（OS/CPU/内存/主机名/时间/目录） | 无 |
+| `get_time` | ⏰ | 获取当前日期时间（支持时区） | `timezone` |
+| `calc` | 🧮 | 计算四则运算（仅 `+ - * / ()`） | `expr` |
+| `run_command` | ⌨️ | 执行本地 shell 命令并返回输出（请谨慎使用） | `command` |
+
+> 说明：`web_search` 依赖访问外网 DuckDuckGo，离线 / 网络受限环境可能失败；`run_command` 会在本机执行真实命令，使用前请确认信任当前对话内容。
+
+#### 13.4 运行配置
+
+设置页「运行配置」选项卡可调：
+
+- **内容截断长度**（可配置，0 表示用默认）：
+  - `工具输出回灌上限`（默认 4000 字符）：工具执行结果回传给模型前的最大字符数，调大可让模型看到更完整的工具结果。
+  - `文件读取上限`（默认 200000 字符）：`read_file` 等内置文件工具读取的最大字符数。
+
+#### 13.5 工具调用格式
+
+Agent 提示词同时支持两种工具调用格式，模型任选其一（每轮最多一个工具调用）：
+
+- **格式 A（标签，推荐）**：适用于原生支持 function calling 的模型
+  ```xml
+  <tool_call>
+  <function>工具名</function>
+  <parameter name="参数名">参数值</parameter>
+  </tool_call>
+  ```
+- **格式 B（JSON）**：
+  ```json
+  {"action":"tool","server":"builtin","tool":"工具名","arguments":{...}}
+  ```
+  内置工具的 `server` 固定为 `builtin`。解析器兼容多种变体：函数名写在 `<function>` 体内或属性里、参数整体为 JSON 字符串、外层包裹 `<function_calls>` 等。对话中只展示**实际调用了的工具名字**标签，不罗列可用工具。
+
 ---
 
 ## 四、部署云分享服务器（公网访问文档）
@@ -288,6 +354,7 @@ request.body.data.page = 1
 - 桌面端本地数据保存在用户配置目录（如 Windows：`%APPDATA%/apitool/data.json`），
   所有接口信息（含最近一次请求与响应）自动保存。
 - 配置字段：`projects`（项目）、`currentProjectId`（当前项目）、`settings`（含 `version`/`updateURL`/AI/云同步等）。
+- **Agent 数据**独立存储在同目录的 `agent.json`，包含 `sessions`（多会话，每会话独立的 `messages` / `usage`）、`activeSession`（当前会话）、全局 `usage`（累计 Token）。对话内容持久化到磁盘，关闭程序后仍在；正常退出时自动保存。
 - 云服务器端数据保存在 `-data` 指定的目录（账号、项目、分享文档）。
 
 ---
@@ -354,6 +421,9 @@ apitool/
 ├── hotkey_windows.go     # 全局快捷键（连续两次 Ctrl）低级键盘钩子
 ├── tray.go               # 系统托盘菜单（含「剪贴板历史…」入口）
 ├── ai.go / capture.go / dbclient.go / export.go / httpclient.go
+├── agent.go              # Agent 数据模型（多会话、Token、内置工具开关）、读写 agent.json
+├── agent_run.go          # Agent 运行（流式调用、工具调用解析与执行、累计 Token）
+├── builtin_tools.go      # 内置工具定义与本地执行（文件/目录/搜索/系统信息/常用）
 ├── plugins.go / jsonparse.go / tools.go / testing.go / stresstest.go
 ├── server/               # 可独立部署的云同步/分享服务器
 │   ├── server.go
@@ -375,6 +445,11 @@ apitool/
             │   ├── Tools.vue / Toolbox.vue / PluginManager.vue / SplitPane.vue
             ├── settings/    # 设置 / 云同步
             │   ├── SettingsPanel.vue / CloudSync.vue
+            ├── agent/       # AI Agent 助手
+            │   ├── AgentChat.vue       # 对话主界面（多会话侧栏、流式输出、工具标签）
+            │   ├── AgentSettings.vue   # Agent 设置（内置工具开关/描述、运行配置）
+            │   ├── ToolCard.vue        # 工具调用标签（仅显示工具名）
+            │   └── agentApi.js         # Agent 后端接口封装
             ├── layout/      # 布局
             │   ├── Sidebar.vue / LogPanel.vue
             └── common/      # 通用面板（参数/环境变量/调试等）

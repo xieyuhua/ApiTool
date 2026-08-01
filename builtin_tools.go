@@ -44,6 +44,21 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 		"list_dir": {map[string]interface{}{
 			"path": map[string]interface{}{"type": "string", "description": "目录绝对路径，默认当前目录"},
 		}, nil},
+		"make_dir": {map[string]interface{}{
+			"path": map[string]interface{}{"type": "string", "description": "要创建的目录路径"},
+			"all":  map[string]interface{}{"type": "boolean", "description": "可选，true 时递归创建多级目录（默认 true）"},
+		}, []string{"path"}},
+		"remove_dir": {map[string]interface{}{
+			"path": map[string]interface{}{"type": "string", "description": "要删除的目录路径"},
+			"all":  map[string]interface{}{"type": "boolean", "description": "可选，true 时递归删除非空目录（默认 false，仅删空目录）"},
+		}, []string{"path"}},
+		"remove_file": {map[string]interface{}{
+			"path": map[string]interface{}{"type": "string", "description": "要删除的文件路径"},
+		}, []string{"path"}},
+		"rename_path": {map[string]interface{}{
+			"src": map[string]interface{}{"type": "string", "description": "源文件或目录路径"},
+			"dst": map[string]interface{}{"type": "string", "description": "目标文件或目录路径"},
+		}, []string{"src", "dst"}},
 		"web_search": {map[string]interface{}{
 			"query": map[string]interface{}{"type": "string", "description": "搜索关键词"},
 			"limit": map[string]interface{}{"type": "number", "description": "可选，结果条数(默认5)"},
@@ -83,6 +98,14 @@ func (a *App) execBuiltinTool(name string, args map[string]interface{}, fileLimi
 		return builtinWriteFile(args)
 	case "list_dir":
 		return builtinListDir(args)
+	case "make_dir":
+		return builtinMakeDir(args)
+	case "remove_dir":
+		return builtinRemoveDir(args)
+	case "remove_file":
+		return builtinRemoveFile(args)
+	case "rename_path":
+		return builtinRenamePath(args)
 	case "web_search":
 		return builtinWebSearch(args)
 	case "system_info":
@@ -158,6 +181,73 @@ func builtinListDir(args map[string]interface{}) (string, error) {
 		sb.WriteString("\n")
 	}
 	return sb.String(), nil
+}
+
+func builtinMakeDir(args map[string]interface{}) (string, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return "", fmt.Errorf("缺少 path 参数")
+	}
+	// all 缺省按 true 处理（递归创建多级目录），避免常见失败
+	all := true
+	if v, ok := args["all"].(bool); ok {
+		all = v
+	}
+	if all {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return "", err
+		}
+	} else {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("已创建目录: %s", path), nil
+}
+
+func builtinRemoveDir(args map[string]interface{}) (string, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return "", fmt.Errorf("缺少 path 参数")
+	}
+	all := false
+	if v, ok := args["all"].(bool); ok {
+		all = v
+	}
+	if all {
+		if err := os.RemoveAll(path); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已递归删除目录: %s", path), nil
+	}
+	// 默认仅删除空目录
+	if err := os.Remove(path); err != nil {
+		return "", fmt.Errorf("删除失败（目录非空？可传入 all=true 递归删除）: %v", err)
+	}
+	return fmt.Sprintf("已删除空目录: %s", path), nil
+}
+
+func builtinRemoveFile(args map[string]interface{}) (string, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		return "", fmt.Errorf("缺少 path 参数")
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已删除文件: %s", path), nil
+}
+
+func builtinRenamePath(args map[string]interface{}) (string, error) {
+	src, _ := args["src"].(string)
+	dst, _ := args["dst"].(string)
+	if src == "" || dst == "" {
+		return "", fmt.Errorf("缺少 src 或 dst 参数")
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已移动/重命名: %s -> %s", src, dst), nil
 }
 
 func builtinWebSearch(args map[string]interface{}) (string, error) {
