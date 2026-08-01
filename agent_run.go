@@ -483,8 +483,11 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 	}
 
 	messages := []ChatMessage{{Role: "system", Content: sysPrompt}}
-	// 加载最近 N 条上下文
-	hist := d.Messages
+	// 加载当前激活会话的历史上下文（关键：必须用当前会话，而非顶层 Messages，否则会串到别的会话）
+	hist := []AgentMsg{}
+	if sess := d.activeSession(); sess != nil {
+		hist = sess.Messages
+	}
 	if cfg.ContextLimit > 0 && len(hist) > cfg.ContextLimit {
 		hist = hist[len(hist)-cfg.ContextLimit:]
 	}

@@ -180,11 +180,11 @@ async function saveAll() {
         <div class="form-row">
           <div class="form-col">
             <label>Agent Loop 最大轮数</label>
-            <el-input-number v-model="local.config.maxLoops" :min="1" :max="30" />
+            <el-input-number v-model="local.config.maxLoops" :min="1" :max="30000" />
           </div>
           <div class="form-col">
             <label>加载最近上下文条数</label>
-            <el-input-number v-model="local.config.contextLimit" :min="0" :max="200" />
+            <el-input-number v-model="local.config.contextLimit" :min="0" :max="20000" />
           </div>
           <div class="form-col">
             <label>温度</label>
