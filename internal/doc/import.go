@@ -86,7 +86,7 @@ func ImportDoc(ctx context.Context, s *store.Store, version, updateURL string, p
 	// 剪枝：删除没有任何接口（含后代）的空目录，避免导入后产生大量无用的空文件夹
 	dirs = pruneEmptyDirs(dirs, apis)
 
-	data := s.Read(version, updateURL)
+	data := s.GetData()
 	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return "", fmt.Errorf("没有可用的项目")
@@ -94,7 +94,7 @@ func ImportDoc(ctx context.Context, s *store.Store, version, updateURL string, p
 	data.Projects[idx].Dirs = append(data.Projects[idx].Dirs, dirs...)
 	data.Projects[idx].Apis = append(data.Projects[idx].Apis, apis...)
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := s.Write(data); err != nil {
+	if err := s.SaveData(data); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("导入成功：%d 个目录、%d 个接口（已放入项目「%s」的「%s」）", len(dirs), len(apis), data.Projects[idx].Name, rootName), nil

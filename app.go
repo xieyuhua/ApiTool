@@ -222,7 +222,7 @@ func (a *App) ClearTestData(projectID string, scope string) (int, error) {
 
 // SaveData 保存全部数据
 func (a *App) SaveData(data model.AppData) error {
-	return a.store.Write(data)
+	return a.store.SaveData(data)
 }
 
 // GetDataFilePath 返回数据文件路径

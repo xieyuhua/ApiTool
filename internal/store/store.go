@@ -10,30 +10,111 @@ import (
 	"time"
 
 	"apitool/internal/model"
+	"apitool/internal/store/db"
 )
 
-// Store 数据存储器，持有数据文件路径与并发锁。
+// Store 数据存储器，支持 JSON 文件（兼容回退）与数据库（SQLite/MySQL）两种后端。
+// 默认优先使用 SQLite（与 dataFile 同目录的 apitool.db）；若存在 storage.json 指定
+// MySQL，则连接 MySQL。数据库不可用时自动回退到 JSON 文件，保证不崩溃。
 type Store struct {
 	dataFile   string
 	version    string
 	updateURL  string
 	mu         sync.Mutex
+	dbImpl     db.DB // 数据库后端（nil 表示使用 JSON 文件回退）
 }
 
-// New 创建存储器。dataFile 为数据文件绝对路径；
-// version / updateURL 用于默认值补全与升级地址（避免 store 反向依赖 main 包常量）。
+// New 创建存储器。dataFile 为 JSON 数据文件路径（同时作为 SQLite DB 的同级依据）；
+// version / updateURL 用于默认值补全与升级地址。
 func New(dataFile, version, updateURL string) *Store {
-	return &Store{dataFile: dataFile, version: version, updateURL: updateURL}
+	s := &Store{dataFile: dataFile, version: version, updateURL: updateURL}
+	s.initBackend()
+	return s
+}
+
+// storageConfig 描述可选的外部存储配置（storage.json，与 dataFile 同级）。
+type storageConfig struct {
+	Type string `json:"type"` // sqlite | mysql
+	DSN  string `json:"dsn"`  // sqlite 为文件路径；mysql 为连接串
+}
+
+// initBackend 初始化后端：优先 MySQL（storage.json），否则 SQLite，失败回退 JSON。
+func (s *Store) initBackend() {
+	dir := filepath.Dir(s.dataFile)
+
+	// 1) 若同级 storage.json 指定 mysql，则启用
+	cfgPath := filepath.Join(dir, "storage.json")
+	if b, err := os.ReadFile(cfgPath); err == nil {
+		var cfg storageConfig
+		if json.Unmarshal(b, &cfg) == nil && cfg.Type == "mysql" && cfg.DSN != "" {
+			if impl, err := db.OpenMySQL(cfg.DSN, s.version, s.updateURL); err == nil {
+				s.dbImpl = impl
+				return
+			}
+		}
+	}
+
+	// 2) 默认 SQLite（与 dataFile 同目录的 apitool.db）
+	dbPath := filepath.Join(dir, "apitool.db")
+	impl, err := db.OpenSQLite(dbPath, s.version, s.updateURL)
+	if err != nil {
+		// 数据库不可用，回退 JSON 文件模式
+		return
+	}
+	s.dbImpl = impl
+
+	// 3) 首次初始化：若库为空且存在旧 data.json，则导入
+	if s.isEmptySQLite(dbPath) {
+		if old, ok := loadLegacyJSON(s.dataFile, s.version, s.updateURL); ok {
+			_ = impl.Write(old)
+		}
+	}
+}
+
+// isEmptySQLite 判断 SQLite 库是否尚未写入任何项目（用于首次导入判断）。
+func (s *Store) isEmptySQLite(dbPath string) bool {
+	rows, err := s.dbImpl.Read()
+	if err != nil {
+		return true
+	}
+	return len(rows.Projects) == 0
+}
+
+// loadLegacyJSON 读取并修正旧版 JSON 数据文件（复用 JSON 回退逻辑）。
+func loadLegacyJSON(dataFile, version, updateURL string) (model.AppData, bool) {
+	tmp := &Store{dataFile: dataFile, version: version, updateURL: updateURL}
+	data := tmp.readJSON(version, updateURL)
+	if len(data.Projects) == 0 {
+		return data, false
+	}
+	return data, true
 }
 
 // GetData 读取并修正全部数据（等价于旧 App.readData）。
 func (s *Store) GetData() model.AppData {
-	return s.Read(s.version, s.updateURL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		data, err := s.dbImpl.Read()
+		if err == nil {
+			return data
+		}
+		// DB 读取失败则回退 JSON
+	}
+	return s.readJSON(s.version, s.updateURL)
 }
 
 // SaveData 保存全部数据（等价于旧 App.SaveData）。
 func (s *Store) SaveData(data model.AppData) error {
-	return s.Write(data)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		if err := s.dbImpl.Write(data); err == nil {
+			return nil
+		}
+		// DB 写入失败则回退 JSON
+	}
+	return s.writeJSON(data)
 }
 
 // Path 返回数据文件绝对路径。
@@ -71,16 +152,15 @@ func defaultData(version, updateURL string) model.AppData {
 	return data
 }
 
-// Read 从磁盘加载并反序列化全部数据，处理旧版本兼容与默认值补全。
-// 返回经过迁移/修正后的最新结构，调用方无需再处理兼容逻辑。
-func (s *Store) Read(version, updateURL string) model.AppData {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// readJSON 从磁盘加载并反序列化全部数据（JSON 文件回退模式），处理旧版本兼容与默认值补全。
+func (s *Store) readJSON(version, updateURL string) model.AppData {
 	data := defaultData(version, updateURL)
 	b, err := os.ReadFile(s.dataFile)
 	if err != nil {
 		return data
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_ = json.Unmarshal(b, &data)
 	if data.Settings.TimeoutSec <= 0 {
 		data.Settings.TimeoutSec = 30
@@ -140,8 +220,8 @@ func hasProject(data model.AppData, id string) bool {
 	return false
 }
 
-// Write 保存全部数据（原子写：先写临时文件再 rename）。
-func (s *Store) Write(data model.AppData) error {
+// writeJSON 保存全部数据到 JSON 文件（原子写：先写临时文件再 rename）。
+func (s *Store) writeJSON(data model.AppData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, err := json.MarshalIndent(data, "", "  ")

@@ -68,7 +68,7 @@ func CollectScope(data model.AppData, dirID string, apiID string) (title string,
 
 // buildDocContent 按指定格式（markdown/html/word/openapi）生成文档内容。
 func buildDocContent(ctx context.Context, s *store.Store, version, updateURL, dirID, apiID, format string) (content string, title string, err error) {
-	data := s.Read(version, updateURL)
+	data := s.GetData()
 	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return "", "", fmt.Errorf("没有可用的项目")
