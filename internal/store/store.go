@@ -64,15 +64,15 @@ func (s *Store) initBackend() {
 	s.dbImpl = impl
 
 	// 3) 首次初始化：若库为空且存在旧 data.json，则导入
-	if s.isEmptySQLite(dbPath) {
+	if s.isEmptySQLite() {
 		if old, ok := loadLegacyJSON(s.dataFile, s.version, s.updateURL); ok {
 			_ = impl.Write(old)
 		}
 	}
 }
 
-// isEmptySQLite 判断 SQLite 库是否尚未写入任何项目（用于首次导入判断）。
-func (s *Store) isEmptySQLite(dbPath string) bool {
+// isEmptySQLite 判断库是否尚未写入任何项目（用于首次导入判断）。
+func (s *Store) isEmptySQLite() bool {
 	rows, err := s.dbImpl.Read()
 	if err != nil {
 		return true
@@ -153,14 +153,13 @@ func defaultData(version, updateURL string) model.AppData {
 }
 
 // readJSON 从磁盘加载并反序列化全部数据（JSON 文件回退模式），处理旧版本兼容与默认值补全。
+// 调用方负责加锁（GetData 已持锁；loadLegacyJSON 使用临时 Store 无需并发保护）。
 func (s *Store) readJSON(version, updateURL string) model.AppData {
 	data := defaultData(version, updateURL)
 	b, err := os.ReadFile(s.dataFile)
 	if err != nil {
 		return data
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	_ = json.Unmarshal(b, &data)
 	if data.Settings.TimeoutSec <= 0 {
 		data.Settings.TimeoutSec = 30

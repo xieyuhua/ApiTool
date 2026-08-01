@@ -27,7 +27,7 @@ type DB interface {
 }
 
 // jsonCol 将任意值序列化为 JSON 文本（用于嵌套结构列）。
-func jsonCol(v interface{}) string {
+func jsonCol(v any) string {
 	if v == nil {
 		return "[]"
 	}
@@ -39,7 +39,7 @@ func jsonCol(v interface{}) string {
 }
 
 // scanJSON 从文本列解析回目标结构。
-func scanJSON(col string, out interface{}) error {
+func scanJSON(col string, out any) error {
 	if col == "" || col == "[]" || col == "{}" {
 		return nil
 	}

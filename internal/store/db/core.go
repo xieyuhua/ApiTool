@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"apitool/internal/model"
 )
@@ -197,6 +196,10 @@ func readAll(db *sql.DB, version, updateURL string) (model.AppData, error) {
 		p.UpdatedAt = updatedAt.String
 		data.Projects = append(data.Projects, p)
 	}
+	if err := projRows.Err(); err != nil {
+		_ = projRows.Close()
+		return data, err
+	}
 	_ = projRows.Close()
 
 	// 关联子表
@@ -246,6 +249,9 @@ func readDirectories(db *sql.DB, data *model.AppData) error {
 			p.Dirs = append(p.Dirs, d)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -279,6 +285,9 @@ func readApis(db *sql.DB, data *model.AppData) error {
 			p.Apis = append(p.Apis, a)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -302,6 +311,9 @@ func readEnvironments(db *sql.DB, data *model.AppData) error {
 		if p, ok := byProj[pid.String]; ok {
 			p.Environments = append(p.Environments, e)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -334,6 +346,9 @@ func readTestCases(db *sql.DB, data *model.AppData) error {
 			p.TestCases = append(p.TestCases, c)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -361,6 +376,9 @@ func readTestPlans(db *sql.DB, data *model.AppData) error {
 			p.TestPlans = append(p.TestPlans, pl)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -386,6 +404,9 @@ func readTestReports(db *sql.DB, data *model.AppData) error {
 		if p, ok := byProj[pid.String]; ok {
 			p.TestReports = append(p.TestReports, r)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -481,6 +502,3 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
-
-// nowRFC 返回当前 RFC3339 时间（供默认数据补全使用）。
-func nowRFC() string { return time.Now().Format(time.RFC3339) }

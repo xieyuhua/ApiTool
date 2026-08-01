@@ -28,7 +28,7 @@ func OpenSQLite(dsn, version, updateURL string) (*SQLiteDB, error) {
 		_ = conn.Close()
 		return nil, err
 	}
-	if err := initSchema(conn, "sqlite"); err != nil {
+	if err := initSchema(conn); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}

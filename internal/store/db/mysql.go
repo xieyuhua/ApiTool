@@ -27,7 +27,7 @@ func OpenMySQL(dsn, version, updateURL string) (*MySQLDB, error) {
 		_ = conn.Close()
 		return nil, err
 	}
-	if err := initSchema(conn, "mysql"); err != nil {
+	if err := initSchema(conn); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
