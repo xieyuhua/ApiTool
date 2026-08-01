@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package platform
 
 import (
 	"time"
@@ -41,23 +41,26 @@ var (
 	procGetMsg  = user32.NewProc("GetMessageW")
 	procNextHook = user32.NewProc("CallNextHookEx")
 
-	hotkeyHook   windows.Handle
-	hotkeyApp    *App // 钩子回调使用的 App 实例（NewCallback 不支持闭包，故用包级变量）
-	lastCtrlTime time.Time
-	ctrlDown     bool
+	hotkeyHook      windows.Handle
+	lastCtrlTime    time.Time
+	ctrlDown        bool
+	onDoubleCtrl    func() // 由 App 注入：打开主窗体
+	onCtrlB         func() // 由 App 注入：打开剪贴板历史浮层
 )
 
-// startGlobalHotkey 安装全局键盘钩子（应在独立 goroutine 中运行）。
-func (a *App) startGlobalHotkey() {
-	hotkeyApp = a
-	// WH_KEYBOARD_LL 是低级钩子，MSDN 要求 dwModule 必须传 NULL(0)，
-	// 传模块句柄会导致钩子不触发。
+// SetHotkeyHandlers 注册全局热键回调（App 在 startup 时调用，注入自身方法）。
+func SetHotkeyHandlers(doubleCtrl, ctrlB func()) {
+	onDoubleCtrl = doubleCtrl
+	onCtrlB = ctrlB
+}
+
+// StartGlobalHotkey 安装全局键盘钩子（应在独立 goroutine 中运行）。
+func StartGlobalHotkey() {
 	h, _, _ := procSetHook.Call(uintptr(whKeyboardLL), uintptr(windows.NewCallback(lowLevelKeyboardProc)), 0, 0)
 	hotkeyHook = windows.Handle(h)
 	if hotkeyHook == 0 {
 		return
 	}
-	// 消息泵：维持钩子线程。GetMessage 阻塞直到线程收到消息。
 	for {
 		if r, _, _ := procGetMsg.Call(0, 0, 0, 0); int32(r) <= 0 {
 			break
@@ -65,8 +68,7 @@ func (a *App) startGlobalHotkey() {
 	}
 }
 
-// lowLevelKeyboardProc 是全局键盘钩子回调（必须为普通函数，不能用闭包，
-// 否则 windows.NewCallback 无法正确捕获上下文，钩子不会触发）。
+// lowLevelKeyboardProc 是全局键盘钩子回调（必须为普通函数，不能用闭包）。
 func lowLevelKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		kh := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
@@ -79,10 +81,11 @@ func lowLevelKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 			ctrlDown = true
 			now := time.Now()
 			if now.Sub(lastCtrlTime) <= doubleCtrlWindow {
-				// 连续两次 Ctrl：打开主窗体
 				lastCtrlTime = time.Time{} // 复位，避免三次连按立即再触发
 				ctrlDown = false
-				go hotkeyApp.ShowMainWindow()
+				if onDoubleCtrl != nil {
+					go onDoubleCtrl()
+				}
 				return 1
 			}
 			lastCtrlTime = now
@@ -91,8 +94,9 @@ func lowLevelKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 			ctrlDown = false
 
 		case down && vk == vkB && ctrlDown:
-			// Ctrl+B：打开剪贴板历史浮层
-			go hotkeyApp.toggleClipboardWindow()
+			if onCtrlB != nil {
+				go onCtrlB()
+			}
 			return 1
 		}
 	}

@@ -1,6 +1,7 @@
-package main
+package doc
 
 import (
+	"apitool/internal/model"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -10,8 +11,8 @@ import (
 	"time"
 )
 
-func childDirs(dirs []Directory, parentID string) []Directory {
-	var out []Directory
+func childDirs(dirs []model.Directory, parentID string) []model.Directory {
+	var out []model.Directory
 	for _, d := range dirs {
 		if d.ParentID == parentID {
 			out = append(out, d)
@@ -21,8 +22,8 @@ func childDirs(dirs []Directory, parentID string) []Directory {
 	return out
 }
 
-func dirApis(apis []ApiInfo, dirID string) []ApiInfo {
-	var out []ApiInfo
+func dirApis(apis []model.ApiInfo, dirID string) []model.ApiInfo {
+	var out []model.ApiInfo
 	for _, a := range apis {
 		if a.DirID == dirID {
 			out = append(out, a)
@@ -31,8 +32,8 @@ func dirApis(apis []ApiInfo, dirID string) []ApiInfo {
 	return out
 }
 
-func enabledKVs(kvs []KV) []KV {
-	var out []KV
+func EnabledKVs(kvs []model.KV) []model.KV {
+	var out []model.KV
 	for _, kv := range kvs {
 		if kv.Enabled && kv.Key != "" {
 			out = append(out, kv)
@@ -41,7 +42,7 @@ func enabledKVs(kvs []KV) []KV {
 	return out
 }
 
-func mdEscape(s string) string {
+func MdEscape(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
@@ -63,7 +64,7 @@ func escAttr(s string) string {
 
 // ---------------- Markdown ----------------
 
-func mdFieldRows(sb *strings.Builder, fields []*Field, depth int) {
+func mdFieldRows(sb *strings.Builder, fields []*model.Field, depth int) {
 	for _, f := range fields {
 		indent := strings.Repeat("&nbsp;&nbsp;&nbsp;", depth)
 		prefix := ""
@@ -71,12 +72,12 @@ func mdFieldRows(sb *strings.Builder, fields []*Field, depth int) {
 			prefix = "└ "
 		}
 		sb.WriteString(fmt.Sprintf("| %s%s%s | %s | %s | %s | %s |\n",
-			indent, prefix, mdEscape(f.Name), f.Type, boolCN(f.Required), mdEscape(f.Description), mdEscape(f.Example)))
+			indent, prefix, MdEscape(f.Name), f.Type, boolCN(f.Required), MdEscape(f.Description), MdEscape(f.Example)))
 		mdFieldRows(sb, f.Children, depth+1)
 	}
 }
 
-func mdFieldTable(sb *strings.Builder, title string, fields []*Field) {
+func mdFieldTable(sb *strings.Builder, title string, fields []*model.Field) {
 	if len(fields) == 0 {
 		return
 	}
@@ -86,21 +87,21 @@ func mdFieldTable(sb *strings.Builder, title string, fields []*Field) {
 	sb.WriteString("\n")
 }
 
-func mdKVTable(sb *strings.Builder, title string, kvs []KV) {
-	kvs = enabledKVs(kvs)
+func mdKVTable(sb *strings.Builder, title string, kvs []model.KV) {
+	kvs = EnabledKVs(kvs)
 	if len(kvs) == 0 {
 		return
 	}
 	sb.WriteString("**" + title + "**\n\n")
 	sb.WriteString("| 参数名 | 值/示例 | 说明 |\n|---|---|---|\n")
 	for _, kv := range kvs {
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", mdEscape(kv.Key), mdEscape(kv.Value), mdEscape(kv.Description)))
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", MdEscape(kv.Key), MdEscape(kv.Value), MdEscape(kv.Description)))
 	}
 	sb.WriteString("\n")
 }
 
-func mdApi(sb *strings.Builder, api ApiInfo, level int, common CommonParams) {
-	h := strings.Repeat("#", min(level, 6))
+func mdApi(sb *strings.Builder, api model.ApiInfo, level int, common model.CommonParams) {
+	h := strings.Repeat("#", minInt(level, 6))
 	sb.WriteString(fmt.Sprintf("%s %s\n\n", h, api.Name))
 	sb.WriteString(fmt.Sprintf("`%s` `%s`\n\n", strings.ToUpper(api.Method), api.URL))
 	if api.Description != "" {
@@ -126,18 +127,18 @@ func mdApi(sb *strings.Builder, api ApiInfo, level int, common CommonParams) {
 	sb.WriteString("---\n\n")
 }
 
-func mdDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, common CommonParams) {
+func mdDir(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, parentID string, level int, common model.CommonParams) {
 	for _, api := range dirApis(apis, parentID) {
 		mdApi(sb, api, level, common)
 	}
 	for _, d := range childDirs(dirs, parentID) {
-		h := strings.Repeat("#", min(level, 6))
+		h := strings.Repeat("#", minInt(level, 6))
 		sb.WriteString(fmt.Sprintf("%s %s\n\n", h, d.Name))
 		mdDir(sb, dirs, apis, d.ID, level+1, common)
 	}
 }
 
-func buildMarkdown(title, rootID string, dirs []Directory, apis []ApiInfo, common CommonParams) string {
+func buildMarkdown(title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams) string {
 	var sb strings.Builder
 	sb.WriteString("# " + title + "\n\n")
 	sb.WriteString("> 导出时间：" + time.Now().Format("2006-01-02 15:04:05") + "\n\n")
@@ -149,9 +150,14 @@ func buildMarkdown(title, rootID string, dirs []Directory, apis []ApiInfo, commo
 	return sb.String()
 }
 
+// BuildMarkdown 生成 Markdown 文档文本（供分享/复制场景复用内部渲染逻辑）。
+func BuildMarkdown(title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams) string {
+	return buildMarkdown(title, rootID, dirs, apis, common)
+}
+
 // ---------------- HTML ----------------
 
-func htmlFieldRows(sb *strings.Builder, fields []*Field, depth int) {
+func htmlFieldRows(sb *strings.Builder, fields []*model.Field, depth int) {
 	for _, f := range fields {
 		name := html.EscapeString(f.Name)
 		pad := depth * 18
@@ -163,7 +169,7 @@ func htmlFieldRows(sb *strings.Builder, fields []*Field, depth int) {
 	}
 }
 
-func htmlFieldTable(sb *strings.Builder, title string, fields []*Field) {
+func htmlFieldTable(sb *strings.Builder, title string, fields []*model.Field) {
 	if len(fields) == 0 {
 		return
 	}
@@ -172,8 +178,8 @@ func htmlFieldTable(sb *strings.Builder, title string, fields []*Field) {
 	sb.WriteString(`</tbody></table>`)
 }
 
-func htmlKVTable(sb *strings.Builder, title string, kvs []KV) {
-	kvs = enabledKVs(kvs)
+func htmlKVTable(sb *strings.Builder, title string, kvs []model.KV) {
+	kvs = EnabledKVs(kvs)
 	if len(kvs) == 0 {
 		return
 	}
@@ -185,7 +191,7 @@ func htmlKVTable(sb *strings.Builder, title string, kvs []KV) {
 	sb.WriteString(`</tbody></table>`)
 }
 
-func htmlApi(sb *strings.Builder, api ApiInfo, dirName string, common CommonParams) {
+func htmlApi(sb *strings.Builder, api model.ApiInfo, dirName string, common model.CommonParams) {
 	method := strings.ToUpper(api.Method)
 	sb.WriteString(fmt.Sprintf(`<div class="api" id="api-%s" data-name="%s" data-url="%s" data-dir="%s"><h3>%s</h3>`,
 		api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName), html.EscapeString(api.Name)))
@@ -213,7 +219,7 @@ func htmlApi(sb *strings.Builder, api ApiInfo, dirName string, common CommonPara
 	sb.WriteString(`</div>`)
 }
 
-func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, level int, dirName string, common CommonParams) {
+func htmlDir(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, parentID string, level int, dirName string, common model.CommonParams) {
 	for _, api := range dirApis(apis, parentID) {
 		htmlApi(sb, api, dirName, common)
 	}
@@ -223,7 +229,7 @@ func htmlDir(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID str
 	}
 }
 
-func htmlToc(sb *strings.Builder, dirs []Directory, apis []ApiInfo, parentID string, depth int, dirName string) {
+func htmlToc(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, parentID string, depth int, dirName string) {
 	for _, api := range dirApis(apis, parentID) {
 		sb.WriteString(fmt.Sprintf(`<a class="toc-api" style="padding-left:%dpx" href="#api-%s" data-name="%s" data-url="%s" data-dir="%s"><span class="tm tm-%s">%s</span>%s</a>`,
 			12+depth*14, api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName),
@@ -288,7 +294,7 @@ tocDirs.forEach(function(d){var name=(d.getAttribute('data-dir')||'').toLowerCas
 var visible=0;apis.forEach(function(a){if(a.style.display!=='none')visible++;});var t=document.getElementById('docEmpty');if(t)t.style.display=visible?'none':'block';}
 </script>`
 
-func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo, common CommonParams) string {
+func BuildHTML(title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams) string {
 	var body, toc strings.Builder
 	if dirs == nil && len(apis) == 1 && rootID == "" {
 		htmlApi(&body, apis[0], "", common)
@@ -317,7 +323,7 @@ func buildHTML(title, rootID string, dirs []Directory, apis []ApiInfo, common Co
 
 // ---------------- OpenAPI ----------------
 
-func schemaFromFields(fields []*Field) map[string]interface{} {
+func schemaFromFields(fields []*model.Field) map[string]interface{} {
 	props := map[string]interface{}{}
 	var required []string
 	for _, f := range fields {
@@ -333,7 +339,7 @@ func schemaFromFields(fields []*Field) map[string]interface{} {
 	return schema
 }
 
-func schemaFromField(f *Field) map[string]interface{} {
+func schemaFromField(f *model.Field) map[string]interface{} {
 	t := f.Type
 	desc := f.Description
 	base := func(typ string) map[string]interface{} {
@@ -378,7 +384,7 @@ func schemaFromField(f *Field) map[string]interface{} {
 	}
 }
 
-func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, error) {
+func BuildOpenAPI(title string, apis []model.ApiInfo, common model.CommonParams) (string, error) {
 	paths := map[string]map[string]interface{}{}
 	for _, api := range apis {
 		p := api.URL
@@ -406,13 +412,13 @@ func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, er
 			},
 		}
 		var params []map[string]interface{}
-		for _, kv := range enabledKVs(api.Query) {
+		for _, kv := range EnabledKVs(api.Query) {
 			params = append(params, map[string]interface{}{
 				"name": kv.Key, "in": "query", "description": kv.Description,
 				"schema": map[string]string{"type": "string"}, "example": kv.Value,
 			})
 		}
-		for _, kv := range enabledKVs(api.Headers) {
+		for _, kv := range EnabledKVs(api.Headers) {
 			params = append(params, map[string]interface{}{
 				"name": kv.Key, "in": "header", "description": kv.Description,
 				"schema": map[string]string{"type": "string"}, "example": kv.Value,
@@ -420,12 +426,12 @@ func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, er
 		}
 		// 公共参数：项目级自动附加（接口同名覆盖公共），仅追加接口未定义的
 		defined := map[string]bool{}
-		for _, kv := range append(append([]KV{}, api.Headers...), api.Query...) {
+		for _, kv := range append(append([]model.KV{}, api.Headers...), api.Query...) {
 			if kv.Enabled && kv.Key != "" {
 				defined[kv.Key] = true
 			}
 		}
-		for _, kv := range enabledKVs(common.Query) {
+		for _, kv := range EnabledKVs(common.Query) {
 			if !defined[kv.Key] {
 				params = append(params, map[string]interface{}{
 					"name": kv.Key, "in": "query", "description": "[公共参数] " + kv.Description,
@@ -433,7 +439,7 @@ func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, er
 				})
 			}
 		}
-		for _, kv := range enabledKVs(common.Headers) {
+		for _, kv := range EnabledKVs(common.Headers) {
 			if !defined[kv.Key] {
 				params = append(params, map[string]interface{}{
 					"name": kv.Key, "in": "header", "description": "[公共参数] " + kv.Description,
@@ -474,7 +480,7 @@ func buildOpenAPI(title string, apis []ApiInfo, common CommonParams) (string, er
 	return string(b), nil
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

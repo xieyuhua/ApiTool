@@ -1,6 +1,15 @@
-package main
+// Package testing 提供接口测试用例的生成、异步生成队列、执行引擎与报告导出能力。
+// 通过 Host 接口与上层 App 解耦，App 只需实现数据存储、请求发送、事件推送与对话框等宿主能力。
+package testing
 
 import (
+	"apitool/internal/ai"
+	"apitool/internal/doc"
+	"apitool/internal/model"
+	"apitool/internal/store"
+	"apitool/internal/util"
+
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,23 +22,50 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// Host 是 Engine 所需的宿主能力（由 main 包 *App 实现）。
+type Host interface {
+	// ReadData 返回当前全部应用数据。
+	ReadData() model.AppData
+	// SaveData 持久化全部应用数据。
+	SaveData(model.AppData) error
+	// SendRequest 执行 HTTP 请求，返回响应数据。
+	SendRequest(model.RequestSpec) model.ResponseData
+	// Emit 向前端发送运行时事件。
+	Emit(event string, data ...interface{})
+	// SaveFileDialog 弹出保存文件对话框，返回所选路径。
+	SaveFileDialog(opts runtime.SaveDialogOptions) (string, error)
+	// AppVersion 返回客户端版本号。
+	AppVersion() string
+}
+
+// Engine 承载测试用例生成与执行逻辑，避免 main 包过度膨胀。
+type Engine struct {
+	host Host
+	ctx  context.Context
+}
+
+// NewEngine 创建测试引擎实例。
+func NewEngine(host Host, ctx context.Context) *Engine {
+	return &Engine{host: host, ctx: ctx}
+}
+
 // ---------------- AI 生成测试用例 ----------------
 
 // buildApiBrief 将接口信息压缩为适合喂给 AI 的精简结构（含字段示例与响应结构）
-func buildApiBrief(api ApiInfo, common CommonParams, envKeys []string) string {
+func buildApiBrief(api model.ApiInfo, common model.CommonParams, envKeys []string) string {
 	brief := map[string]interface{}{
 		"name":        api.Name,
 		"description": api.Description,
 		"method":      api.Method,
 		"url":         api.URL,
-		"query":       enabledKVs(api.Query),
-		"headers":     enabledKVs(api.Headers),
+		"query":       doc.EnabledKVs(api.Query),
+		"headers":     doc.EnabledKVs(api.Headers),
 		"reqFields":   api.ReqFields,
 		"respFields":  api.RespFields,
 		"body":        api.Body,
 		// 公共参数：执行时自动附加到所有请求，接口同名覆盖公共
-		"commonHeaders": enabledKVs(common.Headers),
-		"commonQuery":   enabledKVs(common.Query),
+		"commonHeaders": doc.EnabledKVs(common.Headers),
+		"commonQuery":   doc.EnabledKVs(common.Query),
 		// 可用环境变量名（执行时按 {{变量名}} 替换，值为机密不提供）
 		"availableEnvVars": envKeys,
 	}
@@ -37,9 +73,8 @@ func buildApiBrief(api ApiInfo, common CommonParams, envKeys []string) string {
 	return string(b)
 }
 
-// genCasesForApi 针对单个接口调用 AI 生成测试用例
 // dirNameOf 按目录 ID 查找目录名称（用于测试用例的目录归属展示）
-func dirNameOf(dirs []Directory, id string) string {
+func dirNameOf(dirs []model.Directory, id string) string {
 	for _, d := range dirs {
 		if d.ID == id {
 			return d.Name
@@ -48,7 +83,7 @@ func dirNameOf(dirs []Directory, id string) string {
 	return ""
 }
 
-func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []string) ([]TestCase, error) {
+func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonParams, envKeys []string) ([]model.TestCase, error) {
 	brief := buildApiBrief(api, common, envKeys)
 	system := `你是一名资深 API 测试专家。根据提供的接口信息，生成覆盖全面的自动化测试用例。
 每个用例必须是完整可独立执行的（包含 method/url/headers/query/bodyType/body 与断言 assertions），
@@ -98,33 +133,33 @@ func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []stri
 4. json 类型用 target 指定 JSONPath；header/cookie/contentType 的 target 用法见上。
 5. 正常用例务必断言 status eq 200（或接口实际成功码），并尽量用 json 断言校验关键业务字段；涉及鉴权/下载/大响应时可用 contentType、cookie、size、regex 等类型。`, brief)
 
-	raw, err := aiChat(s, system, user)
+	raw, err := ai.Chat(s, system, user)
 	if err != nil {
 		return nil, err
 	}
-	jsonStr := extractJSON(raw)
+	jsonStr := ai.ExtractJSON(raw)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("AI 未返回有效的 JSON 结果")
 	}
 	var parsed struct {
 		Cases []struct {
-			Name        string      `json:"name"`
-			Category    string      `json:"category"`
-			Description string      `json:"description"`
-			Method      string      `json:"method"`
-			URL         string      `json:"url"`
-			Headers     []KV        `json:"headers"`
-			Query       []KV        `json:"query"`
-			BodyType    string      `json:"bodyType"`
-			Body        string      `json:"body"`
-			Assertions  []Assertion `json:"assertions"`
+			Name        string `json:"name"`
+			Category    string `json:"category"`
+			Description string `json:"description"`
+			Method      string `json:"method"`
+			URL         string `json:"url"`
+			Headers     []model.KV `json:"headers"`
+			Query       []model.KV `json:"query"`
+			BodyType    string `json:"bodyType"`
+			Body        string `json:"body"`
+			Assertions  []model.Assertion `json:"assertions"`
 		} `json:"cases"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		return nil, fmt.Errorf("AI 用例结果解析失败: %v", err)
 	}
 	now := time.Now().Format(time.RFC3339)
-	out := make([]TestCase, 0, len(parsed.Cases))
+	out := make([]model.TestCase, 0, len(parsed.Cases))
 	for _, c := range parsed.Cases {
 		cat := c.Category
 		if cat == "" {
@@ -134,8 +169,8 @@ func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []stri
 		for i := range c.Assertions {
 			c.Assertions[i].Enabled = true
 		}
-		out = append(out, TestCase{
-			ID:          genID(),
+		out = append(out, model.TestCase{
+			ID:          util.GenID(),
 			ApiID:       api.ID,
 			ApiName:     api.Name,
 			DirID:       api.DirID,
@@ -160,16 +195,16 @@ func genCasesForApi(s Settings, api ApiInfo, common CommonParams, envKeys []stri
 }
 
 // GenerateTestCases 为指定接口生成测试用例（基于现有接口或已导入的 OpenAPI 接口）
-func (a *App) GenerateTestCases(apiID string) ([]TestCase, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) GenerateTestCases(apiID string) ([]model.TestCase, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return nil, fmt.Errorf("没有可用的项目")
 	}
 	if strings.TrimSpace(data.Settings.AIKey) == "" {
 		return nil, fmt.Errorf("请先在「设置」中配置 AI API Key")
 	}
-	var api *ApiInfo
+	var api *model.ApiInfo
 	for i := range data.Projects[idx].Apis {
 		if data.Projects[idx].Apis[i].ID == apiID {
 			api = &data.Projects[idx].Apis[i]
@@ -191,9 +226,9 @@ func (a *App) GenerateTestCases(apiID string) ([]TestCase, error) {
 }
 
 // GenerateTestCasesForApis 批量生成（可先导入 OpenAPI，再对多个接口生成）
-func (a *App) GenerateTestCasesForApis(apiIDs []string) ([]TestCase, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) GenerateTestCasesForApis(apiIDs []string) ([]model.TestCase, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return nil, fmt.Errorf("没有可用的项目")
 	}
@@ -204,7 +239,7 @@ func (a *App) GenerateTestCasesForApis(apiIDs []string) ([]TestCase, error) {
 	for _, id := range apiIDs {
 		idSet[id] = true
 	}
-	var out []TestCase
+	var out []model.TestCase
 	common := data.Projects[idx].Common
 	envKeys := activeEnvKeys(data, idx)
 	for i := range data.Projects[idx].Apis {
@@ -228,14 +263,14 @@ func (a *App) GenerateTestCasesForApis(apiIDs []string) ([]TestCase, error) {
 }
 
 // apiToTestCase 将已有接口定义直接转换为可执行测试用例（无需 AI，用于快速自动化测试 / 压测）
-func apiToTestCase(api ApiInfo) TestCase {
-	tc := TestCase{
-		ID:          genID(),
+func apiToTestCase(api model.ApiInfo) model.TestCase {
+	tc := model.TestCase{
+		ID:          util.GenID(),
 		ApiID:       api.ID,
 		ApiName:     api.Name,
 		DirID:       api.DirID,
 		Category:    "正常流程",
-		Name:        api.Method + " " + firstNonEmpty(api.Name, api.URL),
+		Name:        api.Method + " " + util.FirstNonEmpty(api.Name, api.URL),
 		Description: api.Description,
 		Method:      api.Method,
 		URL:         api.URL,
@@ -245,7 +280,7 @@ func apiToTestCase(api ApiInfo) TestCase {
 		Body:        api.Body,
 		FormItems:   api.FormItems,
 		ContentType: api.ContentType,
-		Assertions: []Assertion{
+		Assertions: []model.Assertion{
 			{Type: "status", Target: "", Operator: "eq", Expected: "200", Enabled: true},
 		},
 		Enabled:   true,
@@ -255,12 +290,12 @@ func apiToTestCase(api ApiInfo) TestCase {
 }
 
 // ImportApisAsTestCases 将指定接口导入为测试用例，复用其请求定义（地址/参数/请求体）
-func (a *App) ImportApisAsTestCases(apiIDs []string) (int, error) {
+func (e *Engine) ImportApisAsTestCases(apiIDs []string) (int, error) {
 	if len(apiIDs) == 0 {
 		return 0, fmt.Errorf("请至少选择一个接口")
 	}
-	data := a.readData()
-	idx := activeProjectIndex(data)
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return 0, fmt.Errorf("没有可用的项目")
 	}
@@ -283,7 +318,7 @@ func (a *App) ImportApisAsTestCases(apiIDs []string) (int, error) {
 		return 0, fmt.Errorf("未找到所选接口")
 	}
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
+	if err := e.host.SaveData(data); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -305,9 +340,9 @@ type genJobReq struct {
 
 // GenerateTestCasesAsync 将生成任务放入异步队列，前端通过运行时事件接收进度与结果。
 // 返回任务 ID（jobId），前端据此过滤事件。
-func (a *App) GenerateTestCasesAsync(apiIDs []string) (string, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) GenerateTestCasesAsync(apiIDs []string) (string, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return "", fmt.Errorf("没有可用的项目")
 	}
@@ -317,23 +352,23 @@ func (a *App) GenerateTestCasesAsync(apiIDs []string) (string, error) {
 	if len(apiIDs) == 0 {
 		return "", fmt.Errorf("请至少选择一个接口")
 	}
-	genWorkerOnce.Do(func() { go a.genWorker() })
-	jobID := genID()
+	genWorkerOnce.Do(func() { go e.genWorker() })
+	jobID := util.GenID()
 	genJobCh <- genJobReq{jobID: jobID, apiIDs: apiIDs, projID: data.CurrentProjectID}
 	return jobID, nil
 }
 
-func (a *App) genWorker() {
+func (e *Engine) genWorker() {
 	for job := range genJobCh {
-		a.runGenJob(job)
+		e.runGenJob(job)
 	}
 }
 
-func (a *App) runGenJob(job genJobReq) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) runGenJob(job genJobReq) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
-		a.emitGenError(job.jobID, "没有可用的项目")
+		e.emitGenError(job.jobID, "没有可用的项目")
 		return
 	}
 	// 定位任务所属项目（若已切换则用当前项目兜底）
@@ -350,9 +385,9 @@ func (a *App) runGenJob(job genJobReq) {
 
 	total := len(job.apiIDs)
 	done := 0
-	allCases := []TestCase{}
+	allCases := []model.TestCase{}
 	for _, id := range job.apiIDs {
-		var api *ApiInfo
+		var api *model.ApiInfo
 		for i := range proj.Apis {
 			if proj.Apis[i].ID == id {
 				api = &proj.Apis[i]
@@ -361,31 +396,31 @@ func (a *App) runGenJob(job genJobReq) {
 		}
 		if api == nil {
 			done++
-			a.emitGenProgress(job.jobID, total, done, "", "skipped")
+			e.emitGenProgress(job.jobID, total, done, "", "skipped")
 			continue
 		}
-		a.emitGenProgress(job.jobID, total, done, api.Name, "generating")
+		e.emitGenProgress(job.jobID, total, done, api.Name, "generating")
 		cases, err := genCasesForApi(data.Settings, *api, common, envKeys)
 		done++
 		if err != nil {
-			a.emitGenProgress(job.jobID, total, done, api.Name, "error:"+err.Error())
+			e.emitGenProgress(job.jobID, total, done, api.Name, "error:"+err.Error())
 			continue
 		}
 		allCases = append(allCases, cases...)
 		for k := range allCases {
 			allCases[k].DirName = dirNameOf(proj.Dirs, allCases[k].DirID)
 		}
-		a.emitGenProgress(job.jobID, total, done, api.Name, "ok")
+		e.emitGenProgress(job.jobID, total, done, api.Name, "ok")
 	}
-	runtime.EventsEmit(a.ctx, "apitool:gen-done", map[string]interface{}{
+	e.host.Emit("apitool:gen-done", map[string]interface{}{
 		"jobId": job.jobID,
 		"total": total,
 		"cases": allCases,
 	})
 }
 
-func (a *App) emitGenProgress(jobID string, total, done int, name, phase string) {
-	runtime.EventsEmit(a.ctx, "apitool:gen-progress", map[string]interface{}{
+func (e *Engine) emitGenProgress(jobID string, total, done int, name, phase string) {
+	e.host.Emit("apitool:gen-progress", map[string]interface{}{
 		"jobId": jobID,
 		"total": total,
 		"done":  done,
@@ -394,8 +429,8 @@ func (a *App) emitGenProgress(jobID string, total, done int, name, phase string)
 	})
 }
 
-func (a *App) emitGenError(jobID string, msg string) {
-	runtime.EventsEmit(a.ctx, "apitool:gen-error", map[string]interface{}{
+func (e *Engine) emitGenError(jobID string, msg string) {
+	e.host.Emit("apitool:gen-error", map[string]interface{}{
 		"jobId": jobID,
 		"error": msg,
 	})
@@ -403,26 +438,16 @@ func (a *App) emitGenError(jobID string, msg string) {
 
 // ---------------- 执行引擎 ----------------
 
-func enabledEnvVars(vars []EnvVar) []KV {
-	out := []KV{}
-	for _, v := range vars {
-		if v.Enabled && v.Key != "" {
-			out = append(out, KV{Key: v.Key, Value: v.Value, Enabled: true})
-		}
-	}
-	return out
-}
-
 // activeEnvKeys 返回当前项目激活环境下的环境变量名（不包含值，避免泄露机密）
-func activeEnvKeys(data AppData, idx int) []string {
+func activeEnvKeys(data model.AppData, idx int) []string {
 	proj := data.Projects[idx]
 	if proj.ActiveEnvID == "" {
 		return nil
 	}
-	for _, e := range proj.Environments {
-		if e.ID == proj.ActiveEnvID {
+	for _, en := range proj.Environments {
+		if en.ID == proj.ActiveEnvID {
 			keys := []string{}
-			for _, v := range e.Vars {
+			for _, v := range en.Vars {
 				if v.Enabled && v.Key != "" {
 					keys = append(keys, v.Key)
 				}
@@ -431,40 +456,6 @@ func activeEnvKeys(data AppData, idx int) []string {
 		}
 	}
 	return nil
-}
-
-// mergeCommon 将项目公共参数合并进请求规格（用例/接口自身同名参数优先覆盖公共）
-func mergeCommon(spec *RequestSpec, common CommonParams) {
-	hm := map[string]KV{}
-	for _, h := range common.Headers {
-		if h.Enabled && h.Key != "" {
-			hm[strings.ToLower(h.Key)] = h
-		}
-	}
-	for _, h := range spec.Headers {
-		if h.Enabled && h.Key != "" {
-			hm[strings.ToLower(h.Key)] = h
-		}
-	}
-	spec.Headers = []KV{}
-	for _, v := range hm {
-		spec.Headers = append(spec.Headers, v)
-	}
-	qm := map[string]KV{}
-	for _, q := range common.Query {
-		if q.Enabled && q.Key != "" {
-			qm[strings.ToLower(q.Key)] = q
-		}
-	}
-	for _, q := range spec.Query {
-		if q.Enabled && q.Key != "" {
-			qm[strings.ToLower(q.Key)] = q
-		}
-	}
-	spec.Query = []KV{}
-	for _, v := range qm {
-		spec.Query = append(spec.Query, v)
-	}
 }
 
 // jsonPathValue 从响应体 JSON 中按简化 JSONPath 取值（支持 a.b.c 与 a.b[0].c）
@@ -593,8 +584,8 @@ func assertionLabel(t string) string {
 }
 
 // compareSimple 用 compareValues 比较实际值/期望值，复用操作符语义
-func compareSimple(actual string, as Assertion, desc string) AssertionResult {
-	ar := AssertionResult{Description: desc}
+func compareSimple(actual string, as model.Assertion, desc string) model.AssertionResult {
+	ar := model.AssertionResult{Description: desc}
 	ok, err := compareValues(actual, as.Expected, as.Operator)
 	if err != nil {
 		ar.Passed = false
@@ -608,7 +599,7 @@ func compareSimple(actual string, as Assertion, desc string) AssertionResult {
 
 // evaluateAssertion 评估单条断言，返回结果
 // 支持的断言类型：status / json / bodyContains / header / duration / contentType / cookie / regex / size
-func evaluateAssertion(resp ResponseData, as Assertion) AssertionResult {
+func evaluateAssertion(resp model.ResponseData, as model.Assertion) model.AssertionResult {
 	desc := assertionLabel(as.Type)
 	if as.Target != "" {
 		desc += " " + as.Target
@@ -640,7 +631,7 @@ func evaluateAssertion(resp ResponseData, as Assertion) AssertionResult {
 	case "regex":
 		re, err := regexp.Compile(as.Expected)
 		if err != nil {
-			return AssertionResult{Description: desc, Passed: false, Detail: "正则编译失败：" + err.Error()}
+			return model.AssertionResult{Description: desc, Passed: false, Detail: "正则编译失败：" + err.Error()}
 		}
 		matched := re.MatchString(resp.Body)
 		// eq/contains/isTrue 表示「必须匹配」；ne/isFalse 表示「必须不匹配」
@@ -658,27 +649,27 @@ func evaluateAssertion(resp ResponseData, as Assertion) AssertionResult {
 		} else {
 			detail += "（要求匹配）"
 		}
-		return AssertionResult{Description: desc, Passed: ok, Detail: detail}
+		return model.AssertionResult{Description: desc, Passed: ok, Detail: detail}
 	case "json":
 		v, err := jsonPathValue(resp.Body, as.Target)
 		if err != nil {
-			return AssertionResult{Description: desc, Passed: false, Detail: "取值失败：" + err.Error()}
+			return model.AssertionResult{Description: desc, Passed: false, Detail: "取值失败：" + err.Error()}
 		}
 		return compareSimple(fmt.Sprintf("%v", v), as, desc)
 	default:
-		return AssertionResult{Description: desc, Passed: false, Detail: "不支持的断言类型：" + as.Type}
+		return model.AssertionResult{Description: desc, Passed: false, Detail: "不支持的断言类型：" + as.Type}
 	}
 }
 
 // runCase 执行单个用例并返回结果
-func (a *App) runCase(c TestCase, env []KV, common CommonParams, timeout int) TestResult {
-	res := TestResult{
+func (e *Engine) runCase(c model.TestCase, env []model.KV, common model.CommonParams, timeout int) model.TestResult {
+	res := model.TestResult{
 		CaseID:     c.ID,
 		CaseName:   c.Name,
 		Category:   c.Category,
 		DurationMs: 0,
 	}
-	spec := RequestSpec{
+	spec := model.RequestSpec{
 		Method:      c.Method,
 		URL:         c.URL,
 		Headers:     c.Headers,
@@ -691,8 +682,8 @@ func (a *App) runCase(c TestCase, env []KV, common CommonParams, timeout int) Te
 		ContentType: c.ContentType,
 	}
 	// 合并项目公共参数（用例同名优先），公共参数中的 {{变量}} 也会按环境变量替换
-	mergeCommon(&spec, common)
-	resp := a.SendRequest(spec)
+	util.MergeCommon(&spec, common)
+	resp := e.host.SendRequest(spec)
 	res.Status = resp.Status
 	res.DurationMs = resp.DurationMs
 	res.ResponseBody = resp.Body
@@ -722,12 +713,10 @@ func (a *App) runCase(c TestCase, env []KV, common CommonParams, timeout int) Te
 	return res
 }
 
-// RunTestCases 执行指定用例（可跨计划），支持并发执行（并发数 concurrency<=0 时退化为串行）。
-// 返回测试报告（不持久化，由前端负责保存）。结果按入参用例顺序返回。
 // DeleteTestCases 按 ID 批量删除当前项目的测试用例
-func (a *App) DeleteTestCases(caseIDs []string) (int, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) DeleteTestCases(caseIDs []string) (int, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return 0, fmt.Errorf("没有可用的项目")
 	}
@@ -735,7 +724,7 @@ func (a *App) DeleteTestCases(caseIDs []string) (int, error) {
 	for _, id := range caseIDs {
 		idSet[id] = true
 	}
-	kept := make([]TestCase, 0)
+	kept := make([]model.TestCase, 0)
 	removed := 0
 	for _, c := range data.Projects[idx].TestCases {
 		if idSet[c.ID] {
@@ -746,37 +735,39 @@ func (a *App) DeleteTestCases(caseIDs []string) (int, error) {
 	}
 	data.Projects[idx].TestCases = kept
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
+	if err := e.host.SaveData(data); err != nil {
 		return 0, err
 	}
 	return removed, nil
 }
 
-func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (TestReport, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+// RunTestCases 执行指定用例（可跨计划），支持并发执行（并发数 concurrency<=0 时退化为串行）。
+// 返回测试报告（不持久化，由前端负责保存）。结果按入参用例顺序返回。
+func (e *Engine) RunTestCases(caseIDs []string, envID string, concurrency int) (model.TestReport, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
-		return TestReport{}, fmt.Errorf("没有可用的项目")
+		return model.TestReport{}, fmt.Errorf("没有可用的项目")
 	}
 	proj := data.Projects[idx]
 
-	var env []KV
+	var env []model.KV
 	if envID != "" {
-		for _, e := range proj.Environments {
-			if e.ID == envID {
-				env = enabledEnvVars(e.Vars)
+		for _, en := range proj.Environments {
+			if en.ID == envID {
+				env = util.EnabledEnvVars(en.Vars)
 				break
 			}
 		}
 	}
 
-	caseMap := map[string]TestCase{}
+	caseMap := map[string]model.TestCase{}
 	for _, c := range proj.TestCases {
 		caseMap[c.ID] = c
 	}
 
 	// 按入参顺序收集待执行用例
-	order := make([]TestCase, 0, len(caseIDs))
+	order := make([]model.TestCase, 0, len(caseIDs))
 	for _, id := range caseIDs {
 		c, ok := caseMap[id]
 		if !ok || !c.Enabled {
@@ -785,8 +776,8 @@ func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (Tes
 		order = append(order, c)
 	}
 
-	report := TestReport{
-		ID:        genID(),
+	report := model.TestReport{
+		ID:        util.GenID(),
 		PlanID:    "",
 		PlanName:  "手动执行",
 		CreatedAt: time.Now().Format(time.RFC3339),
@@ -795,7 +786,7 @@ func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (Tes
 		return report, nil
 	}
 
-	results := make([]TestResult, len(order))
+	results := make([]model.TestResult, len(order))
 	if concurrency <= 0 {
 		concurrency = 1
 	}
@@ -809,10 +800,10 @@ func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (Tes
 	for i, c := range order {
 		wg.Add(1)
 		sem <- struct{}{} // 获取并发额度
-		go func(idx int, tc TestCase) {
+		go func(idx int, tc model.TestCase) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[idx] = a.runCase(tc, env, proj.Common, data.Settings.TimeoutSec)
+			results[idx] = e.runCase(tc, env, proj.Common, data.Settings.TimeoutSec)
 		}(i, c)
 	}
 	wg.Wait()
@@ -830,14 +821,14 @@ func (a *App) RunTestCases(caseIDs []string, envID string, concurrency int) (Tes
 }
 
 // RunTestPlan 执行指定测试计划（并发数取计划配置的 Concurrency）
-func (a *App) RunTestPlan(planID string) (TestReport, error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
+func (e *Engine) RunTestPlan(planID string) (model.TestReport, error) {
+	data := e.host.ReadData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
-		return TestReport{}, fmt.Errorf("没有可用的项目")
+		return model.TestReport{}, fmt.Errorf("没有可用的项目")
 	}
 	proj := data.Projects[idx]
-	var plan *TestPlan
+	var plan *model.TestPlan
 	for i := range proj.TestPlans {
 		if proj.TestPlans[i].ID == planID {
 			plan = &proj.TestPlans[i]
@@ -845,13 +836,13 @@ func (a *App) RunTestPlan(planID string) (TestReport, error) {
 		}
 	}
 	if plan == nil {
-		return TestReport{}, fmt.Errorf("未找到指定的测试计划")
+		return model.TestReport{}, fmt.Errorf("未找到指定的测试计划")
 	}
 	conc := plan.Concurrency
 	if conc <= 0 {
 		conc = 1
 	}
-	report, err := a.RunTestCases(plan.CaseIDs, plan.EnvID, conc)
+	report, err := e.RunTestCases(plan.CaseIDs, plan.EnvID, conc)
 	if err != nil {
 		return report, err
 	}
@@ -863,8 +854,8 @@ func (a *App) RunTestPlan(planID string) (TestReport, error) {
 // ---------------- AI 分析报告 ----------------
 
 // GenerateReportSummary 根据测试报告（JSON）调用 AI 生成中文分析摘要
-func (a *App) GenerateReportSummary(reportJSON string) (string, error) {
-	data := a.readData()
+func (e *Engine) GenerateReportSummary(reportJSON string) (string, error) {
+	data := e.host.ReadData()
 	if strings.TrimSpace(data.Settings.AIKey) == "" {
 		return "", fmt.Errorf("请先在「设置」中配置 AI API Key")
 	}
@@ -879,182 +870,40 @@ func (a *App) GenerateReportSummary(reportJSON string) (string, error) {
 3. 改进与回归建议。
 不要使用 JSON，直接输出 Markdown 文本。`, reportJSON)
 
-	return aiChat(data.Settings, system, user)
+	return ai.Chat(data.Settings, system, user)
 }
 
 // ---------------- 报告导出 ----------------
 
-func reportMarkdown(r TestReport) string {
-	var sb strings.Builder
-	sb.WriteString("# 接口测试报告\n\n")
-	fmt.Fprintf(&sb, "- 计划：%s\n", r.PlanName)
-	fmt.Fprintf(&sb, "- 生成时间：%s\n", r.CreatedAt)
-	fmt.Fprintf(&sb, "- 用例总数：%d，通过：%d，失败：%d\n", r.Total, r.Passed, r.Failed)
-	fmt.Fprintf(&sb, "- 总耗时：%d ms\n\n", r.DurationMs)
-
-	if r.Summary != "" {
-		sb.WriteString("## AI 分析摘要\n\n")
-		sb.WriteString(r.Summary + "\n\n")
-	}
-
-	sb.WriteString("## 用例结果\n\n")
-	sb.WriteString("| 用例 | 分类 | 状态 | 耗时 | 结果 |\n|---|---|---|---|---|\n")
-	for _, res := range r.Results {
-		status := "失败"
-		if res.Passed {
-			status = "通过"
-		}
-		errMsg := res.Error
-		if errMsg != "" {
-			errMsg = "（" + errMsg + "）"
-		}
-		sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d ms | %s%s |\n",
-			mdEscape(res.CaseName), mdEscape(res.Category), res.Status, res.DurationMs, status, mdEscape(errMsg)))
-	}
-
-	sb.WriteString("\n## 断言明细\n\n")
-	for _, res := range r.Results {
-		sb.WriteString(fmt.Sprintf("### %s\n", mdEscape(res.CaseName)))
-		if res.Error != "" {
-			sb.WriteString("- 请求错误：" + mdEscape(res.Error) + "\n")
-		}
-		if len(res.AssertionResults) == 0 {
-			sb.WriteString("- 无断言\n")
-		}
-		for _, ar := range res.AssertionResults {
-			mark := "✓"
-			if !ar.Passed {
-				mark = "✗"
-			}
-			sb.WriteString(fmt.Sprintf("- %s %s —— %s\n", mark, mdEscape(ar.Description), mdEscape(ar.Detail)))
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String()
-}
-
-const reportCSS = `
-:root{color-scheme:light}
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2329;background:#f7f8fa}
-.wrap{max-width:1100px;margin:0 auto;padding:32px 28px}
-h1{font-size:26px;margin:0 0 6px}
-.meta{color:#86909c;font-size:13px;margin-bottom:18px}
-.stats{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
-.stat{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:14px 20px;min-width:120px}
-.stat .n{font-size:24px;font-weight:700}
-.stat.ok .n{color:#00b42a}.stat.fail .n{color:#f53f3f}.stat.tot .n{color:#165dff}
-.card{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:18px 22px;margin:16px 0}
-.card h2{margin:0 0 12px;font-size:18px}
-.summary{white-space:pre-wrap;line-height:1.8;font-size:14px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{border:1px solid #e5e6eb;padding:8px 12px;text-align:left;word-break:break-all}
-th{background:#f7f8fa;font-weight:600}
-.pass{color:#00b42a;font-weight:600}.fail{color:#f53f3f;font-weight:600}
-.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:#f2f3f5;color:#4e5969;margin-right:6px}
-.assert{font-size:12px;padding:3px 0;border-bottom:1px dashed #eee}
-.assert .ok{color:#00b42a}.assert .no{color:#f53f3f}
-`
-
-func reportHTML(r TestReport) string {
-	var stats strings.Builder
-	fmt.Fprintf(&stats, `<div class="stats">
-<div class="stat tot"><div class="n">%d</div><div>用例总数</div></div>
-<div class="stat ok"><div class="n">%d</div><div>通过</div></div>
-<div class="stat fail"><div class="n">%d</div><div>失败</div></div>
-<div class="stat"><div class="n">%d ms</div><div>总耗时</div></div></div>`,
-		r.Total, r.Passed, r.Failed, r.DurationMs)
-
-	var summary strings.Builder
-	if r.Summary != "" {
-		summary.WriteString(`<div class="card"><h2>AI 分析摘要</h2><div class="summary">` + htmlEscape(r.Summary) + `</div></div>`)
-	}
-
-	var rows strings.Builder
-	for _, res := range r.Results {
-		cls := "pass"
-		label := "通过"
-		if !res.Passed {
-			cls = "fail"
-			label = "失败"
-		}
-		errMsg := ""
-		if res.Error != "" {
-			errMsg = ` <span style="color:#f53f3f">（` + htmlEscape(res.Error) + `）</span>`
-		}
-		rows.WriteString(fmt.Sprintf(`<tr><td>%s</td><td>%s</td><td>%d</td><td>%d ms</td><td class="%s">%s%s</td></tr>`,
-			htmlEscape(res.CaseName), htmlEscape(res.Category), res.Status, res.DurationMs, cls, label, errMsg))
-	}
-
-	var details strings.Builder
-	for _, res := range r.Results {
-		details.WriteString(fmt.Sprintf(`<div class="card"><h2>%s</h2>`, htmlEscape(res.CaseName)))
-		if res.Error != "" {
-			details.WriteString(`<div class="assert"><span class="no">✗</span> 请求错误：` + htmlEscape(res.Error) + `</div>`)
-		}
-		if len(res.AssertionResults) == 0 {
-			details.WriteString(`<div class="assert">无断言</div>`)
-		}
-		for _, ar := range res.AssertionResults {
-			mark := `<span class="ok">✓</span>`
-			if !ar.Passed {
-				mark = `<span class="no">✗</span>`
-			}
-			details.WriteString(fmt.Sprintf(`<div class="assert">%s %s —— %s</div>`,
-				mark, htmlEscape(ar.Description), htmlEscape(ar.Detail)))
-		}
-		details.WriteString(`</div>`)
-	}
-
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>接口测试报告 - %s</title><style>%s</style></head>
-<body><div class="wrap">
-<h1>接口测试报告</h1>
-<div class="meta">计划：%s · 生成时间：%s</div>
-%s
-%s
-<div class="card"><h2>用例结果</h2>
-<table><thead><tr><th>用例</th><th>分类</th><th>状态码</th><th>耗时</th><th>结果</th></tr></thead><tbody>%s</tbody></table></div>
-%s
-</div></body></html>`,
-		htmlEscape(r.PlanName), reportCSS, htmlEscape(r.PlanName), htmlEscape(r.CreatedAt),
-		stats.String(), summary.String(), rows.String(), details.String())
-}
-
-func htmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;")
-	return r.Replace(s)
-}
-
 // BuildReportHTMLContent 将测试报告（JSON）渲染为独立 HTML 源码，供文档中心预览/导出/分享。
-func (a *App) BuildReportHTMLContent(reportJSON string) (string, error) {
-	var r TestReport
+func (e *Engine) BuildReportHTMLContent(reportJSON string) (string, error) {
+	var r model.TestReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
 		return "", fmt.Errorf("报告解析失败: %v", err)
 	}
-	return reportHTML(r), nil
+	return doc.BuildTestReportHTML(r), nil
 }
 
 // ExportTestReport 将测试报告导出为 Markdown / HTML 文件，返回保存路径
-func (a *App) ExportTestReport(reportJSON string, format string) (string, error) {
-	var r TestReport
+func (e *Engine) ExportTestReport(reportJSON string, format string) (string, error) {
+	var r model.TestReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
 		return "", fmt.Errorf("报告解析失败: %v", err)
 	}
 	var content, ext, filter string
 	switch format {
 	case "html":
-		content = reportHTML(r)
+		content = doc.BuildTestReportHTML(r)
 		ext, filter = ".html", "HTML (*.html)|*.html"
 	case "markdown", "":
-		content = reportMarkdown(r)
+		content = doc.BuildTestReportMarkdown(r)
 		ext, filter = ".md", "Markdown (*.md)|*.md"
 	default:
 		return "", fmt.Errorf("不支持的格式: %s", format)
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	path, err := e.host.SaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "导出测试报告",
-		DefaultFilename: "test-report-" + sanitizeFilename(r.PlanName) + ext,
+		DefaultFilename: "test-report-" + doc.SanitizeFilename(r.PlanName) + ext,
 		Filters: []runtime.FileFilter{
 			{DisplayName: filter, Pattern: "*" + ext},
 		},

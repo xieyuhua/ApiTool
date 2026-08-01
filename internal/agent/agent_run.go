@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bufio"
@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/ai"
+	"apitool/internal/util"
 )
 
 // RunAgentArgs 前端发起一次 Agent 对话的入参。
@@ -34,7 +35,7 @@ type RunAgentResult struct {
 }
 
 // llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
-func (a *App) llmCall(args RunAgentArgs, messages []ChatMessage, temperature float64, tag string) (string, error) {
+func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
 		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
@@ -54,7 +55,7 @@ func (a *App) llmCall(args RunAgentArgs, messages []ChatMessage, temperature flo
 			url += "/v1/chat/completions"
 		}
 	}
-	payload, _ := json.Marshal(callAIRequest{Model: model, Messages: messages, Temperature: temperature, Stream: false})
+	payload, _ := json.Marshal(ai.Request{Model: model, Messages: messages, Temperature: temperature, Stream: false})
 	timeout := args.Timeout
 	if timeout <= 0 {
 		timeout = 60
@@ -65,20 +66,20 @@ func (a *App) llmCall(args RunAgentArgs, messages []ChatMessage, temperature flo
 	req.Header.Set("Authorization", "Bearer "+args.APIKey)
 
 	start := time.Now()
-	a.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
 	resp, err := client.Do(req)
 	if err != nil {
-		a.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 请求失败: " + tag, Detail: err.Error()})
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 请求失败: " + tag, Detail: err.Error()})
 		return "", fmt.Errorf("AI 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	dur := time.Since(start).Milliseconds()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		a.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 响应异常: " + tag, Detail: fmt.Sprintf("%d: %s", resp.StatusCode, truncate(string(body), 2000)), DurationMs: dur})
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 响应异常: " + tag, Detail: fmt.Sprintf("%d: %s", resp.StatusCode, util.Truncate(string(body), 2000)), DurationMs: dur})
 		return "", fmt.Errorf("AI 请求失败 %d: %s", resp.StatusCode, string(body))
 	}
-	var r callAIResult
+	var r ai.Result
 	if err := json.Unmarshal(body, &r); err != nil {
 		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
@@ -86,7 +87,7 @@ func (a *App) llmCall(args RunAgentArgs, messages []ChatMessage, temperature flo
 		return "", fmt.Errorf("AI 返回内容为空")
 	}
 	out := r.Choices[0].Message.Content
-	a.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 响应: " + tag, Detail: truncate(out, 3000), DurationMs: dur})
+	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 响应: " + tag, Detail: util.Truncate(out, 3000), DurationMs: dur})
 	return out, nil
 }
 
@@ -99,7 +100,7 @@ type streamDelta struct {
 // llmCallStream 以流式（SSE）方式请求 LLM。
 // onDelta 会在收到每个增量文本时被调用（已根据 <thinking> 标签拆分区段），
 // 返回累计的完整原始文本（含标签），供上层解析工具调用/思考/正文。
-func (a *App) llmCallStream(args RunAgentArgs, messages []ChatMessage, temperature float64, tag string, onDelta func(streamDelta), onUsage func(TokenUsage)) (string, error) {
+func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, onDelta func(streamDelta), onUsage func(TokenUsage)) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
 		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
@@ -119,12 +120,12 @@ func (a *App) llmCallStream(args RunAgentArgs, messages []ChatMessage, temperatu
 			url += "/v1/chat/completions"
 		}
 	}
-	payload, _ := json.Marshal(callAIRequest{
+	payload, _ := json.Marshal(ai.Request{
 		Model:         model,
 		Messages:      messages,
 		Temperature:   temperature,
 		Stream:        true,
-		StreamOptions: &callAIStreamOptions{IncludeUsage: true},
+		StreamOptions: &ai.StreamOptions{IncludeUsage: true},
 	})
 	timeout := args.Timeout
 	if timeout <= 0 {
@@ -137,16 +138,16 @@ func (a *App) llmCallStream(args RunAgentArgs, messages []ChatMessage, temperatu
 	req.Header.Set("Accept", "text/event-stream")
 
 	start := time.Now()
-	a.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
 	resp, err := client.Do(req)
 	if err != nil {
-		a.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式请求失败: " + tag, Detail: err.Error()})
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式请求失败: " + tag, Detail: err.Error()})
 		return "", fmt.Errorf("AI 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		a.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式响应异常: " + tag, Detail: fmt.Sprintf("%d: %s", resp.StatusCode, truncate(string(body), 2000))})
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式响应异常: " + tag, Detail: fmt.Sprintf("%d: %s", resp.StatusCode, util.Truncate(string(body), 2000))})
 		return "", fmt.Errorf("AI 请求失败 %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -244,14 +245,14 @@ func (a *App) llmCallStream(args RunAgentArgs, messages []ChatMessage, temperatu
 		emit(pending.String(), inThinking)
 	}
 	if err := scanner.Err(); err != nil {
-		a.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式读取中断: " + tag, Detail: err.Error()})
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式读取中断: " + tag, Detail: err.Error()})
 		if full.Len() == 0 {
 			return "", fmt.Errorf("AI 流式读取失败: %w", err)
 		}
 	}
 	out := full.String()
 	dur := time.Since(start).Milliseconds()
-	a.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 流式响应: " + tag, Detail: truncate(out, 3000), DurationMs: dur})
+	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 流式响应: " + tag, Detail: util.Truncate(out, 3000), DurationMs: dur})
 	return out, nil
 }
 
@@ -445,17 +446,17 @@ func stripTags(text string) string {
 }
 
 // emitEvent 向前端推送 agent 运行事件（实时展示步骤/思考）。
-func (a *App) emitEvent(name string, payload interface{}) {
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, name, payload)
+func (m *Manager) emitEvent(name string, payload interface{}) {
+	if m.ctx != nil {
+		m.b.Emit( name, payload)
 	}
 }
 
 // RunAgent 执行一次完整的 Agent 对话（ReAct / Plan loop）。
-func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
-	d := a.readAgentData()
+func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
+	d := m.readAgentData()
 	cfg := d.Config
-	userCtx := a.mcpUserContext(cfg, d.Users)
+	userCtx := m.mcpUserContext(cfg, d.Users)
 
 	// 收集可用工具（启用的 MCP 服务器 + 启用的内置工具）
 	var tools []MCPTool
@@ -465,9 +466,9 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 		if !srv.Enabled {
 			continue
 		}
-		ts, err := a.listMCPTools(srv, userCtx)
+		ts, err := m.listMCPTools(srv, userCtx)
 		if err != nil {
-			a.appendLog(AgentLog{Level: "error", Category: "mcp", Title: "加载工具失败: " + srv.Name, Detail: err.Error()})
+			m.appendLog(AgentLog{Level: "error", Category: "mcp", Title: "加载工具失败: " + srv.Name, Detail: err.Error()})
 			continue
 		}
 		tools = append(tools, ts...)
@@ -482,7 +483,7 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 		sysPrompt += fmt.Sprintf("\n\n## 当前登录用户\n%s（调用工具时会自动携带其身份用于权限校验）", toJSON(userCtx))
 	}
 
-	messages := []ChatMessage{{Role: "system", Content: sysPrompt}}
+	messages := []ai.ChatMessage{{Role: "system", Content: sysPrompt}}
 	// 加载当前激活会话的历史上下文（关键：必须用当前会话，而非顶层 Messages，否则会串到别的会话）
 	hist := []AgentMsg{}
 	if sess := d.activeSession(); sess != nil {
@@ -493,12 +494,12 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 	}
 	for _, m := range hist {
 		if m.Role == "user" || m.Role == "assistant" {
-			messages = append(messages, ChatMessage{Role: m.Role, Content: m.Content})
+			messages = append(messages, ai.ChatMessage{Role: m.Role, Content: m.Content})
 		}
 	}
-	messages = append(messages, ChatMessage{Role: "user", Content: args.Input})
+	messages = append(messages, ai.ChatMessage{Role: "user", Content: args.Input})
 
-	a.appendLog(AgentLog{Level: "info", Category: "agent", Title: "开始运行 Agent", Detail: fmt.Sprintf("模式=%s 最大轮数=%d 上下文=%d 工具数=%d 技能数=%d\n输入: %s", cfg.Mode, cfg.MaxLoops, cfg.ContextLimit, len(tools), len(d.Skills), truncate(args.Input, 500)), UserID: cfg.CurrentUserID})
+	m.appendLog(AgentLog{Level: "info", Category: "agent", Title: "开始运行 Agent", Detail: fmt.Sprintf("模式=%s 最大轮数=%d 上下文=%d 工具数=%d 技能数=%d\n输入: %s", cfg.Mode, cfg.MaxLoops, cfg.ContextLimit, len(tools), len(d.Skills), util.Truncate(args.Input, 500)), UserID: cfg.CurrentUserID})
 
 	result := RunAgentResult{}
 	var thinkingAll strings.Builder
@@ -518,7 +519,7 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 		for _, s := range d.Skills {
 			if s.Enabled && s.Name != "" && strings.Contains(text, s.Name) {
 				result.Steps = append(result.Steps, AgentStep{Type: "skill", Name: s.Name})
-				a.emitEvent("agent:step", AgentStep{Type: "skill", Name: s.Name})
+				m.b.Emit("agent:step", AgentStep{Type: "skill", Name: s.Name})
 			}
 		}
 	}
@@ -529,10 +530,10 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 	}
 	for i := 0; i < loops; i++ {
 		// 通知前端：新一轮流式输出开始
-		a.emitEvent("agent:loop-start", map[string]interface{}{"loop": i + 1})
-		out, err := a.llmCallStream(args, messages, cfg.Temperature, fmt.Sprintf("loop-%d", i+1), func(dc streamDelta) {
+		m.b.Emit("agent:loop-start", map[string]interface{}{"loop": i + 1})
+		out, err := m.llmCallStream(args, messages, cfg.Temperature, fmt.Sprintf("loop-%d", i+1), func(dc streamDelta) {
 			// 实时把增量推给前端（区分思考区/正文区），实现打字机效果
-			a.emitEvent("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
+			m.b.Emit("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
 		}, func(u TokenUsage) {
 			addUsage(u)
 		})
@@ -541,17 +542,17 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 			return result
 		}
 		// 抽取思考 / 计划
-		if m := thinkingRe.FindStringSubmatch(out); len(m) > 1 {
-			th := strings.TrimSpace(m[1])
+		if mm := thinkingRe.FindStringSubmatch(out); len(mm) > 1 {
+			th := strings.TrimSpace(mm[1])
 			thinkingAll.WriteString(th + "\n")
 			markSkills(th)
-			a.emitEvent("agent:thinking", th)
+			m.b.Emit("agent:thinking", th)
 			result.Steps = append(result.Steps, AgentStep{Type: "thought", Name: "思考", Output: th})
 		}
-		if m := planRe.FindStringSubmatch(out); len(m) > 1 {
-			planText = strings.TrimSpace(m[1])
+		if mm := planRe.FindStringSubmatch(out); len(mm) > 1 {
+			planText = strings.TrimSpace(mm[1])
 			result.Plan = planText
-			a.emitEvent("agent:plan", planText)
+			m.b.Emit("agent:plan", planText)
 			result.Steps = append(result.Steps, AgentStep{Type: "plan", Name: "计划", Output: planText})
 		}
 
@@ -565,12 +566,12 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 		}
 		// 执行工具
 		step := AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: toJSON(act.Arguments)}
-		a.emitEvent("agent:step", AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: step.Input})
+		m.b.Emit("agent:step", AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: step.Input})
 		var toolOut string
 		var terr error
 		if act.Server == "builtin" {
 			// 内置工具：本地执行
-			toolOut, terr = a.execBuiltinTool(act.Tool, act.Arguments, cfg.MaxFileRead)
+			toolOut, terr = m.execBuiltinTool(act.Tool, act.Arguments, cfg.MaxFileRead)
 		} else {
 			srv, ok := srvByID[act.Server]
 			if !ok {
@@ -586,33 +587,33 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 			if !ok {
 				step.Error = "未找到工具所属服务器"
 				result.Steps = append(result.Steps, step)
-				messages = append(messages, ChatMessage{Role: "assistant", Content: out})
-				messages = append(messages, ChatMessage{Role: "user", Content: "工具调用失败：未找到服务器 " + act.Server + "，请直接给出答案或换用其他方式。"})
+				messages = append(messages, ai.ChatMessage{Role: "assistant", Content: out})
+				messages = append(messages, ai.ChatMessage{Role: "user", Content: "工具调用失败：未找到服务器 " + act.Server + "，请直接给出答案或换用其他方式。"})
 				continue
 			}
 			step.Server = srv.Name
-			toolOut, terr = a.callMCPTool(srv, act.Tool, act.Arguments, userCtx)
+			toolOut, terr = m.callMCPTool(srv, act.Tool, act.Arguments, userCtx)
 		}
 		if terr != nil {
 			step.Error = terr.Error()
 			result.Steps = append(result.Steps, step)
-			messages = append(messages, ChatMessage{Role: "assistant", Content: out})
-			messages = append(messages, ChatMessage{Role: "user", Content: "工具执行出错：" + terr.Error() + "。请调整或直接回答。"})
+			messages = append(messages, ai.ChatMessage{Role: "assistant", Content: out})
+			messages = append(messages, ai.ChatMessage{Role: "user", Content: "工具执行出错：" + terr.Error() + "。请调整或直接回答。"})
 			continue
 		}
-		step.Output = truncate(toolOut, cfg.MaxToolOutput)
+		step.Output = util.Truncate(toolOut, cfg.MaxToolOutput)
 		result.Steps = append(result.Steps, step)
-		a.emitEvent("agent:step", step)
+		m.b.Emit("agent:step", step)
 		// 把工具结果回灌给模型
-		messages = append(messages, ChatMessage{Role: "assistant", Content: out})
-		messages = append(messages, ChatMessage{Role: "user", Content: fmt.Sprintf("工具 %s 返回结果：\n%s\n请基于此继续。", act.Tool, toolOut)})
+		messages = append(messages, ai.ChatMessage{Role: "assistant", Content: out})
+		messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("工具 %s 返回结果：\n%s\n请基于此继续。", act.Tool, toolOut)})
 
 		// 最后一轮仍在调用工具，强制收尾
 		if i == loops-1 {
-			finalMsgs := append(messages, ChatMessage{Role: "user", Content: "已达最大轮数，请基于以上信息直接给出最终答案。"})
-			a.emitEvent("agent:loop-start", map[string]interface{}{"loop": loops + 1, "final": true})
-			out2, err := a.llmCallStream(args, finalMsgs, cfg.Temperature, "final", func(dc streamDelta) {
-				a.emitEvent("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
+			finalMsgs := append(messages, ai.ChatMessage{Role: "user", Content: "已达最大轮数，请基于以上信息直接给出最终答案。"})
+			m.b.Emit("agent:loop-start", map[string]interface{}{"loop": loops + 1, "final": true})
+			out2, err := m.llmCallStream(args, finalMsgs, cfg.Temperature, "final", func(dc streamDelta) {
+				m.b.Emit("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
 			}, func(u TokenUsage) {
 				addUsage(u)
 			})
@@ -630,9 +631,9 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 	if cfg.EnablePolish && result.Content != "" {
 		polishSys := "你是文字润色助手，请在不改变原意与技术细节的前提下，使下面内容表达更清晰、专业、结构更好。若含代码/表格/图表请保留。直接输出润色后的正文。"
 		// 通知前端进入润色，重置正文流
-		a.emitEvent("agent:polish-start", nil)
-		polished, err := a.llmCallStream(args, []ChatMessage{{Role: "system", Content: polishSys}, {Role: "user", Content: result.Content}}, 0.4, "polish", func(dc streamDelta) {
-			a.emitEvent("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
+		m.b.Emit("agent:polish-start", nil)
+		polished, err := m.llmCallStream(args, []ai.ChatMessage{{Role: "system", Content: polishSys}, {Role: "user", Content: result.Content}}, 0.4, "polish", func(dc streamDelta) {
+			m.b.Emit("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
 		}, func(u TokenUsage) {
 			addUsage(u)
 		})
@@ -645,12 +646,12 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 
 	// 保存会话（写入当前激活会话）
 	now := time.Now().Format("2006-01-02 15:04:05")
-	d = a.readAgentData()
+	d = m.readAgentData()
 	sess := d.activeSession()
 	if sess == nil {
 		// 兜底：新建
-		id := a.CreateAgentSession("默认会话")
-		d = a.readAgentData()
+		id := m.CreateAgentSession("默认会话")
+		d = m.readAgentData()
 		sess = d.activeSession()
 		_ = id
 	}
@@ -659,7 +660,7 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 		AgentMsg{ID: agentID("msg"), Role: "assistant", Content: result.Content, Thinking: result.Thinking, Steps: result.Steps, Time: now},
 	)
 	if sess.Title == "" || sess.Title == "新会话" || sess.Title == "默认会话" {
-		sess.Title = truncate(args.Input, 30)
+		sess.Title = util.Truncate(args.Input, 30)
 	}
 	sess.UpdatedAt = time.Now().Format(time.RFC3339)
 	// 累计 token 到会话与全局
@@ -669,15 +670,15 @@ func (a *App) RunAgent(args RunAgentArgs) RunAgentResult {
 	d.Usage.PromptTokens += accUsage.PromptTokens
 	d.Usage.CompletionTokens += accUsage.CompletionTokens
 	d.Usage.TotalTokens += accUsage.TotalTokens
-	_ = a.writeAgentData(d)
+	_ = m.writeAgentData(d)
 
-	a.emitEvent("agent:done", map[string]interface{}{"content": result.Content, "thinking": result.Thinking, "usage": accUsage})
-	a.appendLog(AgentLog{Level: "info", Category: "agent", Title: "Agent 运行结束", Detail: fmt.Sprintf("步骤数=%d 输出长度=%d token=%d", len(result.Steps), len(result.Content), accUsage.TotalTokens), UserID: cfg.CurrentUserID})
+	m.b.Emit("agent:done", map[string]interface{}{"content": result.Content, "thinking": result.Thinking, "usage": accUsage})
+	m.appendLog(AgentLog{Level: "info", Category: "agent", Title: "Agent 运行结束", Detail: fmt.Sprintf("步骤数=%d 输出长度=%d token=%d", len(result.Steps), len(result.Content), accUsage.TotalTokens), UserID: cfg.CurrentUserID})
 	return result
 }
 
 // PolishText 独立的 AI 润色接口（供输入框"润色"按钮使用）。
-func (a *App) PolishText(args RunAgentArgs) (string, error) {
+func (m *Manager) PolishText(args RunAgentArgs) (string, error) {
 	sys := "你是文字润色与提示词优化助手。请优化下面这段用户输入，使其作为给 AI 的指令更清晰、完整、无歧义。直接输出优化后的文本，不要解释。"
-	return a.llmCall(args, []ChatMessage{{Role: "system", Content: sys}, {Role: "user", Content: args.Input}}, 0.5, "polish-input")
+	return m.llmCall(args, []ai.ChatMessage{{Role: "system", Content: sys}, {Role: "user", Content: args.Input}}, 0.5, "polish-input")
 }

@@ -1,6 +1,17 @@
-package main
+// Package capture 实现浏览器扩展请求捕获服务（token 鉴权 HTTP 服务）、
+// 捕获记录的存储/转换（转接口定义、测试用例、OpenAPI）以及静态资源兜底过滤。
+// 抽离自根目录 capture.go，将服务状态（server/token/列表）收归本包，
+// 通过参数与 bus.Bus 解耦对 App / runtime 的直接依赖。
+package capture
 
 import (
+	"apitool/internal/bus"
+	"apitool/internal/doc"
+	"apitool/internal/jsonutil"
+	"apitool/internal/model"
+	"apitool/internal/store"
+	"apitool/internal/util"
+
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,7 +33,7 @@ import (
 
 // ---------------- 捕获请求数据模型 ----------------
 // CapturedRequest 浏览器扩展回传的一条被监听网页的请求记录。
-// 字段命名尽量贴近 ApiInfo，便于直接转换为接口定义。
+// 字段命名尽量贴近 model.ApiInfo，便于直接转换为接口定义。
 type CapturedRequest struct {
 	ID          string            `json:"id"`
 	CapturedAt  string            `json:"capturedAt"` // RFC3339
@@ -31,8 +42,8 @@ type CapturedRequest struct {
 	Host        string            `json:"host"`
 	Path        string            `json:"path"`
 	Origin      string            `json:"origin"`    // 协议+主机，如 https://api.example.com
-	Query       []KV              `json:"query"`
-	Headers     []KV              `json:"headers"`
+	Query       []model.KV        `json:"query"`
+	Headers     []model.KV        `json:"headers"`
 	BodyType    string            `json:"bodyType"`  // none | json | form | text
 	Body        string            `json:"body"`
 	StatusCode  int               `json:"statusCode"`
@@ -41,7 +52,7 @@ type CapturedRequest struct {
 	RespHeaders map[string]string `json:"respHeaders"`
 	RespBody    string            `json:"respBody"`
 	RespIsJSON  bool              `json:"respIsJson"`
-	PageURL     string            `json:"pageUrl"` // 触发该请求的页面地址
+	PageURL     string            `json:"pageUrl"`   // 触发该请求的页面地址
 	MatchedURL  string            `json:"matchedUrl"` // 命中的监控规则（扩展侧填写）
 	Error       string            `json:"error"`
 }
@@ -55,27 +66,32 @@ type capturedIn struct {
 
 // CaptureServerInfo 返回捕获服务状态，供前端展示与扩展配置
 type CaptureServerInfo struct {
-	Running   bool   `json:"running"`
-	Addr      string `json:"addr"`      // 监听地址 host:port
-	Port      string `json:"port"`      // 端口
-	URL       string `json:"url"`       // http://127.0.0.1:port
-	Token     string `json:"token"`     // 当前鉴权 Token
-	Count     int    `json:"count"`     // 已捕获条数
+	Running bool   `json:"running"`
+	Addr    string `json:"addr"`   // 监听地址 host:port
+	Port    string `json:"port"`   // 端口
+	URL     string `json:"url"`    // http://127.0.0.1:port
+	Token   string `json:"token"`  // 当前鉴权 Token
+	Count   int    `json:"count"`  // 已捕获条数
 }
 
 // ---------------- 全局状态 ----------------
 
 const defaultCaptureAddr = "127.0.0.1:8653"
 
-var captureSrv *http.Server
-var captureMu sync.Mutex
-var capturedList []*CapturedRequest
+const captureTokenFile = "capture_token.txt"
+
+var (
+	captureSrv   *http.Server
+	captureMu    sync.Mutex
+	capturedList []*CapturedRequest
+	captureToken string
+)
 
 // ---------------- 启动 / 停止 ----------------
 
-// StartCaptureServer 启动独立捕获服务（端口 8653，带 Token 鉴权），
-// 仅用于接收浏览器扩展回传的被监听网页请求。
-func (a *App) StartCaptureServer(addr string, token string) (string, error) {
+// Start 启动独立捕获服务（端口 8653，带 Token 鉴权），
+// 仅用于接收浏览器扩展回传的被监听网页请求。syncDir 用于持久化 token。
+func Start(addr string, token string, syncDir string) (string, error) {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	if captureSrv != nil {
@@ -85,14 +101,14 @@ func (a *App) StartCaptureServer(addr string, token string) (string, error) {
 		addr = defaultCaptureAddr
 	}
 	if token == "" {
-		token = a.captureToken
+		token = captureToken
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", fmt.Errorf("启动请求捕获服务失败: %v（端口可能被占用）", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/capture", a.handleCapture)
+	mux.HandleFunc("/capture", handleCapture)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeCaptureJSON(w, 200, map[string]interface{}{"ok": true, "port": strings.Split(ln.Addr().String(), ":")[1]})
 	})
@@ -102,8 +118,8 @@ func (a *App) StartCaptureServer(addr string, token string) (string, error) {
 	return ln.Addr().String(), nil
 }
 
-// StopCaptureServer 停止捕获服务
-func (a *App) StopCaptureServer() error {
+// Stop 停止捕获服务
+func Stop() error {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	if captureSrv == nil {
@@ -114,20 +130,20 @@ func (a *App) StopCaptureServer() error {
 	return nil
 }
 
-// CaptureServerRunning 捕获服务是否在运行
-func (a *App) CaptureServerRunning() bool {
+// Running 捕获服务是否在运行
+func Running() bool {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	return captureSrv != nil
 }
 
-// CaptureInfo 返回捕获服务信息（地址、端口、Token、条数）
-func (a *App) CaptureInfo() CaptureServerInfo {
+// Info 返回捕获服务信息（地址、端口、Token、条数）
+func Info() CaptureServerInfo {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	info := CaptureServerInfo{
 		Running: captureSrv != nil,
-		Token:   a.captureToken,
+		Token:   captureToken,
 		Count:   len(capturedList),
 	}
 	if captureSrv != nil {
@@ -147,7 +163,7 @@ func (a *App) CaptureInfo() CaptureServerInfo {
 
 // ---------------- HTTP 处理 ----------------
 
-func (a *App) handleCapture(w http.ResponseWriter, r *http.Request) {
+func handleCapture(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeCaptureJSON(w, 405, map[string]string{"error": "method not allowed"})
 		return
@@ -160,7 +176,7 @@ func (a *App) handleCapture(w http.ResponseWriter, r *http.Request) {
 	var in capturedIn
 	if err := json.Unmarshal(raw, &in); err == nil && len(in.Requests) > 0 {
 		for i := range in.Requests {
-			a.appendCaptured(in.Requests[i], in.CaptureStatic, in.Blacklist)
+			appendCaptured(in.Requests[i], in.CaptureStatic, in.Blacklist)
 		}
 		writeCaptureJSON(w, 200, map[string]interface{}{"ok": true, "count": len(capturedList)})
 		return
@@ -168,14 +184,14 @@ func (a *App) handleCapture(w http.ResponseWriter, r *http.Request) {
 	// 兼容单条上报
 	var single CapturedRequest
 	if err2 := json.Unmarshal(raw, &single); err2 == nil && (single.URL != "" || single.Method != "") {
-		a.appendCaptured(single, false, nil)
+		appendCaptured(single, false, nil)
 		writeCaptureJSON(w, 200, map[string]interface{}{"ok": true, "count": len(capturedList)})
 		return
 	}
 	writeCaptureJSON(w, 400, map[string]string{"error": "请求体解析失败，需为 {requests:[...]} 或单条捕获记录"})
 }
 
-func (a *App) appendCaptured(c CapturedRequest, captureStatic bool, blacklist []string) {
+func appendCaptured(c CapturedRequest, captureStatic bool, blacklist []string) {
 	// 服务端兜底过滤：即便扩展端因运行异常未过滤，css/图片/字体/data:URI 等静态资源也不会入库。
 	// 仅当用户在扩展端显式关闭「过滤静态资源」（即 captureStatic=true）时才放行。
 	if !captureStatic && isStaticResourceURL(c.URL) {
@@ -205,7 +221,7 @@ func (a *App) appendCaptured(c CapturedRequest, captureStatic bool, blacklist []
 			if len(c.Query) == 0 && u.RawQuery != "" {
 				for k, vs := range u.Query() {
 					if len(vs) > 0 {
-						c.Query = append(c.Query, KV{Key: k, Value: vs[0], Enabled: true})
+						c.Query = append(c.Query, model.KV{Key: k, Value: vs[0], Enabled: true})
 					}
 				}
 			}
@@ -228,8 +244,8 @@ func (a *App) appendCaptured(c CapturedRequest, captureStatic bool, blacklist []
 	captureMu.Unlock()
 }
 
-// GetCapturedRequests 返回全部已捕获请求（供前端展示）
-func (a *App) GetCapturedRequests() []CapturedRequest {
+// GetRequests 返回全部已捕获请求（供前端展示）
+func GetRequests() []CapturedRequest {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	out := make([]CapturedRequest, 0, len(capturedList))
@@ -239,8 +255,8 @@ func (a *App) GetCapturedRequests() []CapturedRequest {
 	return out
 }
 
-// ClearCapturedRequests 清空已捕获列表
-func (a *App) ClearCapturedRequests() {
+// Clear 清空已捕获列表
+func Clear() {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	capturedList = nil
@@ -284,11 +300,11 @@ func writeCaptureJSON(w http.ResponseWriter, code int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// ---------------- 转换为 ApiInfo ----------------
+// ---------------- 转换为 model.ApiInfo ----------------
 
 // capturedToTestCase 将单条捕获请求转换为可执行测试用例（用于自动化测试 / 压测）
-func capturedToTestCase(c CapturedRequest) TestCase {
-	name := c.Method + " " + firstNonEmpty(c.Path, c.URL)
+func capturedToTestCase(c CapturedRequest) model.TestCase {
+	name := c.Method + " " + util.FirstNonEmpty(c.Path, c.URL)
 	bodyType := "json"
 	switch c.BodyType {
 	case "form":
@@ -296,7 +312,7 @@ func capturedToTestCase(c CapturedRequest) TestCase {
 	case "text", "none":
 		bodyType = "text"
 	}
-	tc := TestCase{
+	tc := model.TestCase{
 		ID:          uuid.NewString(),
 		ApiName:     "捕获: " + name,
 		Category:    "正常流程",
@@ -308,9 +324,9 @@ func capturedToTestCase(c CapturedRequest) TestCase {
 		Query:       c.Query,
 		BodyType:    bodyType,
 		Body:        c.Body,
-		FormItems:   []KV{},
+		FormItems:   []model.KV{},
 		ContentType: "",
-		Assertions: []Assertion{
+		Assertions: []model.Assertion{
 			{Type: "status", Target: "", Operator: "eq", Expected: "200", Enabled: true},
 		},
 		Enabled:   true,
@@ -319,13 +335,13 @@ func capturedToTestCase(c CapturedRequest) TestCase {
 	return tc
 }
 
-// capturedToApi 将单条捕获请求转换为 ApiInfo（推断请求/响应字段树）
-func capturedToApi(c CapturedRequest) ApiInfo {
-	api := ApiInfo{
+// capturedToApi 将单条捕获请求转换为 model.ApiInfo（推断请求/响应字段树）
+func capturedToApi(c CapturedRequest) model.ApiInfo {
+	api := model.ApiInfo{
 		ID:          uuid.NewString(),
 		Method:      c.Method,
 		URL:         c.URL,
-		Name:        c.Method + " " + firstNonEmpty(c.Path, c.URL),
+		Name:        c.Method + " " + util.FirstNonEmpty(c.Path, c.URL),
 		BodyType:    "json",
 		Headers:     c.Headers,
 		Query:       c.Query,
@@ -353,7 +369,7 @@ func capturedToApi(c CapturedRequest) ApiInfo {
 			api.RespFields = fields
 		}
 	}
-	api.LastResponse = &ResponseData{
+	api.LastResponse = &model.ResponseData{
 		Status:     c.StatusCode,
 		StatusText: c.StatusText,
 		Headers:    c.RespHeaders,
@@ -365,33 +381,17 @@ func capturedToApi(c CapturedRequest) ApiInfo {
 	return api
 }
 
-// parseJSONBodyToFields 解析 JSON 文本为字段树（复用 jsonparse.go 的基础逻辑）
-func parseJSONBodyToFields(s string) ([]*Field, error) {
-	dec := json.NewDecoder(strings.NewReader(s))
-	dec.UseNumber()
-	v, err := decodeValue(dec)
+// parseJSONBodyToFields 解析 JSON 文本为字段树（复用 jsonutil 的基础逻辑）
+func parseJSONBodyToFields(s string) ([]*model.Field, error) {
+	fields, err := jsonutil.ParseFields(s, nil)
 	if err != nil {
 		return nil, err
 	}
-	switch t := v.(type) {
-	case omap:
-		var fields []*Field
-		for _, p := range t {
-			fields = append(fields, fieldFromValue(p.key, p.val))
-		}
-		return fields, nil
-	case []interface{}:
-		root := fieldFromValue("(root)", t)
-		if len(root.Children) > 0 {
-			return root.Children, nil
-		}
-		return []*Field{root}, nil
-	}
-	return nil, fmt.Errorf("非 JSON 对象/数组")
+	return fields, nil
 }
 
-// GenerateApiFromCaptured 将选中的捕获请求转换为接口定义并导入当前项目（指定目录）
-func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (int, error) {
+// GenerateApi 将选中的捕获请求转换为接口定义并导入当前项目（指定目录）
+func GenerateApi(ids []string, projectID, dirID string, s *store.Store) (int, error) {
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("请至少选择一条捕获记录")
 	}
@@ -411,7 +411,7 @@ func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (in
 		return 0, fmt.Errorf("未找到所选捕获记录（可能已被清空）")
 	}
 
-	data := a.readData()
+	data := s.GetData()
 	idx := -1
 	for i, p := range data.Projects {
 		if p.ID == projectID {
@@ -420,7 +420,7 @@ func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (in
 		}
 	}
 	if idx < 0 {
-		idx = activeProjectIndex(data)
+		idx = store.ActiveProjectIndex(data)
 	}
 	if idx < 0 {
 		return 0, fmt.Errorf("没有可用的项目")
@@ -431,14 +431,14 @@ func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (in
 		data.Projects[idx].Apis = append(data.Projects[idx].Apis, api)
 	}
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
+	if err := s.SaveData(data); err != nil {
 		return 0, err
 	}
 	return len(sel), nil
 }
 
-// ImportCapturedAsTestCases 将选中的捕获请求转换为测试用例，导入当前项目用于自动化测试 / 压测
-func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
+// ImportTestCases 将选中的捕获请求转换为测试用例，导入当前项目用于自动化测试 / 压测
+func ImportTestCases(ids []string, s *store.Store) (int, error) {
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("请至少选择一条捕获记录")
 	}
@@ -458,8 +458,8 @@ func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
 		return 0, fmt.Errorf("未找到所选捕获记录（可能已被清空）")
 	}
 
-	data := a.readData()
-	idx := activeProjectIndex(data)
+	data := s.GetData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return 0, fmt.Errorf("没有可用的项目")
 	}
@@ -467,14 +467,14 @@ func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
 		data.Projects[idx].TestCases = append(data.Projects[idx].TestCases, capturedToTestCase(c))
 	}
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
+	if err := s.SaveData(data); err != nil {
 		return 0, err
 	}
 	return len(sel), nil
 }
 
-// ExportCapturedOpenAPI 将选中的捕获请求生成 OpenAPI 文档并弹出保存对话框
-func (a *App) ExportCapturedOpenAPI(ids []string, title string) (string, error) {
+// ExportOpenAPI 将选中的捕获请求生成 OpenAPI 文档并弹出保存对话框（通过 bus.Bus）
+func ExportOpenAPI(ids []string, title string, b bus.Bus) (string, error) {
 	if len(ids) == 0 {
 		return "", fmt.Errorf("请至少选择一条捕获记录")
 	}
@@ -493,20 +493,20 @@ func (a *App) ExportCapturedOpenAPI(ids []string, title string) (string, error) 
 	if len(sel) == 0 {
 		return "", fmt.Errorf("未找到所选捕获记录")
 	}
-	apis := make([]ApiInfo, 0, len(sel))
+	apis := make([]model.ApiInfo, 0, len(sel))
 	for _, c := range sel {
 		apis = append(apis, capturedToApi(c))
 	}
 	if title == "" {
 		title = "浏览器捕获接口"
 	}
-	content, err := buildOpenAPI(title, apis, CommonParams{})
+	content, err := doc.BuildOpenAPI(title, apis, model.CommonParams{})
 	if err != nil {
 		return "", err
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	path, err := b.SaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "导出 OpenAPI 文档",
-		DefaultFilename: sanitizeFilename(title) + ".json",
+		DefaultFilename: doc.SanitizeFilename(title) + ".json",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "OpenAPI JSON (*.json)", Pattern: "*.json"},
 		},
@@ -520,8 +520,8 @@ func (a *App) ExportCapturedOpenAPI(ids []string, title string) (string, error) 
 	return path, nil
 }
 
-// BuildCapturedOpenAPI 生成 OpenAPI JSON 文本（不弹保存框），便于前端复制到剪贴板
-func (a *App) BuildCapturedOpenAPI(ids []string, title string) (string, error) {
+// BuildOpenAPI 生成 OpenAPI JSON 文本（不弹保存框），便于前端复制到剪贴板
+func BuildOpenAPI(ids []string, title string) (string, error) {
 	if len(ids) == 0 {
 		return "", fmt.Errorf("请至少选择一条捕获记录")
 	}
@@ -540,38 +540,35 @@ func (a *App) BuildCapturedOpenAPI(ids []string, title string) (string, error) {
 	if len(sel) == 0 {
 		return "", fmt.Errorf("未找到所选捕获记录")
 	}
-	apis := make([]ApiInfo, 0, len(sel))
+	apis := make([]model.ApiInfo, 0, len(sel))
 	for _, c := range sel {
 		apis = append(apis, capturedToApi(c))
 	}
 	if title == "" {
 		title = "浏览器捕获接口"
 	}
-	return buildOpenAPI(title, apis, CommonParams{})
+	return doc.BuildOpenAPI(title, apis, model.CommonParams{})
 }
 
 // ---------------- Token 持久化 ----------------
 
-const captureTokenFile = "capture_token.txt"
-
-func (a *App) loadOrCreateCaptureToken() {
-	// 优先读取已持久化的 token（避免每次重启都要重新配置扩展）
-	p := filepath.Join(a.syncDir, captureTokenFile)
+// LoadOrCreateToken 读取或生成持久化的捕获 token（写入 syncDir 下 capture_token.txt）
+func LoadOrCreateToken(syncDir string) {
+	p := filepath.Join(syncDir, captureTokenFile)
 	if b, err := os.ReadFile(p); err == nil {
 		t := strings.TrimSpace(string(b))
 		if t != "" {
-			a.captureToken = t
+			captureToken = t
 			return
 		}
 	}
-	// 否则生成一个新的随机 token
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err == nil {
-		a.captureToken = "cap_" + hex.EncodeToString(buf)
+		captureToken = "cap_" + hex.EncodeToString(buf)
 	} else {
-		a.captureToken = "cap_" + uuid.NewString()
+		captureToken = "cap_" + uuid.NewString()
 	}
-	_ = os.WriteFile(p, []byte(a.captureToken), 0o600)
+	_ = os.WriteFile(p, []byte(captureToken), 0o600)
 }
 
 // ---------------- 静态资源 / 黑名单（服务端兜底过滤） ----------------
@@ -632,13 +629,4 @@ func matchBlacklistPat(u string, pats []string) bool {
 		}
 	}
 	return false
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

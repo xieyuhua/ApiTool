@@ -1,6 +1,8 @@
-package main
+// Package jsonutil 提供保留原始顺序的 JSON 解析、字段树推断与格式化。
+package jsonutil
 
 import (
+	"apitool/internal/model"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -13,7 +15,21 @@ type opair struct {
 }
 type omap []opair
 
-// decodeValue 按原始顺序解析 JSON
+// DecodeValue 按原始顺序解析 JSON（对象保留插入顺序）
+func DecodeValue(dec *json.Decoder) (interface{}, error) {
+	return decodeValue(dec)
+}
+
+// FieldFromValue 从解析出的值推断字段结构
+func FieldFromValue(name string, v interface{}) *model.Field {
+	return fieldFromValue(name, v)
+}
+
+// FieldPath 拼接字段路径
+func FieldPath(prefix, name string) string {
+	return fieldPath(prefix, name)
+}
+
 func decodeValue(dec *json.Decoder) (interface{}, error) {
 	tok, err := dec.Token()
 	if err != nil {
@@ -105,8 +121,8 @@ func exampleOf(v interface{}) string {
 	}
 }
 
-func fieldFromValue(name string, v interface{}) *Field {
-	f := &Field{Name: name, Type: typeOf(v), Example: exampleOf(v)}
+func fieldFromValue(name string, v interface{}) *model.Field {
+	f := &model.Field{Name: name, Type: typeOf(v), Example: exampleOf(v)}
 	switch t := v.(type) {
 	case omap:
 		for _, p := range t {
@@ -137,7 +153,7 @@ func fieldPath(prefix, name string) string {
 	return prefix + "." + name
 }
 
-func collectDesc(fields []*Field, prefix string, m map[string]*Field) {
+func collectDesc(fields []*model.Field, prefix string, m map[string]*model.Field) {
 	for _, f := range fields {
 		p := fieldPath(prefix, f.Name)
 		m[p] = f
@@ -145,7 +161,7 @@ func collectDesc(fields []*Field, prefix string, m map[string]*Field) {
 	}
 }
 
-func applyDesc(fields []*Field, prefix string, m map[string]*Field) {
+func applyDesc(fields []*model.Field, prefix string, m map[string]*model.Field) {
 	for _, f := range fields {
 		p := fieldPath(prefix, f.Name)
 		if old, ok := m[p]; ok {
@@ -159,7 +175,7 @@ func applyDesc(fields []*Field, prefix string, m map[string]*Field) {
 }
 
 // ParseFields 将 JSON 文本解析为字段树，并合并已有字段的描述信息
-func (a *App) ParseFields(jsonStr string, existing []*Field) ([]*Field, error) {
+func ParseFields(jsonStr string, existing []*model.Field) ([]*model.Field, error) {
 	dec := json.NewDecoder(strings.NewReader(jsonStr))
 	dec.UseNumber()
 	v, err := decodeValue(dec)
@@ -167,7 +183,7 @@ func (a *App) ParseFields(jsonStr string, existing []*Field) ([]*Field, error) {
 		return nil, fmt.Errorf("JSON 解析失败: %v", err)
 	}
 
-	var fields []*Field
+	var fields []*model.Field
 	switch t := v.(type) {
 	case omap:
 		for _, p := range t {
@@ -178,20 +194,20 @@ func (a *App) ParseFields(jsonStr string, existing []*Field) ([]*Field, error) {
 		if len(root.Children) > 0 {
 			fields = root.Children
 		} else {
-			fields = []*Field{root}
+			fields = []*model.Field{root}
 		}
 	default:
 		return nil, fmt.Errorf("请提供 JSON 对象或数组")
 	}
 
-	old := map[string]*Field{}
+	old := map[string]*model.Field{}
 	collectDesc(existing, "", old)
 	applyDesc(fields, "", old)
 	return fields, nil
 }
 
 // FormatJSON 格式化 JSON 文本
-func (a *App) FormatJSON(jsonStr string) (string, error) {
+func FormatJSON(jsonStr string) (string, error) {
 	var v interface{}
 	dec := json.NewDecoder(strings.NewReader(jsonStr))
 	dec.UseNumber()

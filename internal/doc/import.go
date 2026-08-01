@@ -1,6 +1,11 @@
-package main
+package doc
 
 import (
+	
+	"context"
+	"apitool/internal/store"
+	"apitool/internal/util"
+	"apitool/internal/model"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,18 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/yaml.v3"
 )
 
-func genID() string {
-	return uuid.NewString()
-}
-
 // ImportDoc 选择并导入接口文档（OpenAPI 3 / Swagger 2 / Postman）
-func (a *App) ImportDoc() (string, error) {
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+func ImportDoc(ctx context.Context, s *store.Store, version, updateURL string, projectID string) (string, error) {
+	path, err := runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{
 		Title: "导入接口文档",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "接口文档 (OpenAPI/Swagger/Postman)", Pattern: "*.json;*.yaml;*.yml"},
@@ -40,8 +40,8 @@ func (a *App) ImportDoc() (string, error) {
 		return "", err
 	}
 
-	var dirs []Directory
-	var apis []ApiInfo
+	var dirs []model.Directory
+	var apis []model.ApiInfo
 
 	switch detectFormat(doc) {
 	case "openapi3":
@@ -63,14 +63,14 @@ func (a *App) ImportDoc() (string, error) {
 
 	// 外层根目录包裹，避免与现有数据混淆
 	rootName := fmt.Sprintf("导入-%s", baseName(path))
-	root := Directory{ID: genID(), Name: rootName, ParentID: "", Sort: 0}
+	root := model.Directory{ID: util.GenID(), Name: rootName, ParentID: "", Sort: 0}
 	// 一级目录指向 root
 	for i := range dirs {
 		if dirs[i].ParentID == "" {
 			dirs[i].ParentID = root.ID
 		}
 	}
-	dirs = append([]Directory{root}, dirs...)
+	dirs = append([]model.Directory{root}, dirs...)
 
 	// 兜底：未归类接口挂到根目录
 	dirSet := map[string]bool{}
@@ -86,15 +86,15 @@ func (a *App) ImportDoc() (string, error) {
 	// 剪枝：删除没有任何接口（含后代）的空目录，避免导入后产生大量无用的空文件夹
 	dirs = pruneEmptyDirs(dirs, apis)
 
-	data := a.readData()
-	idx := activeProjectIndex(data)
+	data := s.Read(version, updateURL)
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return "", fmt.Errorf("没有可用的项目")
 	}
 	data.Projects[idx].Dirs = append(data.Projects[idx].Dirs, dirs...)
 	data.Projects[idx].Apis = append(data.Projects[idx].Apis, apis...)
 	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
+	if err := s.Write(data); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("导入成功：%d 个目录、%d 个接口（已放入项目「%s」的「%s」）", len(dirs), len(apis), data.Projects[idx].Name, rootName), nil
@@ -176,7 +176,7 @@ func baseName(p string) string {
 
 // ensureTagPath 将形如 "A/B/C" 的标签名拆成多级嵌套目录，
 // 返回末级目录 ID。兼容 Apipost 等多级文件夹用 "/" 拼接在 tag 名里的导出方式。
-func ensureTagPath(tagPath string, dirs *[]Directory, tagDir map[string]string) string {
+func ensureTagPath(tagPath string, dirs *[]model.Directory, tagDir map[string]string) string {
 	tagPath = strings.Trim(tagPath, "/")
 	if tagPath == "" {
 		return ""
@@ -197,8 +197,8 @@ func ensureTagPath(tagPath string, dirs *[]Directory, tagDir map[string]string) 
 			parent = id
 			continue
 		}
-		id := genID()
-		*dirs = append(*dirs, Directory{ID: id, Name: seg, ParentID: parent, Sort: len(*dirs)})
+		id := util.GenID()
+		*dirs = append(*dirs, model.Directory{ID: id, Name: seg, ParentID: parent, Sort: len(*dirs)})
 		tagDir[curKey] = id
 		parent = id
 	}
@@ -207,7 +207,7 @@ func ensureTagPath(tagPath string, dirs *[]Directory, tagDir map[string]string) 
 
 // pruneEmptyDirs 删除没有任何接口（含后代接口）归属的空目录。
 // 保留规则：一个目录被保留，当且仅当它本身直接挂载了接口，或它的某个后代目录被保留。
-func pruneEmptyDirs(dirs []Directory, apis []ApiInfo) []Directory {
+func pruneEmptyDirs(dirs []model.Directory, apis []model.ApiInfo) []model.Directory {
 	// 收集所有“被接口直接使用”的目录 ID
 	used := map[string]bool{}
 	for _, a := range apis {
@@ -280,7 +280,7 @@ func resolveRefSchema(s map[string]interface{}, doc map[string]interface{}) map[
 	return s
 }
 
-func schemaToFields(name string, schema map[string]interface{}, doc map[string]interface{}, depth int) *Field {
+func schemaToFields(name string, schema map[string]interface{}, doc map[string]interface{}, depth int) *model.Field {
 	if depth > 20 {
 		return nil
 	}
@@ -288,7 +288,7 @@ func schemaToFields(name string, schema map[string]interface{}, doc map[string]i
 	if schema == nil {
 		return nil
 	}
-	field := &Field{Name: name}
+	field := &model.Field{Name: name}
 	if t, ok := schema["type"].(string); ok {
 		field.Type = t
 	} else {
@@ -419,8 +419,8 @@ func contentSchema(obj map[string]interface{}, doc map[string]interface{}) map[s
 	return nil
 }
 
-func paramToKV(p map[string]interface{}) KV {
-	kv := KV{Enabled: true, Key: strVal(p["name"]), Description: strVal(p["description"])}
+func paramToKV(p map[string]interface{}) model.KV {
+	kv := model.KV{Enabled: true, Key: strVal(p["name"]), Description: strVal(p["description"])}
 	if req, ok := p["required"].(bool); ok && req {
 		kv.Description = "必填。" + kv.Description
 	}
@@ -440,9 +440,9 @@ func paramToKV(p map[string]interface{}) KV {
 
 // ---------------- OpenAPI 3 ----------------
 
-func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []ApiInfo) {
-	var dirs []Directory
-	var apis []ApiInfo
+func parseOpenAPI3(doc map[string]interface{}, title string) ([]model.Directory, []model.ApiInfo) {
+	var dirs []model.Directory
+	var apis []model.ApiInfo
 
 	base := ""
 	if servers, ok := doc["servers"].([]interface{}); ok && len(servers) > 0 {
@@ -477,8 +477,8 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 			if method == "" || method == "PARAMETERS" {
 				continue
 			}
-			api := ApiInfo{
-				ID: genID(), Name: strVal(op["summary"]), Method: method,
+			api := model.ApiInfo{
+				ID: util.GenID(), Name: strVal(op["summary"]), Method: method,
 				URL: joinURL(base, path), Description: strVal(op["description"]), BodyType: "json",
 			}
 			if api.Name == "" {
@@ -497,7 +497,7 @@ func parseOpenAPI3(doc map[string]interface{}, title string) ([]Directory, []Api
 	return dirs, apis
 }
 
-func buildOpenAPIOp(api ApiInfo, op map[string]interface{}, doc map[string]interface{}) ApiInfo {
+func buildOpenAPIOp(api model.ApiInfo, op map[string]interface{}, doc map[string]interface{}) model.ApiInfo {
 	if params, ok := op["parameters"].([]interface{}); ok {
 		for _, pv := range params {
 			p, ok := pv.(map[string]interface{})
@@ -543,9 +543,9 @@ func buildOpenAPIOp(api ApiInfo, op map[string]interface{}, doc map[string]inter
 
 // ---------------- Swagger 2 ----------------
 
-func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []ApiInfo) {
-	var dirs []Directory
-	var apis []ApiInfo
+func parseSwagger2(doc map[string]interface{}, title string) ([]model.Directory, []model.ApiInfo) {
+	var dirs []model.Directory
+	var apis []model.ApiInfo
 
 	base := ""
 	if host, ok := doc["host"].(string); ok && host != "" {
@@ -585,8 +585,8 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 			if method == "" || method == "PARAMETERS" {
 				continue
 			}
-			api := ApiInfo{
-				ID: genID(), Name: strVal(op["summary"]), Method: method,
+			api := model.ApiInfo{
+				ID: util.GenID(), Name: strVal(op["summary"]), Method: method,
 				URL: joinURL(base, path), Description: strVal(op["description"]), BodyType: "json",
 			}
 			if api.Name == "" {
@@ -605,7 +605,7 @@ func parseSwagger2(doc map[string]interface{}, title string) ([]Directory, []Api
 	return dirs, apis
 }
 
-func buildSwaggerOp(api ApiInfo, op map[string]interface{}, doc map[string]interface{}) ApiInfo {
+func buildSwaggerOp(api model.ApiInfo, op map[string]interface{}, doc map[string]interface{}) model.ApiInfo {
 	if params, ok := op["parameters"].([]interface{}); ok {
 		for _, pv := range params {
 			p, ok := pv.(map[string]interface{})
@@ -625,7 +625,7 @@ func buildSwaggerOp(api ApiInfo, op map[string]interface{}, doc map[string]inter
 				}
 			case "formData":
 				api.BodyType = "form"
-				api.FormItems = append(api.FormItems, KV{Enabled: true, Key: strVal(p["name"]), Value: strVal(p["type"]), Description: strVal(p["description"])})
+				api.FormItems = append(api.FormItems, model.KV{Enabled: true, Key: strVal(p["name"]), Value: strVal(p["type"]), Description: strVal(p["description"])})
 			case "query":
 				api.Query = append(api.Query, paramToKV(p))
 			case "header":
@@ -655,16 +655,16 @@ func buildSwaggerOp(api ApiInfo, op map[string]interface{}, doc map[string]inter
 
 // ---------------- Postman Collection ----------------
 
-func parsePostman(doc map[string]interface{}, title string) ([]Directory, []ApiInfo) {
-	var dirs []Directory
-	var apis []ApiInfo
+func parsePostman(doc map[string]interface{}, title string) ([]model.Directory, []model.ApiInfo) {
+	var dirs []model.Directory
+	var apis []model.ApiInfo
 	if items, ok := doc["item"].([]interface{}); ok {
 		parsePostmanItems(items, &dirs, &apis, "", 0)
 	}
 	return dirs, apis
 }
 
-func parsePostmanItems(items []interface{}, dirs *[]Directory, apis *[]ApiInfo, parentID string, sort int) {
+func parsePostmanItems(items []interface{}, dirs *[]model.Directory, apis *[]model.ApiInfo, parentID string, sort int) {
 	for _, it := range items {
 		im, ok := it.(map[string]interface{})
 		if !ok {
@@ -672,8 +672,8 @@ func parsePostmanItems(items []interface{}, dirs *[]Directory, apis *[]ApiInfo, 
 		}
 		name := strVal(im["name"])
 		if sub, ok := im["item"].([]interface{}); ok {
-			id := genID()
-			*dirs = append(*dirs, Directory{ID: id, Name: name, ParentID: parentID, Sort: sort})
+			id := util.GenID()
+			*dirs = append(*dirs, model.Directory{ID: id, Name: name, ParentID: parentID, Sort: sort})
 			parsePostmanItems(sub, dirs, apis, id, 0)
 		} else if req, ok := im["request"]; ok {
 			*apis = append(*apis, postmanRequestToApi(name, req, parentID))
@@ -681,8 +681,8 @@ func parsePostmanItems(items []interface{}, dirs *[]Directory, apis *[]ApiInfo, 
 	}
 }
 
-func postmanRequestToApi(name string, req interface{}, parentID string) ApiInfo {
-	api := ApiInfo{ID: genID(), Name: name, DirID: parentID, BodyType: "json"}
+func postmanRequestToApi(name string, req interface{}, parentID string) model.ApiInfo {
+	api := model.ApiInfo{ID: util.GenID(), Name: name, DirID: parentID, BodyType: "json"}
 	rm, ok := req.(map[string]interface{})
 	if !ok {
 		return api
@@ -701,7 +701,7 @@ func postmanRequestToApi(name string, req interface{}, parentID string) ApiInfo 
 			if !ok {
 				continue
 			}
-			api.Headers = append(api.Headers, KV{
+			api.Headers = append(api.Headers, model.KV{
 				Enabled: true, Key: strVal(hm["key"]), Value: strVal(hm["value"]), Description: strVal(hm["description"]),
 			})
 		}
@@ -752,7 +752,7 @@ func postmanURL(u interface{}) string {
 	return ""
 }
 
-func postmanBody(b interface{}, api *ApiInfo) {
+func postmanBody(b interface{}, api *model.ApiInfo) {
 	bm, ok := b.(map[string]interface{})
 	if !ok {
 		return
@@ -776,7 +776,7 @@ func postmanBody(b interface{}, api *ApiInfo) {
 		if fl, ok := bm[key].([]interface{}); ok {
 			for _, f := range fl {
 				if fm, ok := f.(map[string]interface{}); ok {
-					api.FormItems = append(api.FormItems, KV{
+					api.FormItems = append(api.FormItems, model.KV{
 						Enabled: true, Key: strVal(fm["key"]), Value: strVal(fm["value"]), Description: strVal(fm["description"]),
 					})
 				}

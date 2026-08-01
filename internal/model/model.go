@@ -1,4 +1,4 @@
-package main
+package model
 
 // KV 键值对（Header / Query / Form 等）
 type KV struct {
@@ -112,7 +112,7 @@ type Project struct {
 
 // Assertion 测试断言（期望）
 type Assertion struct {
-	Type     string `json:"type"`     // status | json | bodyContains | header | duration
+	Type     string `json:"type"`     // status | json | body | header | duration
 	Target   string `json:"target"`   // json 时为 JSONPath；header 时为请求头名；其余为空
 	Operator string `json:"operator"` // eq | ne | gt | gte | lt | lte | contains | exists | isTrue | isFalse
 	Expected string `json:"expected"` // 期望值（duration 时单位为毫秒）
@@ -135,7 +135,7 @@ type TestCase struct {
 	Body        string      `json:"body"`
 	FormItems   []KV        `json:"formItems"`
 	ContentType string      `json:"contentType"`
-		Assertions  []Assertion `json:"assertions"`
+	Assertions  []Assertion `json:"assertions"`
 	Enabled     bool        `json:"enabled"`
 	CreatedAt   string      `json:"createdAt"`
 	DirID       string      `json:"dirId,omitempty"`

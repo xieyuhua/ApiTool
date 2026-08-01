@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bufio"
@@ -10,13 +10,42 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/ai"
+	"apitool/internal/bus"
+	"apitool/internal/model"
+	"apitool/internal/store"
+	"apitool/internal/util"
 )
+
+// Host 宿主能力接口：agent 模块通过它访问应用数据存储、事件推送与配置，
+// 从而与 main 包的 App 解耦（App 实现该接口并注入）。
+type Host interface {
+	Store() *store.Store
+	ReadData() model.AppData
+	SaveData(model.AppData) error
+	SendRequest(model.RequestSpec) model.ResponseData
+	AppVersion() string
+}
+
+// Manager 承载 agent 运行、配置与 MCP 客户端等全部逻辑，不再依赖 main 包的 App。
+type Manager struct {
+	host          Host
+	b             bus.Bus
+	ctx           context.Context
+	mu            sync.Mutex // 对应原 agentMu，保护 agent.json 读写
+	agentDataPath string
+}
+
+// NewManager 创建 agent 管理器。host 提供数据与配置能力，b 用于事件推送，
+// agentDataPath 为 agent.json 的绝对路径。
+func NewManager(host Host, b bus.Bus, agentDataPath string) *Manager {
+	return &Manager{host: host, b: b, ctx: context.Background(), agentDataPath: agentDataPath}
+}
 
 // ============================ 数据模型 ============================
 
@@ -80,7 +109,7 @@ func BuiltinToolMeta() []BuiltinToolDef {
 }
 
 // GetBuiltinTools 返回全部内置工具的静态元信息（供前端设置页动态罗列，保证前后端一致）。
-func (a *App) GetBuiltinTools() []BuiltinToolDef {
+func (m *Manager) GetBuiltinTools() []BuiltinToolDef {
 	return BuiltinToolMeta()
 }
 
@@ -172,8 +201,8 @@ type AgentData struct {
 
 // ============================ 持久化 ============================
 
-func (a *App) agentFilePath() string {
-	return filepath.Join(filepath.Dir(a.dataFile), "agent.json")
+func (m *Manager) agentFilePath() string {
+	return m.agentDataPath
 }
 
 func defaultAgentData() AgentData {
@@ -203,11 +232,11 @@ func defaultAgentData() AgentData {
 	}
 }
 
-func (a *App) readAgentData() AgentData {
-	a.agentMu.Lock()
-	defer a.agentMu.Unlock()
+func (m *Manager) readAgentData() AgentData {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	data := defaultAgentData()
-	b, err := os.ReadFile(a.agentFilePath())
+	b, err := os.ReadFile(m.agentDataPath)
 	if err != nil {
 		return data
 	}
@@ -301,9 +330,9 @@ func (d *AgentData) activeSession() *AgentSession {
 	return nil
 }
 
-func (a *App) writeAgentData(data AgentData) error {
-	a.agentMu.Lock()
-	defer a.agentMu.Unlock()
+func (m *Manager) writeAgentData(data AgentData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// 限制日志与消息数量，避免文件无限增长
 	if len(data.Logs) > 2000 {
 		data.Logs = data.Logs[len(data.Logs)-2000:]
@@ -321,25 +350,25 @@ func (a *App) writeAgentData(data AgentData) error {
 	if err != nil {
 		return err
 	}
-	tmp := a.agentFilePath() + ".tmp"
+	tmp := m.agentDataPath + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, a.agentFilePath())
+	return os.Rename(tmp, m.agentDataPath)
 }
 
 // ============================ 前端可调用：配置 / CRUD ============================
 
 // LoadAgentData 返回 Agent 全部数据（配置、技能、服务器、用户、消息）。日志单独查询。
-func (a *App) LoadAgentData() AgentData {
-	d := a.readAgentData()
+func (m *Manager) LoadAgentData() AgentData {
+	d := m.readAgentData()
 	// 消息与日志较大，前端首屏只需要少量消息，这里全部返回由前端裁剪
 	return d
 }
 
 // SaveAgentConfig 保存运行配置。
-func (a *App) SaveAgentConfig(cfg AgentConfig) error {
-	d := a.readAgentData()
+func (m *Manager) SaveAgentConfig(cfg AgentConfig) error {
+	d := m.readAgentData()
 	if cfg.MaxLoops <= 0 {
 		cfg.MaxLoops = 6
 	}
@@ -350,12 +379,12 @@ func (a *App) SaveAgentConfig(cfg AgentConfig) error {
 		cfg.Mode = "react"
 	}
 	d.Config = cfg
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // SaveAgentSkills 覆盖保存技能列表（热加载：保存后立即生效）。
-func (a *App) SaveAgentSkills(skills []AgentSkill) error {
-	d := a.readAgentData()
+func (m *Manager) SaveAgentSkills(skills []AgentSkill) error {
+	d := m.readAgentData()
 	now := time.Now().Format(time.RFC3339)
 	for i := range skills {
 		if skills[i].ID == "" {
@@ -364,12 +393,12 @@ func (a *App) SaveAgentSkills(skills []AgentSkill) error {
 		skills[i].UpdatedAt = now
 	}
 	d.Skills = skills
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // SaveMCPServers 覆盖保存 MCP 服务器列表。
-func (a *App) SaveMCPServers(servers []MCPServer) error {
-	d := a.readAgentData()
+func (m *Manager) SaveMCPServers(servers []MCPServer) error {
+	d := m.readAgentData()
 	now := time.Now().Format(time.RFC3339)
 	for i := range servers {
 		if servers[i].ID == "" {
@@ -381,33 +410,33 @@ func (a *App) SaveMCPServers(servers []MCPServer) error {
 		servers[i].UpdatedAt = now
 	}
 	d.Servers = servers
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // SaveAgentUsers 覆盖保存用户列表。
-func (a *App) SaveAgentUsers(users []AgentUser) error {
-	d := a.readAgentData()
+func (m *Manager) SaveAgentUsers(users []AgentUser) error {
+	d := m.readAgentData()
 	for i := range users {
 		if users[i].ID == "" {
 			users[i].ID = agentID("user")
 		}
 	}
 	d.Users = users
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // ClearAgentMessages 清空当前会话历史。
-func (a *App) ClearAgentMessages() error {
-	d := a.readAgentData()
+func (m *Manager) ClearAgentMessages() error {
+	d := m.readAgentData()
 	if s := d.activeSession(); s != nil {
 		s.Messages = []AgentMsg{}
 	}
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // CreateAgentSession 新建会话，返回新会话 ID。
-func (a *App) CreateAgentSession(title string) string {
-	d := a.readAgentData()
+func (m *Manager) CreateAgentSession(title string) string {
+	d := m.readAgentData()
 	id := agentID("sess")
 	now := time.Now().Format(time.RFC3339)
 	if title == "" {
@@ -415,25 +444,25 @@ func (a *App) CreateAgentSession(title string) string {
 	}
 	d.Sessions = append(d.Sessions, AgentSession{ID: id, Title: title, CreatedAt: now, UpdatedAt: now, Messages: []AgentMsg{}})
 	d.ActiveSession = id
-	_ = a.writeAgentData(d)
-	a.emitEvent("agent:session-created", map[string]interface{}{"id": id, "title": title})
+	_ = m.writeAgentData(d)
+	m.b.Emit("agent:session-created", map[string]interface{}{"id": id, "title": title})
 	return id
 }
 
 // SwitchAgentSession 切换当前激活会话。
-func (a *App) SwitchAgentSession(id string) error {
-	d := a.readAgentData()
+func (m *Manager) SwitchAgentSession(id string) error {
+	d := m.readAgentData()
 	if !sessionExists(d, id) {
 		return fmt.Errorf("会话不存在")
 	}
 	d.ActiveSession = id
-	_ = a.writeAgentData(d)
+	_ = m.writeAgentData(d)
 	return nil
 }
 
 // DeleteAgentSession 删除会话（至少保留一个）。
-func (a *App) DeleteAgentSession(id string) error {
-	d := a.readAgentData()
+func (m *Manager) DeleteAgentSession(id string) error {
+	d := m.readAgentData()
 	if len(d.Sessions) <= 1 {
 		return fmt.Errorf("至少保留一个会话")
 	}
@@ -451,27 +480,27 @@ func (a *App) DeleteAgentSession(id string) error {
 	if d.ActiveSession == id {
 		d.ActiveSession = d.Sessions[0].ID
 	}
-	_ = a.writeAgentData(d)
+	_ = m.writeAgentData(d)
 	return nil
 }
 
 // RenameAgentSession 重命名会话。
-func (a *App) RenameAgentSession(id, title string) error {
-	d := a.readAgentData()
+func (m *Manager) RenameAgentSession(id, title string) error {
+	d := m.readAgentData()
 	for i := range d.Sessions {
 		if d.Sessions[i].ID == id {
 			d.Sessions[i].Title = title
 			d.Sessions[i].UpdatedAt = time.Now().Format(time.RFC3339)
 		}
 	}
-	_ = a.writeAgentData(d)
+	_ = m.writeAgentData(d)
 	return nil
 }
 
 // ============================ 日志 ============================
 
-func (a *App) appendLog(l AgentLog) {
-	d := a.readAgentData()
+func (m *Manager) appendLog(l AgentLog) {
+	d := m.readAgentData()
 	if l.ID == "" {
 		l.ID = agentID("log")
 	}
@@ -482,10 +511,10 @@ func (a *App) appendLog(l AgentLog) {
 		l.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	}
 	d.Logs = append(d.Logs, l)
-	_ = a.writeAgentData(d)
+	_ = m.writeAgentData(d)
 	// 实时推送给前端日志面板
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "agent:log", l)
+	if m.ctx != nil {
+		m.b.Emit( "agent:log", l)
 	}
 }
 
@@ -498,8 +527,8 @@ type QueryAgentLogsArgs struct {
 }
 
 // QueryAgentLogs 按关键词/级别/分类搜索日志，返回最新在前。
-func (a *App) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
-	d := a.readAgentData()
+func (m *Manager) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
+	d := m.readAgentData()
 	kw := strings.ToLower(strings.TrimSpace(args.Keyword))
 	out := make([]AgentLog, 0, len(d.Logs))
 	for _, l := range d.Logs {
@@ -529,10 +558,10 @@ func (a *App) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
 }
 
 // ClearAgentLogs 清空日志。
-func (a *App) ClearAgentLogs() error {
-	d := a.readAgentData()
+func (m *Manager) ClearAgentLogs() error {
+	d := m.readAgentData()
 	d.Logs = []AgentLog{}
-	return a.writeAgentData(d)
+	return m.writeAgentData(d)
 }
 
 // ============================ MCP 客户端 ============================
@@ -564,7 +593,7 @@ type jsonRPCResp struct {
 }
 
 // mcpUserContext 传给 MCP 的登录用户上下文（用于权限区分）。
-func (a *App) mcpUserContext(cfg AgentConfig, users []AgentUser) map[string]interface{} {
+func (m *Manager) mcpUserContext(cfg AgentConfig, users []AgentUser) map[string]interface{} {
 	for _, u := range users {
 		if u.ID == cfg.CurrentUserID {
 			return map[string]interface{}{
@@ -580,7 +609,7 @@ func (a *App) mcpUserContext(cfg AgentConfig, users []AgentUser) map[string]inte
 
 // callMCPStdio 通过 stdio 传输调用一次 MCP（initialize -> 指定 method）。
 // 为简化实现，每次调用启动一次进程，完成后退出。
-func (a *App) callMCPStdio(srv MCPServer, method string, params interface{}) (json.RawMessage, error) {
+func (m *Manager) callMCPStdio(srv MCPServer, method string, params interface{}) (json.RawMessage, error) {
 	if srv.Command == "" {
 		return nil, fmt.Errorf("MCP[%s] 未配置命令", srv.Name)
 	}
@@ -639,7 +668,7 @@ func (a *App) callMCPStdio(srv MCPServer, method string, params interface{}) (js
 	if err := writeReq(jsonRPCReq{JSONRPC: "2.0", ID: 1, Method: "initialize", Params: map[string]interface{}{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]interface{}{},
-		"clientInfo":      map[string]interface{}{"name": "apitool-agent", "version": AppVersion},
+		"clientInfo":      map[string]interface{}{"name": "apitool-agent", "version": ai.AppVersion},
 	}}); err != nil {
 		return nil, err
 	}
@@ -657,7 +686,7 @@ func (a *App) callMCPStdio(srv MCPServer, method string, params interface{}) (js
 }
 
 // callMCPHTTP 通过 HTTP（JSON-RPC over POST）调用远程 MCP。
-func (a *App) callMCPHTTP(srv MCPServer, method string, params interface{}, userCtx map[string]interface{}) (json.RawMessage, error) {
+func (m *Manager) callMCPHTTP(srv MCPServer, method string, params interface{}, userCtx map[string]interface{}) (json.RawMessage, error) {
 	if srv.URL == "" {
 		return nil, fmt.Errorf("MCP[%s] 未配置 URL", srv.Name)
 	}
@@ -703,13 +732,13 @@ func (a *App) callMCPHTTP(srv MCPServer, method string, params interface{}, user
 }
 
 // listMCPTools 列出单个服务器的工具。
-func (a *App) listMCPTools(srv MCPServer, userCtx map[string]interface{}) ([]MCPTool, error) {
+func (m *Manager) listMCPTools(srv MCPServer, userCtx map[string]interface{}) ([]MCPTool, error) {
 	var raw json.RawMessage
 	var err error
 	if srv.Transport == "http" {
-		raw, err = a.callMCPHTTP(srv, "tools/list", map[string]interface{}{}, userCtx)
+		raw, err = m.callMCPHTTP(srv, "tools/list", map[string]interface{}{}, userCtx)
 	} else {
-		raw, err = a.callMCPStdio(srv, "tools/list", map[string]interface{}{})
+		raw, err = m.callMCPStdio(srv, "tools/list", map[string]interface{}{})
 	}
 	if err != nil {
 		return nil, err
@@ -728,17 +757,17 @@ func (a *App) listMCPTools(srv MCPServer, userCtx map[string]interface{}) ([]MCP
 }
 
 // ListAllMCPTools 列出所有启用服务器的工具（前端预览/调试用）。
-func (a *App) ListAllMCPTools() ([]MCPTool, error) {
-	d := a.readAgentData()
-	userCtx := a.mcpUserContext(d.Config, d.Users)
+func (m *Manager) ListAllMCPTools() ([]MCPTool, error) {
+	d := m.readAgentData()
+	userCtx := m.mcpUserContext(d.Config, d.Users)
 	var all []MCPTool
 	for _, srv := range d.Servers {
 		if !srv.Enabled {
 			continue
 		}
-		tools, err := a.listMCPTools(srv, userCtx)
+		tools, err := m.listMCPTools(srv, userCtx)
 		if err != nil {
-			a.appendLog(AgentLog{Level: "error", Category: "mcp", Title: "列出工具失败: " + srv.Name, Detail: err.Error()})
+			m.appendLog(AgentLog{Level: "error", Category: "mcp", Title: "列出工具失败: " + srv.Name, Detail: err.Error()})
 			continue
 		}
 		all = append(all, tools...)
@@ -747,14 +776,14 @@ func (a *App) ListAllMCPTools() ([]MCPTool, error) {
 }
 
 // TestMCPServer 测试单个 MCP 服务器连通性，返回工具列表。
-func (a *App) TestMCPServer(srv MCPServer) ([]MCPTool, error) {
-	d := a.readAgentData()
-	userCtx := a.mcpUserContext(d.Config, d.Users)
-	return a.listMCPTools(srv, userCtx)
+func (m *Manager) TestMCPServer(srv MCPServer) ([]MCPTool, error) {
+	d := m.readAgentData()
+	userCtx := m.mcpUserContext(d.Config, d.Users)
+	return m.listMCPTools(srv, userCtx)
 }
 
 // callMCPTool 调用某工具，注入登录用户上下文（供权限区分）。
-func (a *App) callMCPTool(srv MCPServer, tool string, arguments map[string]interface{}, userCtx map[string]interface{}) (string, error) {
+func (m *Manager) callMCPTool(srv MCPServer, tool string, arguments map[string]interface{}, userCtx map[string]interface{}) (string, error) {
 	params := map[string]interface{}{
 		"name":      tool,
 		"arguments": arguments,
@@ -767,13 +796,13 @@ func (a *App) callMCPTool(srv MCPServer, tool string, arguments map[string]inter
 	var raw json.RawMessage
 	var err error
 	if srv.Transport == "http" {
-		raw, err = a.callMCPHTTP(srv, "tools/call", params, userCtx)
+		raw, err = m.callMCPHTTP(srv, "tools/call", params, userCtx)
 	} else {
-		raw, err = a.callMCPStdio(srv, "tools/call", params)
+		raw, err = m.callMCPStdio(srv, "tools/call", params)
 	}
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
-		a.appendLog(AgentLog{Level: "error", Category: "mcp", Title: fmt.Sprintf("调用工具失败: %s@%s", tool, srv.Name), Detail: err.Error(), DurationMs: dur})
+		m.appendLog(AgentLog{Level: "error", Category: "mcp", Title: fmt.Sprintf("调用工具失败: %s@%s", tool, srv.Name), Detail: err.Error(), DurationMs: dur})
 		return "", err
 	}
 	// 解析 content 文本
@@ -796,7 +825,7 @@ func (a *App) callMCPTool(srv MCPServer, tool string, arguments map[string]inter
 	if out == "" {
 		out = string(raw)
 	}
-	a.appendLog(AgentLog{Level: "tool", Category: "mcp", Title: fmt.Sprintf("调用工具: %s@%s", tool, srv.Name), Detail: "参数: " + toJSON(arguments) + "\n结果: " + truncate(out, 4000), DurationMs: dur})
+	m.appendLog(AgentLog{Level: "tool", Category: "mcp", Title: fmt.Sprintf("调用工具: %s@%s", tool, srv.Name), Detail: "参数: " + toJSON(arguments) + "\n结果: " + util.Truncate(out, 4000), DurationMs: dur})
 	return out, nil
 }
 

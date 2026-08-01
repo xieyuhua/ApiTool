@@ -1,6 +1,16 @@
-package main
+// Package stress 实现接口压测（并发请求、延迟分布、吞吐统计）与压测报告导出。
+// 抽离自根目录 stresstest.go，通过 bus.Bus（事件推送 / 保存对话框）与 store.Store 解耦 App，
+// 请求发送复用 httpx.SendRequest，环境变量与公共参数合并复用 util 包。
+package stress
 
 import (
+	"apitool/internal/bus"
+	"apitool/internal/doc"
+	"apitool/internal/httpx"
+	"apitool/internal/model"
+	"apitool/internal/store"
+	"apitool/internal/util"
+
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,22 +25,22 @@ import (
 
 // StressTarget 压测目标（来自测试用例或接口的请求定义）
 type StressTarget struct {
-	Name        string `json:"name"`
-	Method      string `json:"method"`
-	URL         string `json:"url"`
-	Headers     []KV   `json:"headers"`
-	Query       []KV   `json:"query"`
-	BodyType    string `json:"bodyType"`
-	Body        string `json:"body"`
-	FormItems   []KV   `json:"formItems"`
-	ContentType string `json:"contentType"`
+	Name        string       `json:"name"`
+	Method      string       `json:"method"`
+	URL         string       `json:"url"`
+	Headers     []model.KV   `json:"headers"`
+	Query       []model.KV   `json:"query"`
+	BodyType    string       `json:"bodyType"`
+	Body        string       `json:"body"`
+	FormItems   []model.KV   `json:"formItems"`
+	ContentType string       `json:"contentType"`
 }
 
 // StressConfig 压测配置
 type StressConfig struct {
-	EnvID       string `json:"envId"`       // 运行环境（用于 {{变量}} 替换）
+	EnvID       string `json:"envId"`      // 运行环境（用于 {{变量}} 替换）
 	Concurrency int    `json:"concurrency"` // 并发数（同时发起的请求数）
-	Requests    int    `json:"requests"`    // 每个目标的请求次数
+	Requests    int    `json:"requests"`   // 每个目标的请求次数
 	TimeoutSec  int    `json:"timeoutSec"`
 }
 
@@ -63,9 +73,9 @@ type StressReport struct {
 	Results    []StressResult `json:"results"`    // 各目标明细
 }
 
-// RunStressTest 对给定目标发起并发压测，返回含延迟分布与吞吐的报告。
+// Run 对给定目标发起并发压测，返回含延迟分布与吞吐的报告。
 // 通过运行时事件 "apitool:stress-progress" 推送进度 {done,total}。
-func (a *App) RunStressTest(targets []StressTarget, config StressConfig) (StressReport, error) {
+func Run(targets []StressTarget, config StressConfig, s *store.Store, b bus.Bus) (StressReport, error) {
 	report := StressReport{}
 	if len(targets) == 0 {
 		return report, fmt.Errorf("请至少选择一个压测目标")
@@ -89,18 +99,18 @@ func (a *App) RunStressTest(targets []StressTarget, config StressConfig) (Stress
 		timeout = 30
 	}
 
-	data := a.readData()
-	idx := activeProjectIndex(data)
+	data := s.GetData()
+	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
 		return report, fmt.Errorf("没有可用的项目")
 	}
 	proj := data.Projects[idx]
 
-	env := []KV{}
+	env := []model.KV{}
 	if config.EnvID != "" {
 		for _, e := range proj.Environments {
 			if e.ID == config.EnvID {
-				env = enabledEnvVars(e.Vars)
+				env = util.EnabledEnvVars(e.Vars)
 				break
 			}
 		}
@@ -143,7 +153,7 @@ func (a *App) RunStressTest(targets []StressTarget, config StressConfig) (Stress
 			defer wg.Done()
 			defer func() { <-sem }()
 			t := targets[j.ti]
-			spec := RequestSpec{
+			spec := model.RequestSpec{
 				Method:      t.Method,
 				URL:         t.URL,
 				Headers:     t.Headers,
@@ -155,8 +165,8 @@ func (a *App) RunStressTest(targets []StressTarget, config StressConfig) (Stress
 				Env:         env,
 				ContentType: t.ContentType,
 			}
-			mergeCommon(&spec, proj.Common)
-			resp := a.SendRequest(spec)
+			util.MergeCommon(&spec, proj.Common)
+			resp := httpx.SendRequest(spec)
 
 			progMu.Lock()
 			ag := aggs[j.ti]
@@ -172,7 +182,7 @@ func (a *App) RunStressTest(targets []StressTarget, config StressConfig) (Stress
 			done++
 			now := time.Now()
 			if now.Sub(lastEmit) > 300*time.Millisecond || done == total {
-				runtime.EventsEmit(a.ctx, "apitool:stress-progress", map[string]interface{}{
+				b.Emit("apitool:stress-progress", map[string]interface{}{
 					"done":  done,
 					"total": total,
 				})
@@ -269,8 +279,8 @@ func stressMarkdown(r StressReport) string {
 			rate = float64(res.Success) / float64(res.Total) * 100
 		}
 		sb.WriteString(fmt.Sprintf("| %s | %.1f%% | %d | %d | %d | %d | %d | %s |\n",
-			mdEscape(res.Name), rate, res.MinMs, res.AvgMs, res.P95, res.P99, res.Failed,
-			mdEscape(statusDistText(res.StatusDist))))
+			doc.MdEscape(res.Name), rate, res.MinMs, res.AvgMs, res.P95, res.P99, res.Failed,
+			doc.MdEscape(statusDistText(res.StatusDist))))
 	}
 	return sb.String()
 }
@@ -296,8 +306,8 @@ func stressHTML(r StressReport) string {
 			cls = "fail"
 		}
 		rows.WriteString(fmt.Sprintf(`<tr><td>%s</td><td class="%s">%.1f%%</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>`,
-			htmlEscape(res.Name), cls, rate, res.MinMs, res.AvgMs, res.P95, res.P99, res.Failed,
-			htmlEscape(statusDistText(res.StatusDist))))
+			doc.HTMLEscape(res.Name), cls, rate, res.MinMs, res.AvgMs, res.P95, res.P99, res.Failed,
+			doc.HTMLEscape(statusDistText(res.StatusDist))))
 	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -309,11 +319,11 @@ func stressHTML(r StressReport) string {
 <div class="card"><h2>目标明细</h2>
 <table><thead><tr><th>目标</th><th>成功率</th><th>最小(ms)</th><th>平均(ms)</th><th>P95</th><th>P99</th><th>失败</th><th>状态码分布</th></tr></thead><tbody>%s</tbody></table></div>
 </div></body></html>`,
-		reportCSS, time.Now().Format("2006-01-02 15:04:05"), stats.String(), rows.String())
+		doc.ReportCSS, time.Now().Format("2006-01-02 15:04:05"), stats.String(), rows.String())
 }
 
-// ExportStressReport 将压测报告（JSON）导出为 Markdown / HTML 文件，返回保存路径
-func (a *App) ExportStressReport(reportJSON string, format string) (string, error) {
+// ExportReport 将压测报告（JSON）导出为 Markdown / HTML 文件，返回保存路径（通过 bus.Bus 弹窗）。
+func ExportReport(reportJSON string, format string, b bus.Bus) (string, error) {
 	var r StressReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
 		return "", fmt.Errorf("报告解析失败: %v", err)
@@ -329,7 +339,7 @@ func (a *App) ExportStressReport(reportJSON string, format string) (string, erro
 	default:
 		return "", fmt.Errorf("不支持的格式: %s", format)
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	path, err := b.SaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "导出压测报告",
 		DefaultFilename: "stress-report-" + time.Now().Format("20060102-150405") + ext,
 		Filters: []runtime.FileFilter{

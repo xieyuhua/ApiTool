@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -90,7 +90,7 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 }
 
 // execBuiltinTool 本地执行内置工具。fileLimit 为文件读取最大字符数。
-func (a *App) execBuiltinTool(name string, args map[string]interface{}, fileLimit int) (string, error) {
+func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, fileLimit int) (string, error) {
 	switch name {
 	case "read_file":
 		return builtinReadFile(args, fileLimit)
@@ -469,7 +469,7 @@ func parseExprInline(s string, pos *int) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for *pos < len(s) && (*pos < len(s) && (s[*pos] == '+' || s[*pos] == '-')) {
+	for *pos < len(s) && (s[*pos] == '+' || s[*pos] == '-') {
 		op := s[*pos]
 		*pos++
 		rhs, err := parseTerm(s, pos)

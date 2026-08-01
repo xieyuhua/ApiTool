@@ -1,6 +1,8 @@
-package main
+// Package httpx 提供 HTTP 请求执行与 {{var}} 变量替换，独立于 Wails 运行时。
+package httpx
 
 import (
+	"apitool/internal/model"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,7 +15,7 @@ import (
 var envVarRe = regexp.MustCompile(`{{\s*([\w.\-]+)\s*}}`)
 
 // buildEnvMap 由环境变量列表构建映射（仅启用项）
-func buildEnvMap(env []KV) map[string]string {
+func buildEnvMap(env []model.KV) map[string]string {
 	m := map[string]string{}
 	for _, kv := range env {
 		if kv.Enabled && kv.Key != "" {
@@ -38,10 +40,10 @@ func applyEnv(s string, env map[string]string) string {
 }
 
 // SendRequest 执行 HTTP 请求
-func (a *App) SendRequest(spec RequestSpec) ResponseData {
+func SendRequest(spec model.RequestSpec) model.ResponseData {
 	start := time.Now()
-	fail := func(msg string) ResponseData {
-		return ResponseData{Error: msg, DurationMs: time.Since(start).Milliseconds()}
+	fail := func(msg string) model.ResponseData {
+		return model.ResponseData{Error: msg, DurationMs: time.Since(start).Milliseconds()}
 	}
 
 	env := buildEnvMap(spec.Env)
@@ -144,7 +146,7 @@ func (a *App) SendRequest(spec RequestSpec) ResponseData {
 		}
 	}
 
-	return ResponseData{
+	return model.ResponseData{
 		Status:     resp.StatusCode,
 		StatusText: resp.Status,
 		Headers:    headers,

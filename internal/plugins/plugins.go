@@ -1,6 +1,14 @@
-package main
+// Package plugins 实现「外部连接管理」插件：Redis / Elasticsearch / SSH(含实时终端) /
+// SFTP / FTP / 数据库(MySQL/PostgreSQL) 的最小协议客户端与连接池，以及对外的
+// 操作接口（连接测试、列举、读写、下载等）。
+//
+// 该包不再持有 *App，仅通过 bus.Bus 与 Wails 运行时交互（事件推送 / 保存对话框 /
+// 剪贴板），可被独立编译与单测。
+package plugins
 
 import (
+	"apitool/internal/bus"
+	"apitool/internal/model"
 	"bufio"
 	"bytes"
 	"crypto/tls"
@@ -117,7 +125,7 @@ var (
 const connPoolTTL = 90 * time.Second
 
 // connKey 用连接的关键字段生成指纹；任一字段变化（如改密码）即视为新连接。
-func connKey(c PluginConn) string {
+func connKey(c model.PluginConn) string {
 	return fmt.Sprintf("%s|%s|%d|%s|%s|%s|%s", c.Category, c.Host, c.Port, c.Username, c.Password, c.DbType, c.Database)
 }
 
@@ -155,7 +163,7 @@ func keepAlive(c net.Conn) {
 // ===================== 连接测试 =====================
 
 // PluginTest 按分类对连接做最小连通性/登录校验
-func (a *App) PluginTest(conn PluginConn) PluginOpResult {
+func PluginTest(conn model.PluginConn) PluginOpResult {
 	switch conn.Category {
 	case "redis":
 		// dialRedis 已完成 AUTH，并根据 conn.DbIndex 自动 SELECT（默认 DB 0）
@@ -238,7 +246,7 @@ type respClient struct {
 	r    *bufio.Reader
 }
 
-func dialRedis(conn PluginConn) (*respClient, error) {
+func dialRedis(conn model.PluginConn) (*respClient, error) {
 	addr := net.JoinHostPort(conn.Host, strconv.Itoa(portOrDefault(conn.Port, 6379)))
 	c, err := net.DialTimeout("tcp", addr, 6*time.Second)
 	if err != nil {
@@ -350,7 +358,7 @@ func asString(v interface{}) string {
 	}
 }
 
-func redisFactory(conn PluginConn) func() (interface{}, func(), error) {
+func redisFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 	return func() (interface{}, func(), error) {
 		rc, err := dialRedis(conn)
 		if err != nil {
@@ -362,7 +370,7 @@ func redisFactory(conn PluginConn) func() (interface{}, func(), error) {
 }
 
 // PluginRedisKeys 列举匹配模式的键
-func (a *App) PluginRedisKeys(conn PluginConn, pattern string, db int) ([]RedisKey, error) {
+func PluginRedisKeys(conn model.PluginConn, pattern string, db int) ([]RedisKey, error) {
 	if pattern == "" {
 		pattern = "*"
 	}
@@ -394,7 +402,7 @@ func (a *App) PluginRedisKeys(conn PluginConn, pattern string, db int) ([]RedisK
 }
 
 // PluginRedisValue 获取键的值（按类型解析）
-func (a *App) PluginRedisValue(conn PluginConn, key string, db int) (RedisValue, error) {
+func PluginRedisValue(conn model.PluginConn, key string, db int) (RedisValue, error) {
 	var res RedisValue
 	err := withConn(connKey(conn), redisFactory(conn), func(v interface{}) error {
 		rc := v.(*respClient)
@@ -436,7 +444,7 @@ func (a *App) PluginRedisValue(conn PluginConn, key string, db int) (RedisValue,
 }
 
 // PluginRedisDel 删除键
-func (a *App) PluginRedisDel(conn PluginConn, key string, db int) error {
+func PluginRedisDel(conn model.PluginConn, key string, db int) error {
 	return withConn(connKey(conn), redisFactory(conn), func(v interface{}) error {
 		rc := v.(*respClient)
 		rc.cmd("SELECT", strconv.Itoa(db))
@@ -445,7 +453,7 @@ func (a *App) PluginRedisDel(conn PluginConn, key string, db int) error {
 }
 
 // PluginRedisSet 设置字符串键（ttl>0 时设置过期秒数）
-func (a *App) PluginRedisSet(conn PluginConn, key, value string, ttl, db int) error {
+func PluginRedisSet(conn model.PluginConn, key, value string, ttl, db int) error {
 	return withConn(connKey(conn), redisFactory(conn), func(v interface{}) error {
 		rc := v.(*respClient)
 		if e := rc.cmd("SELECT", strconv.Itoa(db)); e != nil {
@@ -462,7 +470,7 @@ func (a *App) PluginRedisSet(conn PluginConn, key, value string, ttl, db int) er
 }
 
 // PluginRedisTTL 返回键过期秒数（-1 永不过期，-2 不存在）
-func (a *App) PluginRedisTTL(conn PluginConn, key string, db int) (int, error) {
+func PluginRedisTTL(conn model.PluginConn, key string, db int) (int, error) {
 	var ttl int
 	err := withConn(connKey(conn), redisFactory(conn), func(v interface{}) error {
 		rc := v.(*respClient)
@@ -491,7 +499,7 @@ func arrayToItems(v interface{}) []RedisItem {
 
 // ===================== Elasticsearch =====================
 
-func esBaseURL(conn PluginConn) string {
+func esBaseURL(conn model.PluginConn) string {
 	host := strings.TrimSpace(conn.Host)
 	scheme := "http"
 	if conn.UseTLS {
@@ -512,7 +520,7 @@ func esBaseURL(conn PluginConn) string {
 	return strings.TrimRight(u, "/")
 }
 
-func esRequest(conn PluginConn, method, path, body string) (string, error) {
+func esRequest(conn model.PluginConn, method, path, body string) (string, error) {
 	base := esBaseURL(conn)
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
@@ -552,7 +560,7 @@ func truncate(s string, n int) string {
 }
 
 // PluginESIndices 列出索引
-func (a *App) PluginESIndices(conn PluginConn) ([]ESIndex, error) {
+func PluginESIndices(conn model.PluginConn) ([]ESIndex, error) {
 	body, err := esRequest(conn, "GET", "/_cat/indices?format=json", "")
 	if err != nil {
 		return nil, err
@@ -574,7 +582,7 @@ func (a *App) PluginESIndices(conn PluginConn) ([]ESIndex, error) {
 }
 
 // PluginESSearch 执行查询
-func (a *App) PluginESSearch(conn PluginConn, index, query string) (string, error) {
+func PluginESSearch(conn model.PluginConn, index, query string) (string, error) {
 	if query == "" {
 		query = `{"query":{"match_all":{}},"size":50}`
 	}
@@ -584,7 +592,7 @@ func (a *App) PluginESSearch(conn PluginConn, index, query string) (string, erro
 
 // ===================== SSH / XShell =====================
 
-func sshDial(conn PluginConn) (*ssh.Client, error) {
+func sshDial(conn model.PluginConn) (*ssh.Client, error) {
 	cfg := &ssh.ClientConfig{
 		User:            conn.Username,
 		Auth:            []ssh.AuthMethod{ssh.Password(conn.Password)},
@@ -600,7 +608,7 @@ type sshSession struct {
 	client *ssh.Client
 }
 
-func sshFactory(conn PluginConn) func() (interface{}, func(), error) {
+func sshFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 	return func() (interface{}, func(), error) {
 		client, err := sshDial(conn)
 		if err != nil {
@@ -611,7 +619,7 @@ func sshFactory(conn PluginConn) func() (interface{}, func(), error) {
 }
 
 // PluginSSHExec 在远端执行命令（XShell 风格命令执行，复用同一 SSH 连接）
-func (a *App) PluginSSHExec(conn PluginConn, command string) (string, error) {
+func PluginSSHExec(conn model.PluginConn, command string) (string, error) {
 	var out string
 	err := withConn(connKey(conn), sshFactory(conn), func(v interface{}) error {
 		session, e := v.(*sshSession).client.NewSession()
@@ -652,7 +660,7 @@ func (w *eventWriter) Write(p []byte) (int, error) {
 }
 
 // PluginSSHOpen 建立带 PTY 的持久 SSH 会话，输出通过事件实时推送到前端
-func (a *App) PluginSSHOpen(conn PluginConn) (string, error) {
+func PluginSSHOpen(b bus.Bus, conn model.PluginConn) (string, error) {
 	client, err := sshDial(conn)
 	if err != nil {
 		return "", err
@@ -695,7 +703,7 @@ func (a *App) PluginSSHOpen(conn PluginConn) (string, error) {
 		return "", err
 	}
 	id := fmt.Sprintf("ssh_%d", time.Now().UnixNano())
-	sess.Stderr = &eventWriter{emit: func(s string) { runtime.EventsEmit(a.ctx, "ssh:"+id+":data", s) }}
+	sess.Stderr = &eventWriter{emit: func(s string) { b.Emit("ssh:" + id + ":data", s) }}
 	if err := sess.Shell(); err != nil {
 		sess.Close()
 		client.Close()
@@ -711,10 +719,10 @@ func (a *App) PluginSSHOpen(conn PluginConn) (string, error) {
 			n, rerr := stdout.Read(buf)
 			if n > 0 {
 				// 按连接编码解码，确保中文等正确显示
-				runtime.EventsEmit(a.ctx, "ssh:"+id+":data", decodeRemote(encoding, buf[:n]))
+				b.Emit("ssh:"+id+":data", decodeRemote(encoding, buf[:n]))
 			}
 			if rerr != nil {
-				runtime.EventsEmit(a.ctx, "ssh:"+id+":close", "")
+				b.Emit("ssh:"+id+":close", "")
 				return
 			}
 		}
@@ -738,19 +746,16 @@ func decodeRemote(encoding string, b []byte) string {
 }
 
 // PluginSSHInput 向 SSH 会话标准输入写入数据（通常是命令 + 换行）
-func (a *App) PluginSSHInput(id string, data string) error {
-	sshMu.Lock()
-	st := sshStreams[id]
-	sshMu.Unlock()
-	if st == nil {
-		return fmt.Errorf("终端会话不存在或已关闭")
+func PluginSSHInput(id string, data string) error {
+	if st := getStream(id); st != nil {
+		_, err := st.stdin.Write([]byte(data))
+		return err
 	}
-	_, err := st.stdin.Write([]byte(data))
-	return err
+	return fmt.Errorf("终端会话不存在或已关闭")
 }
 
 // PluginSSHClose 关闭 SSH 会话
-func (a *App) PluginSSHClose(id string) error {
+func PluginSSHClose(id string) error {
 	sshMu.Lock()
 	st := sshStreams[id]
 	if st != nil {
@@ -766,10 +771,8 @@ func (a *App) PluginSSHClose(id string) error {
 }
 
 // PluginSSHResize 通知远端调整伪终端尺寸（行/列），适配前端容器大小
-func (a *App) PluginSSHResize(id string, rows, cols int) error {
-	sshMu.Lock()
-	st := sshStreams[id]
-	sshMu.Unlock()
+func PluginSSHResize(id string, rows, cols int) error {
+	st := getStream(id)
 	if st == nil {
 		return fmt.Errorf("终端会话不存在或已关闭")
 	}
@@ -780,6 +783,12 @@ func (a *App) PluginSSHResize(id string, rows, cols int) error {
 	return st.sess.WindowChange(rows, cols)
 }
 
+func getStream(id string) *sshStream {
+	sshMu.Lock()
+	defer sshMu.Unlock()
+	return sshStreams[id]
+}
+
 // ===================== SFTP =====================
 
 type sftpHolder struct {
@@ -787,7 +796,7 @@ type sftpHolder struct {
 	sc     *sftpClient
 }
 
-func sftpFactory(conn PluginConn) func() (interface{}, func(), error) {
+func sftpFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 	return func() (interface{}, func(), error) {
 		client, sc, err := openSFTP(conn)
 		if err != nil {
@@ -805,7 +814,7 @@ func joinRemotePath(base, name string) string {
 }
 
 // PluginSFTPList 列出远端目录
-func (a *App) PluginSFTPList(conn PluginConn, path string) ([]FileInfo, error) {
+func PluginSFTPList(conn model.PluginConn, path string) ([]FileInfo, error) {
 	var out []FileInfo
 	err := withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		h := v.(*sftpHolder)
@@ -820,7 +829,7 @@ func (a *App) PluginSFTPList(conn PluginConn, path string) ([]FileInfo, error) {
 }
 
 // PluginSFTPRead 读取远端文件文本（最大 5MB）
-func (a *App) PluginSFTPRead(conn PluginConn, path string) (string, error) {
+func PluginSFTPRead(conn model.PluginConn, path string) (string, error) {
 	var out string
 	err := withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		var e error
@@ -831,14 +840,14 @@ func (a *App) PluginSFTPRead(conn PluginConn, path string) (string, error) {
 }
 
 // PluginSFTPWrite 写入远端文件
-func (a *App) PluginSFTPWrite(conn PluginConn, path, content string) error {
+func PluginSFTPWrite(conn model.PluginConn, path, content string) error {
 	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		return v.(*sftpHolder).sc.writeFile(path, content)
 	})
 }
 
 // PluginSFTPUploadB64 通过 SFTP 上传本地文件（二进制安全，b64 为文件内容的 base64）
-func (a *App) PluginSFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) error {
+func PluginSFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return err
@@ -850,7 +859,7 @@ func (a *App) PluginSFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) 
 }
 
 // PluginSFTPRename 重命名 / 移动远端文件或目录
-func (a *App) PluginSFTPRename(conn PluginConn, oldPath, newPath string) error {
+func PluginSFTPRename(conn model.PluginConn, oldPath, newPath string) error {
 	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
 		return fmt.Errorf("原路径与新路径不能为空")
 	}
@@ -860,7 +869,7 @@ func (a *App) PluginSFTPRename(conn PluginConn, oldPath, newPath string) error {
 }
 
 // PluginSFTPDownload 下载远端文件到本地（弹出保存对话框），返回本地保存路径
-func (a *App) PluginSFTPDownload(conn PluginConn, remotePath, name string) (string, error) {
+func PluginSFTPDownload(b bus.Bus, conn model.PluginConn, remotePath, name string) (string, error) {
 	var data []byte
 	err := withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		var e error
@@ -870,15 +879,15 @@ func (a *App) PluginSFTPDownload(conn PluginConn, remotePath, name string) (stri
 	if err != nil {
 		return "", err
 	}
-	return saveDownloadedFile(a, name, remotePath, data)
+	return saveDownloadedFile(b, name, remotePath, data)
 }
 
 // saveDownloadedFile 弹出保存对话框并将字节写入本地文件，返回本地路径（用户取消返回空串）
-func saveDownloadedFile(a *App, name, remotePath string, data []byte) (string, error) {
+func saveDownloadedFile(b bus.Bus, name, remotePath string, data []byte) (string, error) {
 	if name == "" {
 		name = pathBaseName(remotePath)
 	}
-	local, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	local, err := b.SaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "保存文件",
 		DefaultFilename: name,
 	})
@@ -907,14 +916,14 @@ func pathBaseName(p string) string {
 }
 
 // PluginSFTPMkdir 创建远端目录
-func (a *App) PluginSFTPMkdir(conn PluginConn, path string) error {
+func PluginSFTPMkdir(conn model.PluginConn, path string) error {
 	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		return v.(*sftpHolder).sc.mkdir(path)
 	})
 }
 
 // PluginSFTPDelete 删除远端文件或目录
-func (a *App) PluginSFTPDelete(conn PluginConn, path string) error {
+func PluginSFTPDelete(conn model.PluginConn, path string) error {
 	return withConn(connKey(conn), sftpFactory(conn), func(v interface{}) error {
 		h := v.(*sftpHolder)
 		isDir, err := h.sc.stat(path)
@@ -931,7 +940,7 @@ type ftpConn struct {
 	c *textproto.Conn
 }
 
-func ftpDial(conn PluginConn) (*ftpConn, error) {
+func ftpDial(conn model.PluginConn) (*ftpConn, error) {
 	addr := net.JoinHostPort(conn.Host, strconv.Itoa(portOrDefault(conn.Port, 21)))
 	tc, err := net.DialTimeout("tcp", addr, 8*time.Second)
 	if err != nil {
@@ -998,7 +1007,7 @@ func (f *ftpConn) pasv() (net.Conn, error) {
 	return net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(port)), 8*time.Second)
 }
 
-func ftpFactory(conn PluginConn) func() (interface{}, func(), error) {
+func ftpFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 	return func() (interface{}, func(), error) {
 		fc, err := ftpDial(conn)
 		if err != nil {
@@ -1009,7 +1018,7 @@ func ftpFactory(conn PluginConn) func() (interface{}, func(), error) {
 }
 
 // PluginFTPList 列出目录
-func (a *App) PluginFTPList(conn PluginConn, path string) ([]FileInfo, error) {
+func PluginFTPList(conn model.PluginConn, path string) ([]FileInfo, error) {
 	var out []FileInfo
 	err := withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
@@ -1062,7 +1071,7 @@ func parseFTPList(s, parent string) []FileInfo {
 }
 
 // PluginFTPRead 读取文件（仅文本，最大 5MB）
-func (a *App) PluginFTPRead(conn PluginConn, path string) (string, error) {
+func PluginFTPRead(conn model.PluginConn, path string) (string, error) {
 	var out string
 	err := withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
@@ -1082,7 +1091,7 @@ func (a *App) PluginFTPRead(conn PluginConn, path string) (string, error) {
 }
 
 // PluginFTPWrite 上传文件
-func (a *App) PluginFTPWrite(conn PluginConn, path, content string) error {
+func PluginFTPWrite(conn model.PluginConn, path, content string) error {
 	return withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
 		dc, e := fc.pasv()
@@ -1099,7 +1108,7 @@ func (a *App) PluginFTPWrite(conn PluginConn, path, content string) error {
 }
 
 // PluginFTPUploadB64 通过 FTP 上传本地文件（二进制安全，b64 为文件内容的 base64）
-func (a *App) PluginFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) error {
+func PluginFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return err
@@ -1127,7 +1136,7 @@ func (a *App) PluginFTPUploadB64(conn PluginConn, remoteDir, name, b64 string) e
 }
 
 // PluginFTPDownload 下载远端文件到本地（弹出保存对话框），返回本地保存路径
-func (a *App) PluginFTPDownload(conn PluginConn, remotePath, name string) (string, error) {
+func PluginFTPDownload(b bus.Bus, conn model.PluginConn, remotePath, name string) (string, error) {
 	var data []byte
 	err := withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
@@ -1151,11 +1160,11 @@ func (a *App) PluginFTPDownload(conn PluginConn, remotePath, name string) (strin
 	if err != nil {
 		return "", err
 	}
-	return saveDownloadedFile(a, name, remotePath, data)
+	return saveDownloadedFile(b, name, remotePath, data)
 }
 
 // PluginFTPRename 重命名 / 移动远端文件或目录（RNFR + RNTO）
-func (a *App) PluginFTPRename(conn PluginConn, oldPath, newPath string) error {
+func PluginFTPRename(conn model.PluginConn, oldPath, newPath string) error {
 	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
 		return fmt.Errorf("原路径与新路径不能为空")
 	}
@@ -1176,7 +1185,7 @@ func (a *App) PluginFTPRename(conn PluginConn, oldPath, newPath string) error {
 }
 
 // PluginFTPMkdir 创建目录
-func (a *App) PluginFTPMkdir(conn PluginConn, path string) error {
+func PluginFTPMkdir(conn model.PluginConn, path string) error {
 	return withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
 		fc.c.PrintfLine("MKD %s", path)
@@ -1186,7 +1195,7 @@ func (a *App) PluginFTPMkdir(conn PluginConn, path string) error {
 }
 
 // PluginFTPDelete 删除文件或目录
-func (a *App) PluginFTPDelete(conn PluginConn, path string) error {
+func PluginFTPDelete(conn model.PluginConn, path string) error {
 	return withConn(connKey(conn), ftpFactory(conn), func(v interface{}) error {
 		fc := v.(*ftpConn)
 		if strings.HasSuffix(path, "/") {
@@ -1202,6 +1211,6 @@ func (a *App) PluginFTPDelete(conn PluginConn, path string) error {
 // ===================== 剪贴板操作（供前端直接调用） =====================
 
 // PluginSetClipboard 写入系统剪贴板（选中历史项后回填）
-func (a *App) PluginSetClipboard(text string) error {
-	return runtime.ClipboardSetText(a.ctx, text)
+func PluginSetClipboard(b bus.Bus, text string) error {
+	return b.ClipboardSetText(text)
 }
