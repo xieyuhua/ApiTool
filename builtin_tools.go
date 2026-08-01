@@ -34,44 +34,44 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 		required []string
 	}{
 		"read_file": {map[string]interface{}{
-			"path":  map[string]interface{}{"type": "string", "description": "文件绝对路径"},
-			"limit": map[string]interface{}{"type": "number", "description": "可选，读取前 N 行"},
+			"path":  map[string]interface{}{"type": "string", "description": "要读取的文件绝对路径，例如 C:\\Users\\me\\a.txt 或 /home/me/a.txt"},
+			"limit": map[string]interface{}{"type": "number", "description": "可选，只读取前 N 行（不填则读取全部，受文件读取上限约束）"},
 		}, []string{"path"}},
 		"write_file": {map[string]interface{}{
-			"path":    map[string]interface{}{"type": "string", "description": "文件绝对路径"},
-			"content": map[string]interface{}{"type": "string", "description": "要写入的内容"},
+			"path":    map[string]interface{}{"type": "string", "description": "要写入的文件绝对路径（不存在则新建，存在则覆盖）"},
+			"content": map[string]interface{}{"type": "string", "description": "要写入文件的完整文本内容"},
 		}, []string{"path", "content"}},
 		"list_dir": {map[string]interface{}{
-			"path": map[string]interface{}{"type": "string", "description": "目录绝对路径，默认当前目录"},
+			"path": map[string]interface{}{"type": "string", "description": "要列出的目录绝对路径；留空或省略则列出当前工作目录"},
 		}, nil},
 		"make_dir": {map[string]interface{}{
-			"path": map[string]interface{}{"type": "string", "description": "要创建的目录路径"},
-			"all":  map[string]interface{}{"type": "boolean", "description": "可选，true 时递归创建多级目录（默认 true）"},
+			"path": map[string]interface{}{"type": "string", "description": "要创建的目录绝对路径，可包含多级不存在的父目录"},
+			"all":  map[string]interface{}{"type": "boolean", "description": "是否递归创建多级目录，默认 true（即自动创建缺失的父目录）"},
 		}, []string{"path"}},
 		"remove_dir": {map[string]interface{}{
-			"path": map[string]interface{}{"type": "string", "description": "要删除的目录路径"},
-			"all":  map[string]interface{}{"type": "boolean", "description": "可选，true 时递归删除非空目录（默认 false，仅删空目录）"},
+			"path": map[string]interface{}{"type": "string", "description": "要删除的目录绝对路径"},
+			"all":  map[string]interface{}{"type": "boolean", "description": "是否递归删除（含所有子内容）。默认 false，仅能删除空目录；确认要删除非空目录时设为 true"},
 		}, []string{"path"}},
 		"remove_file": {map[string]interface{}{
-			"path": map[string]interface{}{"type": "string", "description": "要删除的文件路径"},
+			"path": map[string]interface{}{"type": "string", "description": "要删除的文件绝对路径（不是目录）"},
 		}, []string{"path"}},
 		"rename_path": {map[string]interface{}{
-			"src": map[string]interface{}{"type": "string", "description": "源文件或目录路径"},
-			"dst": map[string]interface{}{"type": "string", "description": "目标文件或目录路径"},
+			"src": map[string]interface{}{"type": "string", "description": "原文件或目录的绝对路径"},
+			"dst": map[string]interface{}{"type": "string", "description": "新的绝对路径（用于重命名或移动，目录需已存在）"},
 		}, []string{"src", "dst"}},
 		"web_search": {map[string]interface{}{
-			"query": map[string]interface{}{"type": "string", "description": "搜索关键词"},
-			"limit": map[string]interface{}{"type": "number", "description": "可选，结果条数(默认5)"},
+			"query": map[string]interface{}{"type": "string", "description": "搜索关键词或问题，例如 \"Go 语言 defer 执行顺序\""},
+			"limit": map[string]interface{}{"type": "number", "description": "可选，返回结果条数，默认 5"},
 		}, []string{"query"}},
 		"system_info": {map[string]interface{}{}, nil},
 		"get_time": {map[string]interface{}{
-			"timezone": map[string]interface{}{"type": "string", "description": "可选时区，如 Asia/Shanghai"},
+			"timezone": map[string]interface{}{"type": "string", "description": "可选 IANA 时区名，例如 Asia/Shanghai、America/New_York；省略则用本机时区"},
 		}, nil},
 		"calc": {map[string]interface{}{
-			"expr": map[string]interface{}{"type": "string", "description": "表达式，例如 \"1+2*3\""},
+			"expr": map[string]interface{}{"type": "string", "description": "算术表达式，仅含数字与运算符 + - * / 和括号 ()，例如 \"(1+2)*3\""},
 		}, []string{"expr"}},
 		"run_command": {map[string]interface{}{
-			"command": map[string]interface{}{"type": "string", "description": "命令字符串"},
+			"command": map[string]interface{}{"type": "string", "description": "要执行的 shell 命令字符串，例如 \"ls -la\" 或 \"git status\""},
 		}, []string{"command"}},
 	}
 	var out []MCPTool

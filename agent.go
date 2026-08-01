@@ -64,18 +64,18 @@ type BuiltinToolDef struct {
 // 顺序即设置页展示顺序。
 func BuiltinToolMeta() []BuiltinToolDef {
 	return []BuiltinToolDef{
-		{Name: "read_file", Icon: "📄", Group: "文件操作", Default: "读取文本文件内容（可指定行数上限）。"},
-		{Name: "write_file", Icon: "✏️", Group: "文件操作", Default: "写入文本文件（覆盖原内容）。"},
-		{Name: "list_dir", Icon: "📂", Group: "文件操作", Default: "列出目录内容（文件/文件夹）。"},
-		{Name: "make_dir", Icon: "📁", Group: "文件操作", Default: "创建目录（可递归创建多级目录）。"},
-		{Name: "remove_dir", Icon: "🗑️", Group: "文件操作", Default: "删除目录（默认仅删除空目录，all=true 时递归删除整个目录）。"},
-		{Name: "remove_file", Icon: "❌", Group: "文件操作", Default: "删除一个文件。"},
-		{Name: "rename_path", Icon: "🔀", Group: "文件操作", Default: "重命名或移动文件/目录（从 src 到 dst）。"},
-		{Name: "web_search", Icon: "🔍", Group: "网页搜索", Default: "网页搜索，返回结果标题、摘要与链接。"},
-		{Name: "system_info", Icon: "💻", Group: "系统信息", Default: "查看本机系统信息（OS/CPU/内存/主机名/时间/目录）。"},
-		{Name: "get_time", Icon: "⏰", Group: "常用工具", Default: "获取当前日期时间（支持指定时区）。"},
-		{Name: "calc", Icon: "🧮", Group: "常用工具", Default: "计算四则运算表达式（仅 + - * / ()）。"},
-		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "执行一条本地 shell 命令并返回输出（请谨慎使用）。"},
+		{Name: "read_file", Icon: "📄", Group: "文件操作", Default: "当用户需要查看某个文本/代码文件的内容时使用。传入文件绝对路径，可指定 limit 只读取前若干行。返回文件文本内容。"},
+		{Name: "write_file", Icon: "✏️", Group: "文件操作", Default: "当用户需要创建新文件或覆盖写入内容时使用。传入文件绝对路径与要写入的完整 content（会覆盖原文件）。返回写入结果。"},
+		{Name: "list_dir", Icon: "📂", Group: "文件操作", Default: "当用户想了解某个目录里有哪些文件或子目录时使用。传入目录路径，省略则默认当前工作目录。返回该目录下的文件/文件夹列表。"},
+		{Name: "make_dir", Icon: "📁", Group: "文件操作", Default: "当用户需要新建目录时使用，支持一次创建多级目录（默认 all=true 递归创建）。传入目标目录路径。返回创建结果。"},
+		{Name: "remove_dir", Icon: "🗑️", Group: "文件操作", Default: "当用户要删除目录时使用。默认仅删除空目录（安全）；若目录非空且确认可删，请传入 all=true 递归删除全部内容。传入目录路径。"},
+		{Name: "remove_file", Icon: "❌", Group: "文件操作", Default: "当用户要删除某个具体的文件时使用（注意：不会删除目录）。传入文件绝对路径。返回删除结果。"},
+		{Name: "rename_path", Icon: "🔀", Group: "文件操作", Default: "当用户要重命名文件/目录，或把文件/目录移动到新位置时使用。传入 src（原路径）与 dst（新路径）。返回移动/重命名结果。"},
+		{Name: "web_search", Icon: "🔍", Group: "网页搜索", Default: "当用户的问题需要最新信息、实时数据、或你不确定答案时才使用。传入 query 关键词，可指定 limit 返回条数。返回相关网页的标题、摘要与链接。"},
+		{Name: "system_info", Icon: "💻", Group: "系统信息", Default: "当用户想了解运行本程序的这台机器信息时使用：操作系统、CPU、内存、主机名、当前时间、当前工作目录等。无需参数。"},
+		{Name: "get_time", Icon: "⏰", Group: "常用工具", Default: "当用户需要知道当前日期/时间，或指定时区（如 Asia/Shanghai）的时间时使用。返回格式化的本地时间。"},
+		{Name: "calc", Icon: "🧮", Group: "常用工具", Default: "当用户需要计算一个算术表达式时使用，仅支持数字与 + - * / 和括号 ()。传入 expr，例如 \"1+2*3\"。返回计算结果。"},
+		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "当用户需要执行一条本机 shell 命令（如 git、npm、系统命令）并获取其输出时使用。传入 command 字符串。⚠️ 会真实执行命令，请仅在确定安全时使用。"},
 	}
 }
 
