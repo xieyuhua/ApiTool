@@ -1,6 +1,6 @@
 import { reactive, watch, ref } from 'vue'
 import * as runtime from '../wailsjs/runtime/runtime'
-import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText, CallAI } from '../wailsjs/go/main/App'
+import { LoadData, SaveData, GetVersion, CheckUpdate, GetClipboardText, CallAI, ClearTestData, GetClipItems, CopyClipItem, DeleteClipItem, ClearClipHistory, GetClipImageData } from '../wailsjs/go/main/App'
 
 export function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2))
@@ -139,6 +139,13 @@ export function effectiveTheme() {
 export function currentProject() {
   const p = store.data.projects.find(x => x.id === store.data.currentProjectId)
   return p || store.data.projects[0]
+}
+
+// 一键清空测试数据。scope: cases|plans|reports|all；返回被清空的条数。
+export async function clearTestData(scope = 'all') {
+  const removed = await ClearTestData(store.data.currentProjectId || '', scope)
+  await reloadStore() // 重新从后端加载并整体替换 store.data，确保 UI 立即刷新
+  return removed
 }
 
 let saveTimer = null
@@ -758,60 +765,74 @@ export function removePluginConn(id) {
 }
 
 // ---------------- 剪贴板历史 ----------------
+// 采集与存储统一由 Go 端负责（见 clipboard_windows.go）：后台轮询系统剪贴板，
+// 同时捕获文本与图片（CF_DIB -> PNG），写入 data.json。前端仅负责展示、搜索、
+// 复制与删除，数据通过 GetClipItems 拉取。调出窗口由全局快捷键 / 托盘菜单触发，
+// Go 端弹出「剪贴板历史」浮层（见 App.vue 的 ClipboardHistory 组件）。
 
-export const clipboardHistoryVisible = ref(false)
-export function toggleClipboardHistory(v) {
-  clipboardHistoryVisible.value = (typeof v === 'boolean') ? v : !clipboardHistoryVisible.value
+export let clipImgBase = ''
+
+// 图片历史项的数据 URL 缓存（避免重复向 Go 请求 base64）
+const clipImageCache = {}
+
+// clipImageURL 返回图片历史项的 data URL，按需向 Go 请求并缓存
+export async function clipImageURL(item) {
+  if (!item || item.type !== 'image' || !item.id) return ''
+  if (clipImageCache[item.id]) return clipImageCache[item.id]
+  try {
+    const r = await GetClipImageData(item.id)
+    if (r && r.data) {
+      const url = 'data:' + (r.mime || 'image/png') + ';base64,' + r.data
+      clipImageCache[item.id] = url
+      return url
+    }
+  } catch (e) { /* ignore */ }
+  return ''
 }
 
-let clipTimer = null
-let lastClip = ''
-// 轮询系统剪贴板，发生变化时追加到历史（去重、上限可自定义）
-export function initClipboardMonitor() {
-  if (clipTimer) return
-  const tick = async () => {
-    try {
-      // 监听开关关闭时不读取系统剪贴板，但仍保持轮询以便随时恢复
-      if (store.data.settings.clipboard.monitor && hasGoBridge()) {
-        const t = await GetClipboardText()
-        if (t && t !== lastClip) {
-          lastClip = t
-          addClip(t)
-        }
-      }
-    } catch (e) { /* 忽略轮询异常 */ }
-    clipTimer = setTimeout(tick, 800)
+// 从 Go 端拉取最新历史并写入 store（图片以相对路径存储，前端拼接 base 显示）
+export async function loadClipItems() {
+  if (!hasGoBridge()) return
+  try {
+    const items = await GetClipItems()
+    store.data.clipboard.history = Array.isArray(items) ? items : []
+  } catch (e) {
+    console.error('加载剪贴板历史失败', e)
   }
-  clipTimer = setTimeout(tick, 800)
 }
 
-export function stopClipboardMonitor() {
-  if (clipTimer) { clearTimeout(clipTimer); clipTimer = null }
+// 兼容旧调用：采集已移到 Go 端，这里仅做一次初始加载
+export function initClipboardMonitor() {
+  loadClipItems()
 }
 
+export function stopClipboardMonitor() {}
+
+// 监听开关：仅持久化到设置（Go 端采集时读取该开关）
 export function setClipboardMonitor(on) {
   store.data.settings.clipboard.monitor = !!on
   saveNow()
 }
 
-export function addClip(text) {
-  if (!text) return
-  const hist = store.data.clipboard.history
-  if (hist.length && hist[0].text === text) return
-  hist.unshift({ id: uid(), text, time: new Date().toISOString() })
-  const max = (store.data.settings.clipboard && store.data.settings.clipboard.maxItems) || 200
-  if (hist.length > max) hist.length = max
-  saveNow()
+// 复制某条历史到系统剪贴板（文本直接写入；图片由 Go 端读取本地 PNG 写回 CF_DIB）
+export async function copyClipItem(id) {
+  await CopyClipItem(id)
 }
 
-export function removeClip(id) {
+// 删除单条（Go 端落地，成功后刷新本地）
+export async function removeClip(id) {
+  try {
+    await DeleteClipItem(id)
+  } catch (e) { /* ignore */ }
   const hist = store.data.clipboard.history
   const i = hist.findIndex(x => x.id === id)
   if (i >= 0) hist.splice(i, 1)
-  saveNow()
 }
 
-export function clearClipHistory() {
+// 清空（Go 端落地，成功后刷新本地）
+export async function clearClipHistory() {
+  try {
+    await ClearClipHistory()
+  } catch (e) { /* ignore */ }
   store.data.clipboard.history = []
-  saveNow()
 }

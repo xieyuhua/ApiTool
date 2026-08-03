@@ -12,6 +12,7 @@
 - 两种分享方式：**网页代码（独立 HTML）** 与 **在线链接（本地或云服务器）**
 - 云同步 / 多端共享、内置同步服务
 - 本地 JSON 配置 + 客户端自动升级检测
+- **剪贴板历史**：系统级监听，连续按两次 Ctrl 调出浮层，自动记录复制过的文本与图片，支持搜索、快捷复制/删除
 
 ---
 
@@ -32,6 +33,8 @@
 | 自动同步 | 可开关；开启后编辑自动备份到云端、启动自动拉取 |
 | 内置同步 | 桌面端可一键启动内置同步服务，供局域网/公网连接 |
 | AI 配置 | 配置 OpenAI 兼容接口，自动生成字段描述 |
+| AI Agent | 多会话对话助手，可调用本地内置工具（文件/目录/网页搜索/系统信息等），独立开关与描述可编辑；实时累计 Token 统计 |
+| 剪贴板历史 | 系统级监听复制内容（文本 + 图片），连续两次 Ctrl 调出浮层，支持搜索、复制、删除 |
 | 版本与升级 | 本地 JSON 记录版本号与升级地址，支持一键检测更新 |
 
 ---
@@ -224,7 +227,7 @@ request.body.data.page = 1
 
 ### 11. 版本与升级
 
-- **本地配置文件**：数据保存在用户配置目录（如 Windows `%APPDATA%/apitool/data.json`），
+- **本地配置文件**：数据保存在**程序启动目录下的 `apitool/` 子目录**（如 `apitool/data.json`），
   其中 `settings.version` 记录客户端版本号，`settings.updateURL` 记录升级服务地址
   （默认 `http://127.0.0.1:8080`）。首次启动若无配置文件会自动生成默认配置。
 - **检测更新**：设置页「版本与升级」卡片显示当前版本、可编辑升级地址，点击「检测更新」
@@ -232,6 +235,142 @@ request.body.data.page = 1
   - 升级服务需返回 JSON：`{ "version": "1.2.0", "url": "下载地址", "notes": "更新说明" }`
   - 客户端按语义化版本号比较，服务端版本更高时提示「发现新版本」并给出下载入口。
 - 升级服务端约定：`GET <升级地址>/version`，建议开启跨域 `Access-Control-Allow-Origin: *` 便于桌面端访问。
+
+### 12. 剪贴板历史
+
+桌面端在系统层面监听剪贴板变化，自动记录你**复制过的文本与图片**，无需打开主窗口即可随时调出、检索与复用。
+
+**如何打开**
+- **连续按两次 Ctrl**（两次间隔 ≤ 500ms）即可弹出 / 收起剪贴板历史浮层；
+  该监听是全局的，即使主窗口最小化、隐藏到托盘甚至未聚焦也能触发。
+- 也可在**系统托盘右键菜单 → 「剪贴板历史…」**打开。
+
+**浮层操作**
+- **搜索**：顶部输入框按内容实时过滤（图片项也可按时间检索）。
+- **键盘导航**：`↑` / `↓` 在条目间移动，`Enter` 复制当前条目，`Delete` 删除当前条目，`Esc` 关闭浮层。
+- **鼠标操作**：单击条目直接复制回剪贴板；右侧删除按钮移除该条。
+- **文本**：复制后写入系统剪贴板，可粘贴到任意程序。
+- **图片**：记录复制的图片缩略图，复制时以图片形式写回剪贴板（可在微信、文档等中粘贴）。
+
+**设置**
+- 入口：设置 → 「剪贴板」。`监控剪贴板`（开关）控制是否记录；`最大保留条数`限制历史上限，超出后自动丢弃最旧的条目。
+- 记录保存在本地数据目录下的 `clipimg/` 子目录（图片以 PNG 存储），应用退出时清理被删除图片的文件。
+
+> 说明：全局快捷键（双击 Ctrl）为固定行为，不依赖设置；其实现见 `hotkey_windows.go`（Windows 低级键盘钩子）+ `clipboard_windows.go`（剪贴板捕获 / 浮层窗口控制）。
+
+### 13. AI Agent（智能助手）
+
+左侧导航栏点击 **「Agent」** 进入 AI 智能助手，支持多轮对话、调用本地工具、累计 Token 统计。
+Agent 复用「设置 → AI 配置」中的 OpenAI 兼容接口（兼容 OpenAI / DeepSeek / 通义千问 / 本地 Ollama 等）。
+
+#### 13.1 多会话管理
+
+- **新建会话**：点击左侧栏「+ 新建会话」按钮，每个会话独立保存上下文与历史。
+- **切换 / 重命名 / 删除**：左侧会话列表中，点击切换；重命名、删除通过条目上的操作按钮完成。
+- **继续对话**：在当前会话中直接发送新消息，Agent 会携带**本会话**的历史上下文（不会串到其他会话）。
+- **会话隔离**：每个会话的对话内容、工具调用步骤、Token 消耗都独立记录，互不干扰。
+
+#### 13.2 Token 统计
+
+- 每次对话自动从流式响应中解析 `usage`（prompt / completion / total tokens），并实时累计。
+- 每条会话显示**该会话累计 Token**；左侧栏底部显示**全局累计 Token**（输入 / 输出 / 合计）。
+- 兼容性：请求时自动携带 `stream_options.include_usage=true`，并兼容 OpenAI 蛇形字段 `prompt_tokens`/`completion_tokens`/`total_tokens`，也兼容把 usage 放在任意分片（含最后一个带 `finish_reason` 的事件）的服务。
+  > 注意：少数本地 / 老旧模型即使开启 `include_usage` 也不返回 usage，那种情况下 Token 会显示 0（属服务端限制）。
+
+#### 13.3 内置工具（无需 MCP 服务器，本地直接执行）
+
+设置页切到 **「内置工具」** 选项卡，可对每个工具**单独开关**、并**编辑其描述**（描述会作为工具说明传给模型，影响它何时调用）。工具以紧凑标签展示在对话中（仅显示名字，不展开大段内容）。
+
+| 工具 | 图标 | 功能 | 关键参数 |
+| --- | --- | --- | --- |
+| `read_file` | 📄 | 读取文本文件内容（按 rune 截断，避免中文乱码） | `path`、`limit`（行数上限） |
+| `write_file` | ✏️ | 写入文本文件（覆盖原内容） | `path`、`content` |
+| `list_dir` | 📂 | 列出目录内容（文件/文件夹） | `path` |
+| `make_dir` | 📁 | 创建目录（递归） | `path`、`all`(bool, 默认 true 递归) |
+| `remove_dir` | 🗑️ | 删除目录 | `path`、`all`(bool, 默认 false 仅删空目录) |
+| `remove_file` | ❌ | 删除文件 | `path` |
+| `rename_path` | 🔀 | 重命名 / 移动文件或目录 | `src`、`dst` |
+| `web_search` | 🔍 | 网页搜索（DuckDuckGo HTML），返回标题/摘要/链接 | `query`、`limit` |
+| `system_info` | 💻 | 查看本机系统信息（OS/CPU/内存/主机名/时间/目录） | 无 |
+| `get_time` | ⏰ | 获取当前日期时间（支持时区） | `timezone` |
+| `calc` | 🧮 | 计算四则运算（仅 `+ - * / ()`） | `expr` |
+| `run_command` | ⌨️ | 执行本地 shell 命令并返回输出（请谨慎使用） | `command` |
+
+> 说明：`web_search` 依赖访问外网 DuckDuckGo，离线 / 网络受限环境可能失败；`run_command` 会在本机执行真实命令，使用前请确认信任当前对话内容。
+
+#### 13.4 运行配置
+
+设置页「运行配置」选项卡可调：
+
+- **内容截断长度**（可配置，0 表示用默认）：
+  - `工具输出回灌上限`（默认 4000 字符）：工具执行结果回传给模型前的最大字符数，调大可让模型看到更完整的工具结果。
+  - `文件读取上限`（默认 200000 字符）：`read_file` 等内置文件工具读取的最大字符数。
+
+#### 13.5 工具调用格式
+
+Agent 提示词同时支持两种工具调用格式，模型任选其一（每轮最多一个工具调用）：
+
+- **格式 A（标签，推荐）**：适用于原生支持 function calling 的模型
+  ```xml
+  <tool_call>
+  <function>工具名</function>
+  <parameter name="参数名">参数值</parameter>
+  </tool_call>
+  ```
+- **格式 B（JSON）**：
+  ```json
+  {"action":"tool","server":"builtin","tool":"工具名","arguments":{...}}
+  ```
+  内置工具的 `server` 固定为 `builtin`。解析器兼容多种变体：函数名写在 `<function>` 体内或属性里、参数整体为 JSON 字符串、外层包裹 `<function_calls>` 等。对话中只展示**实际调用了的工具名字**标签，不罗列可用工具。
+
+#### 13.6 MCP 服务器（stdio / 本地命令）
+
+除了内置工具，Agent 还支持接入标准的 **MCP（Model Context Protocol）服务器**，从而调用社区/第三方工具（文件系统、数据库、搜索引擎等）。
+
+进入 **设置 → Agent → MCP 服务器**，点击「新增服务器」并填写：
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | 服务器显示名（对话中工具调用时会带上该名） |
+| `transport` | 传输方式，选 `stdio` |
+| `command` | **可执行命令或二进制完整路径**（见下方说明，**不是只填目录**） |
+| `args` | 启动参数，空格分隔；可留空 |
+| `env` | 额外的环境变量（可选，如 `API_KEY=xxx`） |
+
+**`command` 的三种填法**（被 `exec.Command` 直接执行，等价于在终端里敲的命令）：
+
+1. **命令名（已在系统 PATH 中）**——最省事：
+   ```
+   command: npx
+   args:    -y @modelcontextprotocol/server-filesystem C:\你的目录
+   ```
+2. **完整二进制路径**（不在 PATH 时使用，Windows 路径用 `\\` 或 `/`）：
+   ```
+   command: C:\tools\mcp-server.exe
+   args:    --port 8080
+   ```
+3. **目录 + 二进制**（同样是填**完整 exe 路径**，不会自动补 exe 名）：
+   ```
+   command: C:\tools\myserver\server.exe
+   ```
+
+> ⚠️ **不能只填目录**（如 `C:\tools\myserver`）：程序会把目录当成可执行文件去启动，会报「不是有效的 Win32 应用程序」或找不到文件。若希望「指目录就跑」，需目录内放一个约定名称的 exe，并**显式写出 `目录\xxx.exe`**。
+>
+> 路径本身含空格也能正确处理（因为是直接 `exec.Command` 而非走 shell），例如 `C:\Program Files\myserver\server.exe`。
+
+**常见示例**：用官方 filesystem MCP 暴露某个本地目录给 Agent：
+```
+name:    文件系统
+transport: stdio
+command: npx
+args:    -y @modelcontextprotocol/server-filesystem D:\task\data
+```
+
+**注意事项**：
+- 当前 stdio 实现为**每次工具调用启动一次进程、完成后退出**（`exec.CommandContext` + 60s 超时），适合「一次性工具」。要求常驻会话、内部维护状态的标准 MCP server 可能不稳定，后续会升级为长连会话。
+- 若 `command` 启动失败，对话会返回「启动 MCP 进程失败」；请优先确认命令在系统终端能独立跑通（含 npx / python 在 PATH 中）。
+- 环境变量 `env` 会追加到进程环境，可用于注入密钥而无需写死在 args 中。
+
 
 ---
 
@@ -261,10 +400,64 @@ request.body.data.page = 1
 
 ## 五、数据存储
 
-- 桌面端本地数据保存在用户配置目录（如 Windows：`%APPDATA%/apitool/data.json`），
-  所有接口信息（含最近一次请求与响应）自动保存。
-- 配置字段：`projects`（项目）、`currentProjectId`（当前项目）、`settings`（含 `version`/`updateURL`/AI/云同步等）。
-- 云服务器端数据保存在 `-data` 指定的目录（账号、项目、分享文档）。
+应用支持两种后端存储，**结构化数据（项目/接口/目录/用例/计划/报告/设置/插件连接/剪贴板等）统一入库**，
+接口文档（Markdown / HTML / Word / OpenAPI）以及 Agent 数据仍按原方式以文件保存（见 5.3）。
+
+### 5.0 数据根目录
+
+所有本地数据文件统一存放在**「程序可执行文件所在目录」下的 `apitool/` 子目录**（即 exe 同级 `apitool/`，
+不占用系统用户配置目录如 `%APPDATA%`）。该目录下包含：
+
+- `apitool.db` —— SQLite 主数据库（默认）
+- `data.json` / `storage.json` —— JSON 回退 / MySQL 切换配置
+- `agent.json` —— Agent（MCP / 会话）数据
+- `syncserver/` —— 内置同步服务数据
+- `clipimg/` —— 剪贴板图片缓存
+
+因此**迁移 / 打包程序时，只需把整个 `apitool/` 目录连同 exe 一起复制**即可带走所有数据。
+旧版本位于 `%APPDATA%/apitool` 的数据，整体复制到 exe 同级的 `apitool/` 目录即可沿用。
+
+### 5.1 默认：SQLite（本地文件）
+
+- 数据保存在程序启动目录下的 `apitool/apitool.db`，首次启动自动建表。
+- 若同目录存在旧版 `data.json`，会在首次启动时**自动导入** SQLite（原 `data.json` 保留作为备份）。
+- 采用纯 Go 实现的 SQLite 驱动（modernc.org/sqlite），无需额外运行时，跨平台一致。
+
+### 5.2 可选：MySQL（远程 / 共享）
+
+- 在 `apitool/`（程序启动目录下的数据子目录）放置 `storage.json` 即可切换到 MySQL：
+  ```json
+  { "type": "mysql", "dsn": "user:pass@tcp(127.0.0.1:3306)/apitool?parseTime=true&charset=utf8mb4" }
+  ```
+- 程序启动时会自动建表（与 SQLite 完全相同的 schema），适合多人/多端共享同一份数据。
+- 数据库不可用时（文件损坏、连接失败）会自动**回退到 JSON 文件模式**，保证程序不崩溃。
+
+### 5.3 存储范围与例外
+
+**已入库的结构化数据**（11 张表，SQLite/MySQL 通用 schema）：
+
+| 表 | 内容 |
+| --- | --- |
+| `meta` | 单例元数据（`version`、`updateURL`） |
+| `projects` | 项目（名称、公共参数、环境变量开关、文档目录、UI 状态等） |
+| `directories` | 接口目录树 |
+| `apis` | 接口（请求/响应、Header/Query、前后置脚本、字段树、最近响应） |
+| `environments` | 环境变量（按项目） |
+| `test_cases` | 测试用例（含步骤、断言、数据集） |
+| `test_plans` | 测试计划（关联的用例、环境、并发数） |
+| `test_reports` | 测试报告（通过/失败统计、耗时、结果明细） |
+| `settings` | 全局设置（代理、外观、AI、云同步、升级等） |
+| `plugin_conns` | 插件数据库连接配置 |
+| `clip_items` | 剪贴板历史（文本/图片元数据） |
+
+**不入库、仍以独立文件保存的数据**：
+
+- **Agent 数据**（`agent.json`）：MCP 服务器配置、多会话（含各自的 `messages` / `usage`）、内置工具开关、累计 Token。由 agent 模块独立管理，不进入上述数据库，保证 Agent 对话与接口数据隔离、可单独备份。
+- **接口文档**（md / html / word / openapi）：由「文档中心」按需导出为文件，不入库。
+- **分享快照**：本地分享服务按请求实时渲染，不落到数据库。
+- **云服务器端数据**：保存在 `-data` 指定的目录（账号、项目、分享文档），为独立的服务端存储。
+
+> 说明：数据库不可用时（文件损坏、连接失败）会自动**回退到 JSON 文件模式**（`data.json`），保证程序不崩溃。
 
 ---
 
@@ -320,20 +513,58 @@ A：说明 Wails 桥接未正确注入。请确认用 `wails build` / `wails dev
 
 ```
 apitool/
-├── main.go              # Wails 应用入口
-├── app.go               # 数据读写、文档生成、剪贴板/浏览器、升级检测等后端方法
-├── share.go             # 本地分享服务（localhost 托管）
-├── syncserver.go        # 桌面端内置同步服务
-├── import.go            # 外部文档导入（OpenAPI/Swagger/Postman）+ 空目录剪枝
-├── models.go            # 数据模型（含公共参数、版本字段）
-├── server/              # 可独立部署的云同步/分享服务器
+├── main.go                # Wails 应用入口
+├── app.go                 # App 结构体：嵌入各内部模块，暴露 Wails 绑定（数据读写、剪贴板、升级检测等）
+├── tray.go                # 系统托盘菜单（含「剪贴板历史…」入口）
+├── tools.go               # 工具注册 / 子命令入口
+├── internal/              # 业务逻辑（不再平铺于根目录）
+│   ├── model/             # 数据模型（AppData、项目/接口/环境/用例/计划/报告/设置/插件/剪贴板等）
+│   ├── store/             # 存储门面：SQLite/MySQL 双后端切换、旧 JSON 自动导入
+│   │   └── db/            # DB 抽象、schema DDL、SQLite 与 MySQL 实现、往返单测
+│   ├── agent/             # AI Agent：多会话、MCP 服务器（stdio/http）、内置工具、Agent 运行
+│   ├── ai/                # AI 调用（Chat / ChatRaw / 字段描述生成），Host 接口解耦宿主
+│   ├── testing/           # 测试引擎：用例生成、执行、报告导出
+│   ├── doc/               # 接口文档生成（md/html/word/openapi）与导入（OpenAPI/Swagger/Postman）
+│   ├── share/             # 本地分享服务（独立 HTML / 在线链接，localhost 托管）
+│   ├── sync/              # 桌面端内置同步服务（账号、项目、分享文档）
+│   ├── capture/           # 剪贴板捕获（文本+图片）、浮层窗口控制、复制回写
+│   ├── plugins/           # 插件数据库连接（MySQL/Redis/PG 等）
+│   ├── httpx/             # HTTP 客户端封装（请求发送、代理、超时、拦截）
+│   ├── stress/            # 压力测试
+│   ├── crypto/            # 加解密工具
+│   ├── bus/               # 事件总线（前端事件转发）
+│   ├── platform/          # 平台相关能力（剪贴板、PNG 读取、文件对话框等）
+│   ├── jsonutil/          # JSON 解析 / 字段树构建
+│   └── util/              # 通用工具（ID 生成、字符串、环境变量等）
+├── server/                # 可独立部署的云同步/分享服务器
 │   ├── server.go
 │   └── cmd/main.go
-└── frontend/            # Vue 前端
-    └── src/components/  # 各功能组件
-        ├── DebugPanel.vue     # 接口调试（含公共参数/环境变量入口、请求区）
-        ├── ParamsPanel.vue    # 参数设置（请求参数/响应参数/请求头）
-        ├── CommonParams.vue   # 公共参数弹窗
-        ├── EnvManager.vue     # 环境变量管理
-        └── ...
+└── frontend/              # Vue 前端
+    └── src/
+        ├── App.vue
+        ├── store.js       # 全局状态（含剪贴板历史加载/复制/删除）
+        ├── main.js / script.js / cli.js / style.css
+        └── components/    # 按功能分组的组件
+            ├── clipboard/   # 剪贴板历史相关
+            │   ├── ClipboardHistory.vue   # 浮层（搜索/导航/复制/删除）
+            │   └── ToolClipboard.vue      # 调试页内的剪贴板入口
+            ├── test/        # 测试中心
+            │   ├── TestCenter.vue
+            │   └── KVEditor.vue
+            ├── doc/         # 文档中心 / 预览 / 分享
+            │   ├── DocCenter.vue / DocPreview.vue / ShareDialog.vue
+            ├── tools/       # 工具箱 / 插件
+            │   ├── Tools.vue / Toolbox.vue / PluginManager.vue / SplitPane.vue
+            ├── settings/    # 设置 / 云同步
+            │   ├── SettingsPanel.vue / CloudSync.vue
+            ├── agent/       # AI Agent 助手
+            │   ├── AgentChat.vue       # 对话主界面（多会话侧栏、流式输出、工具标签）
+            │   ├── AgentSettings.vue   # Agent 设置（内置工具开关/描述、运行配置）
+            │   ├── ToolCard.vue        # 工具调用标签（仅显示工具名）
+            │   └── agentApi.js         # Agent 后端接口封装
+            ├── layout/      # 布局
+            │   ├── Sidebar.vue / LogPanel.vue
+            └── common/      # 通用面板（参数/环境变量/调试等）
+                ├── ParamsPanel.vue / DebugPanel.vue / FieldTable.vue
+                ├── EnvManager.vue / CommonParams.vue / CapturePanel.vue
 ```

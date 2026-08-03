@@ -1,21 +1,62 @@
 <script setup>
 import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, toggleClipboardHistory } from './store'
-import Sidebar from './components/Sidebar.vue'
-import DebugPanel from './components/DebugPanel.vue'
-import ParamsPanel from './components/ParamsPanel.vue'
-import DocPreview from './components/DocPreview.vue'
-import DocCenter from './components/DocCenter.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
-import TestCenter from './components/TestCenter.vue'
-import EnvManager from './components/EnvManager.vue'
-import CommonParams from './components/CommonParams.vue'
-import CapturePanel from './components/CapturePanel.vue'
-import AutoTestPanel from './components/AutoTestPanel.vue'
-import Tools from './components/Tools.vue'
-import ClipHistory from './components/ClipHistory.vue'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor } from './store'
+import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
+import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
+import Sidebar from './components/layout/Sidebar.vue'
+import DebugPanel from './components/common/DebugPanel.vue'
+import ParamsPanel from './components/common/ParamsPanel.vue'
+import DocPreview from './components/doc/DocPreview.vue'
+import DocCenter from './components/doc/DocCenter.vue'
+import SettingsPanel from './components/settings/SettingsPanel.vue'
+import TestCenter from './components/test/TestCenter.vue'
+import EnvManager from './components/common/EnvManager.vue'
+import CommonParams from './components/common/CommonParams.vue'
+import CapturePanel from './components/common/CapturePanel.vue'
+import Tools from './components/tools/Tools.vue'
+import AgentChat from './components/agent/AgentChat.vue'
+import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
 
-onMounted(() => { initStore(); initClipboardMonitor() })
+const clipVisible = ref(false)
+
+onMounted(() => {
+  initStore()
+  initClipboardMonitor()
+  // 系统托盘「运行全部测试」：执行当前项目全部用例
+  EventsOn('apitool:tray-run-tests', async () => {
+    try {
+      const p = currentProject()
+      await RunTestCases({ ProjectID: p.id, TestCaseIDs: [], EnvID: p.activeEnvId || '', Concurrency: 3 })
+    } catch (e) {
+      console.error('托盘触发运行测试失败', e)
+    }
+  })
+  // 全局快捷键（Ctrl+Shift+V / Ctrl+`）与托盘菜单由 Go 端 WH_KEYBOARD_LL 钩子 /
+  // systray 触发，Go 端负责弹出窗口并显示「剪贴板历史」浮层，这里只负责渲染。
+  EventsOn('apitool:show-clipboard-history', () => {
+    clipVisible.value = true
+    initClipboardMonitor() // 重新从 Go 拉取最新历史
+  })
+  EventsOn('apitool:hide-clipboard-history', () => {
+    clipVisible.value = false
+  })
+  EventsOn('apitool:clipboard-updated', () => {
+    if (clipVisible.value) initClipboardMonitor()
+  })
+})
+
+onBeforeUnmount(() => {
+  EventsOff('apitool:tray-run-tests')
+  EventsOff('apitool:show-clipboard-history')
+  EventsOff('apitool:hide-clipboard-history')
+  EventsOff('apitool:clipboard-updated')
+})
+
+// 关闭剪贴板历史浮层：隐藏前端覆盖层，并由 Go 端恢复窗口置顶状态/聚焦
+async function closeClip() {
+  clipVisible.value = false
+  try { await CloseClipboardWindow() } catch (e) { /* ignore */ }
+}
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
 
@@ -39,33 +80,9 @@ function matchCombo(e, combo) {
     norm === keyPart
   )
 }
-// 全局快捷键：
-// - 用户在「设置」中自定义的快捷键（默认 Ctrl+Shift+V）
-// - Ctrl+` 始终可用，作为弹出剪贴板历史的便捷键（无论设置如何）
-function onGlobalKey(e) {
-  const hasModifier = e.ctrlKey || e.metaKey
-  // 反引号 `：始终弹出剪贴板历史
-  if ((e.key === '`' || e.code === 'Backquote') && hasModifier) {
-    e.preventDefault()
-    toggleClipboardHistory()
-    focusSearch()
-    return
-  }
-  const combo = store.data.settings.hotkey || 'Ctrl+Shift+V'
-  if (combo && matchCombo(e, combo)) {
-    e.preventDefault()
-    toggleClipboardHistory()
-    focusSearch()
-  }
-}
-function focusSearch() {
-  setTimeout(() => {
-    const el = document.querySelector('.clip-search input, input[placeholder*="搜索"]')
-    if (el) el.focus()
-  }, 30)
-}
-window.addEventListener('keydown', onGlobalKey)
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
+// 注：剪贴板历史全局快捷键（Ctrl+Shift+V / Ctrl+`）已由 Go 端 WH_KEYBOARD_LL 钩子
+// 直接弹出「原生剪贴板历史菜单」，不依赖 WebView，窗口隐藏到托盘时也能用，
+// 因此前端不再监听该组合键，避免与 Go 端重复触发。
 
 // 目录栏宽度可拖拽调整（持久化到 localStorage）
 const NAV_W = 60
@@ -103,10 +120,10 @@ const api = computed(() => currentApi())
 const navs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
-  { key: 'testing', label: '接口测试', icon: '🧪' },
+  { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
-  { key: 'autotest', label: '自动化测试', icon: '🤖' },
   { key: 'tools', label: '工具', icon: '🔧' },
+  { key: 'agent', label: 'AI Agent', icon: '🤖' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
 </script>
@@ -163,11 +180,12 @@ const navs = [
     <DocCenter v-else-if="store.view === 'docs'" />
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
-    <AutoTestPanel v-else-if="store.view === 'autotest'" />
     <Tools v-else-if="store.view === 'tools'" />
+    <AgentChat v-else-if="store.view === 'agent'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />
-    <ClipHistory />
   </div>
+
+  <ClipboardHistory v-if="clipVisible" @close="closeClip" />
 
   <div v-if="!store.loaded" class="boot-loading">
     <div class="spinner"></div>

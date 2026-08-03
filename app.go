@@ -1,11 +1,25 @@
 package main
 
 import (
-	"bytes"
+	"apitool/internal/agent"
+	"apitool/internal/ai"
+	"apitool/internal/bus"
+	"apitool/internal/capture"
+	"apitool/internal/doc"
+	"apitool/internal/httpx"
+	"apitool/internal/jsonutil"
+	"apitool/internal/model"
+	"apitool/internal/platform"
+	"apitool/internal/plugins"
+	"apitool/internal/share"
+	"apitool/internal/store"
+	"apitool/internal/stress"
+	syncsrv "apitool/internal/sync"
+	"apitool/internal/testing"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,11 +32,30 @@ import (
 
 // App struct
 type App struct {
-	ctx         context.Context
-	dataFile    string
-	syncDir     string
-	mu          sync.Mutex
-	captureToken string // 浏览器扩展回传鉴权 Token（持久化）
+	*agent.Manager  // 嵌入 agent 模块，提升其 Agent*/RunAgent/MCP* 等导出方法供 Wails 绑定
+	*testing.Engine // 嵌入测试引擎，提升其 Generate*/RunTest*/ExportTestReport 等导出方法供 Wails 绑定
+	ctx             context.Context
+	store           *store.Store
+	dataFile        string
+	syncDir         string
+	mu              sync.Mutex
+	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
+	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
+	quitting        bool // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
+}
+
+// Store 返回应用数据存储（实现 agent.Host 接口）
+func (a *App) Store() *store.Store { return a.store }
+
+// ReadData 返回应用数据（实现 agent.Host 接口）
+func (a *App) ReadData() model.AppData { return a.readData() }
+
+// AppVersion 返回应用版本号（实现 agent.Host 接口）
+func (a *App) AppVersion() string { return AppVersion }
+
+// GenerateDescriptions 使用 AI 为字段自动生成描述（转发到 internal/ai，保持 Wails 绑定签名）
+func (a *App) GenerateDescriptions(apiName string, apiDesc string, fields []*model.Field) ([]*model.Field, error) {
+	return ai.GenerateDescriptions(a, apiName, apiDesc, fields)
 }
 
 // NewApp creates a new App application struct
@@ -33,72 +66,68 @@ func NewApp() *App {
 // AppVersion 客户端版本号（用于升级检测与本地配置标记）
 const AppVersion = "1.0.0"
 
-// DefaultUpdateURL 默认升级服务地址（本地同步服务，端口与 defaultSyncAddr 一致）
-const DefaultUpdateURL = "http://127.0.0.1" + defaultSyncAddr
+// DefaultUpdateURL 默认升级服务地址（本地同步服务）
+const DefaultUpdateURL = "http://127.0.0.1" + syncsrv.DefaultSyncAddr
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
+	// 数据目录使用「程序可执行文件所在目录」下的 apitool 子目录，
+	// 便于随程序整体迁移/打包，不再依赖系统用户配置目录（%APPDATA% 等）。
+	dir := "."
+	if exe, err := os.Executable(); err == nil {
+		dir = filepath.Dir(exe)
 	}
 	dataDir := filepath.Join(dir, "apitool")
 	_ = os.MkdirAll(dataDir, 0o755)
 	a.dataFile = filepath.Join(dataDir, "data.json")
 	a.syncDir = filepath.Join(dataDir, "syncserver")
+	a.store = store.New(a.dataFile, AppVersion, DefaultUpdateURL)
+	// 初始化 agent 模块（MCP/技能/会话/运行），注入宿主能力与事件总线
+	a.Manager = agent.NewManager(a, a, filepath.Join(dataDir, "agent.json"))
+	// 初始化测试引擎（用例生成/执行/报告导出），注入宿主能力与事件总线
+	a.Engine = testing.NewEngine(a, ctx)
 	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
 	if _, err := os.Stat(a.dataFile); err != nil {
-		_ = a.SaveData(defaultData())
+		_ = a.SaveData(a.store.GetData())
 	}
 	// 仅加载/生成捕获服务 Token；捕获服务不再自动启动，改由用户在「请求捕获」页面手动开启
-	a.loadOrCreateCaptureToken()
+	capture.LoadOrCreateToken(a.syncDir)
+	// 启动系统托盘（独立于主界面，提供显隐/测试/退出）
+	a.windowVisible = true
+	go a.startTray()
+	// 安装系统级全局快捷键（即使窗口失焦也能调出剪贴板历史）
+	platform.SetHotkeyHandlers(a.ShowMainWindow, a.toggleClipboardWindow)
+	go platform.StartGlobalHotkey()
+	// 启动剪贴板后台采集（文本 + 图片）
+	go a.StartClipboardCapture()
 }
 
-// showWindow 从后台恢复主窗口
-func (a *App) showWindow() {
-	runtime.WindowShow(a.ctx)
-	runtime.WindowUnminimise(a.ctx)
+// shutdown 在应用退出时清理资源（停止采集）。托盘由 systray.Quit 自行退出。
+func (a *App) shutdown(ctx context.Context) {
+	a.StopClipboardCapture()
 }
 
-// hideWindow 隐藏主窗口到后台常驻（点窗口关闭按钮时由 HideWindowOnClose 自动触发；
-// 这里暴露给前端「隐藏窗口」按钮使用）
-func (a *App) hideWindow() {
-	runtime.WindowHide(a.ctx)
-}
-
-// quitApp 彻底退出应用（绕过 HideWindowOnClose 的后台常驻行为）
-func (a *App) quitApp() {
-	runtime.Quit(a.ctx)
-}
-
-func defaultData() AppData {
-	return AppData{
-		Projects: []Project{
-			{
-				ID:        "default",
-				Name:      "默认项目",
-				Dirs:      []Directory{},
-				Apis:      []ApiInfo{},
-				Environments: []Environment{},
-				UpdatedAt: time.Now().Format(time.RFC3339),
-			},
-		},
-		CurrentProjectID: "default",
-		Settings: Settings{
-			AIBaseURL:  "https://api.openai.com/v1",
-			AIModel:    "gpt-4o-mini",
-			TimeoutSec: 30,
-			Version:    AppVersion,
-			UpdateURL:  DefaultUpdateURL,
-			Theme:      "light",
-			Accent:     "#165dff",
-			Hotkey:     "Ctrl+Shift+V",
-			AutoSync:   false,
-			Clipboard: ClipSettings{Monitor: true, MaxItems: 200},
-		},
-		Plugins:   PluginsData{Connections: []PluginConn{}},
-		Clipboard: ClipData{History: []ClipItem{}},
+// beforeClose 在用户点击窗口关闭/Alt+F4 时触发。
+// 返回 true 表示阻止退出，改为隐藏窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
+// 使用 WindowHide 而非 WindowMinimise：隐藏后窗口不在任务栏保留按钮，
+// 托盘图标仍然存在，用户可通过托盘菜单「显示主窗口」恢复。
+// 全局快捷键（Ctrl+Shift+V / Ctrl+`）由 Go 端 WH_KEYBOARD_LL 钩子处理，
+// 不依赖 WebView 存活，因此隐藏窗口不影响剪贴板历史弹出。
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	// 主动退出（托盘「退出」）时跳过隐藏逻辑，直接放行关闭
+	if a.quitting {
+		return false
 	}
+	// 用户点击窗口关闭：隐藏到托盘而非真正退出。
+	// 若剪贴板浮层处于打开状态，一并关闭并复位状态，避免下次 toggle 判断错位。
+	if a.clipWinVisible {
+		a.clipWinVisible = false
+		a.WindowSetAlwaysOnTop(false)
+		runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
+	}
+	a.WindowHide()
+	a.windowVisible = false
+	return true
 }
 
 // GetClipboardText 读取系统剪贴板文本（供前端轮询记录历史）
@@ -111,98 +140,96 @@ func (a *App) SetClipboardText(text string) error {
 	return runtime.ClipboardSetText(a.ctx, text)
 }
 
-// readData 从磁盘加载并反序列化全部数据，处理旧版本兼容与默认值补全。
-// 返回的是经过迁移/修正后的最新结构，调用方无需再处理兼容逻辑。
-func (a *App) readData() AppData {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	data := defaultData()
-	b, err := os.ReadFile(a.dataFile)
-	if err != nil {
-		return data
-	}
-	_ = json.Unmarshal(b, &data)
-	if data.Settings.TimeoutSec <= 0 {
-		data.Settings.TimeoutSec = 30
-	}
-	// 兼容旧版本配置（无 version / updateURL 字段）
-	if data.Settings.Version == "" {
-		data.Settings.Version = AppVersion
-	}
-	if data.Settings.UpdateURL == "" {
-		data.Settings.UpdateURL = DefaultUpdateURL
-	}
-	// 兼容旧版数据（顶层 dirs/apis/environments）：反序列化到新结构失败时，
-	// 通过 migrateLegacy 额外解析旧结构并迁移进默认项目。
-	if len(data.Projects) == 0 {
-		proj := Project{ID: "default", Name: "默认项目", UpdatedAt: time.Now().Format(time.RFC3339)}
-		if migrated := a.migrateLegacy(b, &proj); migrated {
-			data.Projects = []Project{proj}
-			data.CurrentProjectID = proj.ID
-		}
-	}
-	if len(data.Projects) == 0 {
-		data = defaultData()
-	}
-	if data.CurrentProjectID == "" || !hasProject(data, data.CurrentProjectID) {
-		data.CurrentProjectID = data.Projects[0].ID
-	}
-	return data
-}
-
-// migrateLegacy 兼容旧版数据（顶层 dirs/apis/environments）
-func (a *App) migrateLegacy(b []byte, proj *Project) bool {
-	var legacy struct {
-		Dirs        []Directory   `json:"dirs"`
-		Apis        []ApiInfo     `json:"apis"`
-		Environments []Environment `json:"environments"`
-		ActiveEnvID string        `json:"activeEnvId"`
-	}
-	if err := json.Unmarshal(b, &legacy); err != nil {
-		return false
-	}
-	if len(legacy.Dirs) == 0 && len(legacy.Apis) == 0 && len(legacy.Environments) == 0 {
-		return false
-	}
-	proj.Dirs = legacy.Dirs
-	proj.Apis = legacy.Apis
-	proj.Environments = legacy.Environments
-	proj.ActiveEnvID = legacy.ActiveEnvID
-	return true
-}
-
-func hasProject(data AppData, id string) bool {
-	for _, p := range data.Projects {
-		if p.ID == id {
-			return true
-		}
-	}
-	return false
+// readData 从磁盘加载并反序列化全部数据（兼容与默认值补全逻辑见 internal/store）。
+func (a *App) readData() model.AppData {
+	return a.store.GetData()
 }
 
 // LoadData 加载全部数据（上次保存的接口信息）
-func (a *App) LoadData() AppData {
+func (a *App) LoadData() model.AppData {
 	return a.readData()
 }
 
+// ParseFields 将 JSON 文本解析为字段树（转发到 jsonutil）
+func (a *App) ParseFields(jsonStr string, existing []*model.Field) ([]*model.Field, error) {
+	return jsonutil.ParseFields(jsonStr, existing)
+}
+
+// FormatJSON 格式化 JSON 文本（转发到 jsonutil）
+func (a *App) FormatJSON(jsonStr string) (string, error) {
+	return jsonutil.FormatJSON(jsonStr)
+}
+
+// SendRequest 执行 HTTP 请求（转发到 httpx）
+func (a *App) SendRequest(spec model.RequestSpec) model.ResponseData {
+	return httpx.SendRequest(spec)
+}
+
+// ClearTestData 一键清空当前项目的测试数据。
+// scope 取值：
+//   - "cases"  仅清空测试用例
+//   - "plans"  仅清空测试计划
+//   - "reports"仅清空测试报告
+//   - "all"    清空以上全部（默认）
+//
+// 返回被清空的数据总条数。
+func (a *App) ClearTestData(projectID string, scope string) (int, error) {
+	data := a.readData()
+	idx := store.ActiveProjectIndex(data)
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	if projectID != "" {
+		found := false
+		for i, p := range data.Projects {
+			if p.ID == projectID {
+				idx = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			return 0, fmt.Errorf("项目不存在：%s", projectID)
+		}
+	}
+	if scope == "" {
+		scope = "all"
+	}
+	removed := 0
+	proj := &data.Projects[idx]
+	switch scope {
+	case "cases":
+		removed = len(proj.TestCases)
+		proj.TestCases = []model.TestCase{}
+	case "plans":
+		removed = len(proj.TestPlans)
+		proj.TestPlans = []model.TestPlan{}
+	case "reports":
+		removed = len(proj.TestReports)
+		proj.TestReports = []model.TestReport{}
+	case "all":
+		removed = len(proj.TestCases) + len(proj.TestPlans) + len(proj.TestReports)
+		proj.TestCases = []model.TestCase{}
+		proj.TestPlans = []model.TestPlan{}
+		proj.TestReports = []model.TestReport{}
+	default:
+		return 0, fmt.Errorf("未知的清空范围：%s", scope)
+	}
+	proj.UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.SaveData(data); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 // SaveData 保存全部数据
-func (a *App) SaveData(data AppData) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := a.dataFile + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, a.dataFile)
+func (a *App) SaveData(data model.AppData) error {
+	return a.store.SaveData(data)
 }
 
 // GetDataFilePath 返回数据文件路径
 func (a *App) GetDataFilePath() string {
-	return a.dataFile
+	return a.store.Path()
 }
 
 // CopyToClipboard 复制文本到剪贴板
@@ -210,41 +237,40 @@ func (a *App) CopyToClipboard(text string) error {
 	return runtime.ClipboardSetText(a.ctx, text)
 }
 
-// ChatMessage 简单的聊天消息结构（供 CallAI 使用）
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// ClipHistory 返回剪贴板历史（供原生菜单 / 托盘菜单读取）。
+func (a *App) ClipHistory() []model.ClipItem {
+	data := a.LoadData()
+	return data.Clipboard.History
 }
+
+// ClearClipHistory 清空剪贴板历史并落盘（同时删除图片文件）。
+func (a *App) ClearClipHistory() {
+	data := a.LoadData()
+	for _, it := range data.Clipboard.History {
+		if it.Type == model.ClipTypeImage && it.ImagePath != "" {
+			_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
+		}
+	}
+	data.Clipboard.History = nil
+	_ = a.SaveData(data)
+}
+
+// ChatMessage 简单的聊天消息结构（供 CallAI 使用），别名指向 internal/ai。
+type ChatMessage = ai.ChatMessage
 
 // CallAIArgs CallAI 入参（由前端传入已解析好的配置，避免在 Go 端读取前端 store）
 type CallAIArgs struct {
-	BaseURL string          `json:"baseUrl"`
-	APIKey  string          `json:"apiKey"`
-	Model   string          `json:"model"`
-	Timeout int             `json:"timeoutSec"`
-	Messages []ChatMessage  `json:"messages"`
-}
-
-// callAIRequest / callAIResponse 对应 OpenAI 兼容接口的请求与响应
-type callAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	Stream      bool          `json:"stream"`
-}
-type callAIChoice struct {
-	Message ChatMessage `json:"message"`
-}
-type callAIResult struct {
-	Choices []callAIChoice `json:"choices"`
-	Error   interface{}    `json:"error"`
+	BaseURL  string        `json:"baseUrl"`
+	APIKey   string        `json:"apiKey"`
+	Model    string        `json:"model"`
+	Timeout  int           `json:"timeoutSec"`
+	Messages []ChatMessage `json:"messages"`
 }
 
 // CallAI 由 Go 后端代发 AI 请求，规避前端 webview 的 CORS 限制。
 // 返回模型回复的文本内容；失败时返回错误。
 func (a *App) CallAI(args CallAIArgs) (string, error) {
 	base := strings.TrimSpace(args.BaseURL)
-	base = strings.TrimRight(base, "/")
 	if base == "" {
 		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
 	}
@@ -252,73 +278,8 @@ func (a *App) CallAI(args CallAIArgs) (string, error) {
 		return "", fmt.Errorf("未配置 AI API Key（设置 → AI 配置）")
 	}
 	model := strings.TrimSpace(args.Model)
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
-	// 兼容以 /v1 结尾的地址
-	url := base
-	if !strings.HasSuffix(url, "/chat/completions") {
-		if strings.HasSuffix(url, "/v1") {
-			url = url + "/chat/completions"
-		} else {
-			url = url + "/v1/chat/completions"
-		}
-	}
-
-	payload, err := json.Marshal(callAIRequest{
-		Model:       model,
-		Messages:    args.Messages,
-		Temperature: 0.3,
-		Stream:      false,
-	})
-	if err != nil {
-		return "", fmt.Errorf("构造请求失败: %w", err)
-	}
-
-	timeout := args.Timeout
-	if timeout <= 0 {
-		timeout = 30
-	}
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("构造请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+args.APIKey)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("AI 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var r callAIResult
-		_ = json.Unmarshal(body, &r)
-		if r.Error != nil {
-			if m, ok := r.Error.(map[string]interface{}); ok {
-				if msg, ok := m["message"].(string); ok {
-					return "", fmt.Errorf("AI 请求失败: %s", msg)
-				}
-			}
-		}
-		return "", fmt.Errorf("AI 请求失败 %d: %s", resp.StatusCode, string(body))
-	}
-
-	var r callAIResult
-	if err := json.Unmarshal(body, &r); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
-	}
-	if len(r.Choices) == 0 {
-		return "", fmt.Errorf("AI 返回内容为空")
-	}
-	return r.Choices[0].Message.Content, nil
+	// 委托 internal/ai 统一处理 URL 拼接、超时与错误解析（与 Chat 共用底层实现）
+	return ai.ChatRaw(base, args.APIKey, model, args.Messages, args.Timeout)
 }
 
 // OpenInBrowser 使用系统浏览器打开
@@ -326,165 +287,24 @@ func (a *App) OpenInBrowser(url string) {
 	runtime.BrowserOpenURL(a.ctx, url)
 }
 
-// activeProjectIndex 返回当前项目的索引（无效时回退到第一个）
-func activeProjectIndex(data AppData) int {
-	for i, p := range data.Projects {
-		if p.ID == data.CurrentProjectID {
-			return i
-		}
-	}
-	if len(data.Projects) > 0 {
-		return 0
-	}
-	return -1
-}
-
-// collectScope 计算导出/分享范围内的目录与接口（限定当前项目）。
-// 返回 (标题, 目录列表, 接口列表)；单接口时标题取接口名，目录范围时取目录名，否则为“接口文档”。
-func (a *App) collectScope(data AppData, dirID string, apiID string) (title string, dirs []Directory, apis []ApiInfo) {
-	idx := activeProjectIndex(data)
-	if idx < 0 {
-		return "接口文档", nil, nil
-	}
-	proj := data.Projects[idx]
-	if apiID != "" {
-		for _, api := range proj.Apis {
-			if api.ID == apiID {
-				return api.Name, nil, []ApiInfo{api}
-			}
-		}
-		return "接口文档", nil, nil
-	}
-	if dirID == "" {
-		return "接口文档", proj.Dirs, proj.Apis
-	}
-	// 收集 dirID 的整个子树
-	include := map[string]bool{dirID: true}
-	changed := true
-	for changed {
-		changed = false
-		for _, d := range proj.Dirs {
-			if include[d.ParentID] && !include[d.ID] {
-				include[d.ID] = true
-				changed = true
-			}
-		}
-	}
-	title = "接口文档"
-	for _, d := range proj.Dirs {
-		if d.ID == dirID {
-			title = d.Name
-		}
-		if include[d.ID] {
-			dirs = append(dirs, d)
-		}
-	}
-	for _, api := range proj.Apis {
-		if include[api.DirID] {
-			apis = append(apis, api)
-		}
-	}
-	return title, dirs, apis
-}
-
-// buildDocContent 按指定格式（markdown/html/word/openapi）生成文档内容。
-// 返回 (内容, 标题, 错误)；当范围内无接口时返回错误。
-func (a *App) buildDocContent(dirID, apiID, format string) (content string, title string, err error) {
-	data := a.readData()
-	idx := activeProjectIndex(data)
-	if idx < 0 {
-		return "", "", fmt.Errorf("没有可用的项目")
-	}
-	proj := data.Projects[idx]
-	title, dirs, apis := a.collectScope(data, dirID, apiID)
-	if len(apis) == 0 {
-		return "", "", fmt.Errorf("所选范围内没有接口")
-	}
-	rootID := ""
-	if apiID == "" {
-		rootID = dirID
-	}
-	switch format {
-	case "markdown":
-		content = buildMarkdown(title, rootID, dirs, apis, proj.Common)
-	case "html", "word":
-		content = buildHTML(title, rootID, dirs, apis, proj.Common)
-	case "openapi":
-		content, err = buildOpenAPI(title, apis, proj.Common)
-	default:
-		return "", "", fmt.Errorf("不支持的格式: %s", format)
-	}
-	return content, title, err
-}
-
-// ExportDoc 导出文档，返回保存路径
+// ExportDoc 导出文档（转发到 doc 包）
 func (a *App) ExportDoc(dirID string, apiID string, format string) (string, error) {
-	content, title, err := a.buildDocContent(dirID, apiID, format)
-	if err != nil {
-		return "", err
-	}
-	ext, filter := ".md", "Markdown (*.md)|*.md"
-	switch format {
-	case "html":
-		ext, filter = ".html", "HTML (*.html)|*.html"
-	case "word":
-		ext, filter = ".doc", "Word (*.doc)|*.doc"
-	case "openapi":
-		ext, filter = ".json", "OpenAPI JSON (*.json)|*.json"
-	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "导出接口文档",
-		DefaultFilename: sanitizeFilename(title) + ext,
-		Filters: []runtime.FileFilter{
-			{DisplayName: filter, Pattern: "*" + ext},
-		},
-	})
-	if err != nil || path == "" {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
+	return doc.ExportDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID, format)
 }
 
-// ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）
+// ImportDoc 选择并导入接口文档（转发到 doc 包）
+func (a *App) ImportDoc() (string, error) {
+	return doc.ImportDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, "")
+}
+
+// ShareDoc 生成 HTML 文档并用浏览器打开（转发到 doc 包）
 func (a *App) ShareDoc(dirID string, apiID string) (string, error) {
-	content, title, err := a.buildDocContent(dirID, apiID, "html")
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(os.TempDir(), "apitool-share-"+sanitizeFilename(title)+".html")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	runtime.BrowserOpenURL(a.ctx, "file:///"+filepath.ToSlash(path))
-	return path, nil
+	return doc.ShareDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID)
 }
 
-// CopyDocMarkdown 复制 Markdown 文档到剪贴板（用于快速分享）
+// CopyDocMarkdown 复制 Markdown 文档到剪贴板（转发到 doc 包）
 func (a *App) CopyDocMarkdown(dirID string, apiID string) error {
-	content, _, err := a.buildDocContent(dirID, apiID, "markdown")
-	if err != nil {
-		return err
-	}
-	return runtime.ClipboardSetText(a.ctx, content)
-}
-
-func sanitizeFilename(s string) string {
-	out := []rune{}
-	for _, r := range s {
-		switch r {
-		case '\\', '/', ':', '*', '?', '"', '<', '>', '|':
-			out = append(out, '_')
-		default:
-			out = append(out, r)
-		}
-	}
-	if len(out) == 0 {
-		return "api-doc"
-	}
-	return string(out)
+	return doc.CopyDocMarkdown(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID)
 }
 
 // UpdateInfo 升级服务返回的版本信息
@@ -496,12 +316,12 @@ type UpdateInfo struct {
 
 // CheckUpdateResult 检测结果返回给前端
 type CheckUpdateResult struct {
-	Current  string `json:"current"`  // 当前版本
-	Latest   string `json:"latest"`   // 服务端版本
-	HasNew   bool   `json:"hasNew"`   // 是否有新版本
-	URL      string `json:"url"`      // 新版本下载地址
-	Notes    string `json:"notes"`    // 更新说明
-	Error    string `json:"error"`    // 检测错误信息（网络/解析失败）
+	Current string `json:"current"` // 当前版本
+	Latest  string `json:"latest"`  // 服务端版本
+	HasNew  bool   `json:"hasNew"`  // 是否有新版本
+	URL     string `json:"url"`     // 新版本下载地址
+	Notes   string `json:"notes"`   // 更新说明
+	Error   string `json:"error"`   // 检测错误信息（网络/解析失败）
 }
 
 // GetVersion 返回当前客户端版本号
@@ -590,4 +410,594 @@ func atoiSafe(s string) int {
 		v = v*10 + int(c-'0')
 	}
 	return v
+}
+
+// ----------------------------------------------------------------------------
+// bus.Bus 实现：App 作为业务子包与 Wails 运行时之间的桥接。
+// 子包通过 bus.Bus 接口收发事件/弹窗/剪贴板，不再依赖 runtime 或 *App 具体类型。
+// ----------------------------------------------------------------------------
+
+// Assert 编译期检查 App 实现了 bus.Bus。
+var _ bus.Bus = (*App)(nil)
+
+// Emit 向前端发送事件。
+func (a *App) Emit(event string, data ...interface{}) {
+	runtime.EventsEmit(a.ctx, event, data...)
+}
+
+// Quit 退出应用。
+func (a *App) Quit() {
+	runtime.Quit(a.ctx)
+}
+
+// WindowShow 显示主窗口。
+func (a *App) WindowShow() {
+	runtime.WindowShow(a.ctx)
+}
+
+// WindowHide 隐藏主窗口。
+func (a *App) WindowHide() {
+	runtime.WindowHide(a.ctx)
+}
+
+// WindowUnminimise 还原最小化窗口。
+func (a *App) WindowUnminimise() {
+	runtime.WindowUnminimise(a.ctx)
+}
+
+// WindowCenter 居中主窗口。
+func (a *App) WindowCenter() {
+	runtime.WindowCenter(a.ctx)
+}
+
+// WindowSetAlwaysOnTop 设置主窗口是否置顶。
+func (a *App) WindowSetAlwaysOnTop(b bool) {
+	runtime.WindowSetAlwaysOnTop(a.ctx, b)
+}
+
+// BrowserOpenURL 用系统浏览器打开 URL（实现 bus.Bus）。
+func (a *App) BrowserOpenURL(url string) {
+	runtime.BrowserOpenURL(a.ctx, url)
+}
+
+// ClipboardGetText 读取系统剪贴板文本（实现 bus.Bus）。
+func (a *App) ClipboardGetText() (string, error) {
+	return runtime.ClipboardGetText(a.ctx)
+}
+
+// ClipboardSetText 写入系统剪贴板（实现 bus.Bus）。
+func (a *App) ClipboardSetText(text string) error {
+	return runtime.ClipboardSetText(a.ctx, text)
+}
+
+// SaveFileDialog 弹出保存文件对话框（实现 bus.Bus）。
+func (a *App) SaveFileDialog(opts runtime.SaveDialogOptions) (string, error) {
+	return runtime.SaveFileDialog(a.ctx, opts)
+}
+
+// OpenFileDialog 弹出打开文件对话框（实现 bus.Bus）。
+func (a *App) OpenFileDialog(opts runtime.OpenDialogOptions) (string, error) {
+	return runtime.OpenFileDialog(a.ctx, opts)
+}
+
+// OpenDirectoryDialog 弹出选择目录对话框（实现 bus.Bus）。
+func (a *App) OpenDirectoryDialog(opts runtime.OpenDialogOptions) (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, opts)
+}
+
+// ----------------------------------------------------------------------------
+// 同步服务转发层（实现在 internal/sync）
+// ----------------------------------------------------------------------------
+
+// StartSyncServer 在客户端进程内启动内置同步服务。
+func (a *App) StartSyncServer() (string, error) { return syncsrv.Start(a.syncDir) }
+
+// StopSyncServer 停止内置同步服务。
+func (a *App) StopSyncServer() error { return syncsrv.Stop() }
+
+// SyncServerRunning 返回同步服务是否运行中。
+func (a *App) SyncServerRunning() bool { return syncsrv.Running() }
+
+// SyncServerURL 返回同步服务可访问地址。
+func (a *App) SyncServerURL() string { return syncsrv.URL() }
+
+// SyncShareBackend 返回内置同步服务作为分享后端的地址与 token。
+func (a *App) SyncShareBackend() syncsrv.ShareBackend { return syncsrv.ShareBackendInfo() }
+
+// ----------------------------------------------------------------------------
+// 捕获服务转发层（实现在 internal/capture）
+// ----------------------------------------------------------------------------
+
+// StartCaptureServer 启动独立捕获服务（端口 8653，带 Token 鉴权）。
+func (a *App) StartCaptureServer(addr string, token string) (string, error) {
+	return capture.Start(addr, token, a.syncDir)
+}
+
+// StopCaptureServer 停止捕获服务。
+func (a *App) StopCaptureServer() error { return capture.Stop() }
+
+// CaptureServerRunning 捕获服务是否在运行。
+func (a *App) CaptureServerRunning() bool { return capture.Running() }
+
+// CaptureInfo 返回捕获服务信息（地址、端口、Token、条数）。
+func (a *App) CaptureInfo() capture.CaptureServerInfo { return capture.Info() }
+
+// GetCapturedRequests 返回全部已捕获请求（供前端展示）。
+func (a *App) GetCapturedRequests() []capture.CapturedRequest { return capture.GetRequests() }
+
+// ClearCapturedRequests 清空已捕获列表。
+func (a *App) ClearCapturedRequests() { capture.Clear() }
+
+// GenerateApiFromCaptured 将选中的捕获请求转换为接口定义并导入当前项目。
+func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (int, error) {
+	return capture.GenerateApi(ids, projectID, dirID, a.store)
+}
+
+// ImportCapturedAsTestCases 将选中的捕获请求转换为测试用例，导入当前项目。
+func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
+	return capture.ImportTestCases(ids, a.store)
+}
+
+// ExportCapturedOpenAPI 将选中的捕获请求生成 OpenAPI 文档并弹出保存对话框。
+func (a *App) ExportCapturedOpenAPI(ids []string, title string) (string, error) {
+	return capture.ExportOpenAPI(ids, title, a)
+}
+
+// BuildCapturedOpenAPI 生成 OpenAPI JSON 文本（不弹保存框）。
+func (a *App) BuildCapturedOpenAPI(ids []string, title string) (string, error) {
+	return capture.BuildOpenAPI(ids, title)
+}
+
+// ----------------------------------------------------------------------------
+// 分享服务转发层（实现在 internal/share）
+// ----------------------------------------------------------------------------
+
+// StartShareServer 启动分享服务（默认端口 8082）。
+func (a *App) StartShareServer(port string) error { return share.Start(port) }
+
+// StopShareServer 停止分享服务。
+func (a *App) StopShareServer() error { return share.Stop() }
+
+// ShareServerRunning 分享服务是否在运行。
+func (a *App) ShareServerRunning() bool { return share.Running() }
+
+// ShareInfo 返回分享服务信息（内外网地址）。
+func (a *App) ShareInfo() share.ShareServerInfo { return share.Info() }
+
+// BuildShareDoc 构建文档内容（不启动服务），供前端内嵌预览。
+func (a *App) BuildShareDoc(scope, projectID, dirID, format string) (string, error) {
+	return share.BuildDoc(a.store, scope, projectID, dirID, format)
+}
+
+// RefreshShareDoc 重新生成并刷新当前分享文档内容。
+func (a *App) RefreshShareDoc(scope, projectID, dirID string) error {
+	return share.Refresh(a.store, scope, projectID, dirID)
+}
+
+// OpenShareDoc 按 openType 内嵌预览 / 复制链接 / 打开分享文档。
+func (a *App) OpenShareDoc(scope, projectID, dirID, openType, format string) (string, error) {
+	return share.OpenDoc(a, a.store, scope, projectID, dirID, openType, format)
+}
+
+// ShareTestReport 分享测试报告（HTML 默认打开分享服务）。
+func (a *App) ShareTestReport(reportJSON, format, openType string) (string, error) {
+	return share.TestReport(a, a.store, reportJSON, format, openType)
+}
+
+// ----------------------------------------------------------------------------
+// 多分享链接绑定（实现在 internal/share），对齐前端 ShareDialog 契约
+// ----------------------------------------------------------------------------
+
+// BuildSharedHTML 构建指定目录/接口的完整 HTML 网页源码（前端"网页代码"页）。
+func (a *App) BuildSharedHTML(dirID, apiID string) (string, error) {
+	return share.BuildHTMLByAPI(a.store, dirID, apiID)
+}
+
+// BuildSharedTitle 返回指定目录/接口的分享文档标题。
+func (a *App) BuildSharedTitle(dirID, apiID string) (string, error) {
+	return share.BuildTitleByAPI(a.store, dirID, apiID)
+}
+
+// CreateShareLink 创建一条本地分享链接（应用退出后失效），返回可访问 URL。
+func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
+	_, link, err := share.CreateShare(a.store, dirID, apiID, password, expireMinutes)
+	return link, err
+}
+
+// ListShares 返回当前有效分享链接列表。
+func (a *App) ListShares() []share.ShareItemView {
+	return share.ListShares()
+}
+
+// StopShare 停止单条分享链接。
+func (a *App) StopShare(token string) error {
+	return share.StopShare(token)
+}
+
+// ----------------------------------------------------------------------------
+// 压测转发层（实现在 internal/stress）
+// ----------------------------------------------------------------------------
+
+// RunStressTest 对给定目标发起并发压测，返回含延迟分布与吞吐的报告。
+func (a *App) RunStressTest(targets []stress.StressTarget, config stress.StressConfig) (stress.StressReport, error) {
+	return stress.Run(targets, config, a.store, a)
+}
+
+// ExportStressReport 将压测报告（JSON）导出为 Markdown / HTML 文件，返回保存路径。
+func (a *App) ExportStressReport(reportJSON string, format string) (string, error) {
+	return stress.ExportReport(reportJSON, format, a)
+}
+
+// ----------------------------------------------------------------------------
+// 剪贴板 / 热键（底层在 internal/platform，业务存储与窗口控制在此）
+// ----------------------------------------------------------------------------
+
+// StartClipboardCapture 启动后台采集（platform 负责轮询与去重，结果经 ClipSink 落盘）。
+func (a *App) StartClipboardCapture() { platform.StartCapture(a) }
+
+// StopClipboardCapture 停止后台采集。
+func (a *App) StopClipboardCapture() { platform.StopCapture() }
+
+// ---- platform.ClipSink 实现：剪贴板采集结果的落盘与去重 ----
+
+// SaveClipText 记录一条文本剪贴板（ClipSink 回调）。
+func (a *App) SaveClipText(text, sig string) error {
+	data := a.LoadData()
+	item := model.ClipItem{
+		ID:        genClipID(),
+		Type:      model.ClipTypeText,
+		Text:      text,
+		Time:      time.Now().Format("2006-01-02 15:04:05"),
+		Timestamp: time.Now().UnixMilli(),
+	}
+	a.pushClip(&data, item)
+	return a.SaveData(data)
+}
+
+// SaveClipImage 保存 PNG 字节到磁盘并记录一条图片剪贴板（ClipSink 回调）。
+func (a *App) SaveClipImage(pngData []byte, w, h int, sig string) error {
+	id := genClipID()
+	rel := filepath.Join("clipimg", id+".png")
+	full := filepath.Join(a.store.Dir(), rel)
+	if err := os.WriteFile(full, pngData, 0o644); err != nil {
+		return err
+	}
+	data := a.LoadData()
+	item := model.ClipItem{
+		ID:        id,
+		Type:      model.ClipTypeImage,
+		ImagePath: rel,
+		Width:     w,
+		Height:    h,
+		Time:      time.Now().Format("2006-01-02 15:04:05"),
+		Timestamp: time.Now().UnixMilli(),
+	}
+	a.pushClip(&data, item)
+	return a.SaveData(data)
+}
+
+// NotifyUpdated 通知前端剪贴板历史已更新（ClipSink 回调）。
+func (a *App) NotifyUpdated() {
+	runtime.EventsEmit(a.ctx, "apitool:clipboard-updated")
+}
+
+// pushClip 将条目插入历史最前，并按上限裁剪（上限来自设置）。
+func (a *App) pushClip(data *model.AppData, item model.ClipItem) {
+	for i, it := range data.Clipboard.History {
+		if it.Type == item.Type {
+			if item.Type == model.ClipTypeText && it.Text == item.Text {
+				data.Clipboard.History = append(data.Clipboard.History[:i:i], data.Clipboard.History[i+1:]...)
+				break
+			}
+		}
+	}
+	data.Clipboard.History = append([]model.ClipItem{item}, data.Clipboard.History...)
+	maxItems := data.Settings.Clipboard.MaxItems
+	if maxItems <= 0 {
+		maxItems = 200
+	}
+	if len(data.Clipboard.History) > maxItems {
+		for _, it := range data.Clipboard.History[maxItems:] {
+			if it.Type == model.ClipTypeImage && it.ImagePath != "" {
+				_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
+			}
+		}
+		data.Clipboard.History = data.Clipboard.History[:maxItems]
+	}
+}
+
+func genClipID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// ---- 对外暴露给前端的 API ----
+
+// GetClipItems 返回剪贴板历史（最新在前）。
+func (a *App) GetClipItems() []model.ClipItem {
+	data := a.LoadData()
+	return data.Clipboard.History
+}
+
+// CopyClipItem 复制指定历史项到系统剪贴板（文本直接写入；图片读取本地 PNG 写回 CF_DIB）。
+func (a *App) CopyClipItem(id string) error {
+	data := a.LoadData()
+	var item *model.ClipItem
+	for i := range data.Clipboard.History {
+		if data.Clipboard.History[i].ID == id {
+			item = &data.Clipboard.History[i]
+			break
+		}
+	}
+	if item == nil {
+		return fmt.Errorf("未找到该记录")
+	}
+	if item.Type == model.ClipTypeText {
+		sig := fmt.Sprintf("%x", sha256.Sum256([]byte(item.Text)))
+		platform.MarkWritten(sig, "")
+		return a.ClipboardSetText(item.Text)
+	}
+	full := filepath.Join(a.store.Dir(), item.ImagePath)
+	pngBytes, err := os.ReadFile(full)
+	if err != nil {
+		return err
+	}
+	sig := fmt.Sprintf("%x", sha256.Sum256(pngBytes))
+	platform.MarkWritten("", sig)
+	return platform.WriteClipboardImagePNG(pngBytes)
+}
+
+// GetClipImageData 返回指定图片历史项的 PNG 数据（base64），用于前端直接展示缩略图。
+func (a *App) GetClipImageData(id string) map[string]string {
+	data := a.LoadData()
+	for _, it := range data.Clipboard.History {
+		if it.ID == id && it.Type == model.ClipTypeImage && it.ImagePath != "" {
+			if m, ok := platform.ReadPNGFileBase64(filepath.Join(a.store.Dir(), it.ImagePath)); ok {
+				return m
+			}
+		}
+	}
+	return map[string]string{}
+}
+
+// DeleteClipItem 删除一条历史记录（同时删除图片文件）。
+func (a *App) DeleteClipItem(id string) error {
+	data := a.LoadData()
+	for i, it := range data.Clipboard.History {
+		if it.ID == id {
+			if it.Type == model.ClipTypeImage && it.ImagePath != "" {
+				_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
+			}
+			data.Clipboard.History = append(data.Clipboard.History[:i], data.Clipboard.History[i+1:]...)
+			break
+		}
+	}
+	return a.SaveData(data)
+}
+
+// ---- 剪贴板历史窗口控制 ----
+// 语义：剪贴板历史是一个「独立弹出浮层」。打开时显示主窗口并置顶居中；
+// 关闭时取消置顶并把窗口隐藏回托盘。
+
+// toggleClipboardWindow 切换剪贴板历史浮层的显隐。
+func (a *App) toggleClipboardWindow() {
+	if a.clipWinVisible {
+		a.CloseClipboardWindow()
+	} else {
+		a.ShowClipboardWindow()
+	}
+}
+
+// ShowClipboardWindow 显示剪贴板历史浮层（复用主窗口，置顶居中）。
+func (a *App) ShowClipboardWindow() {
+	a.clipWinVisible = true
+	a.WindowShow()
+	a.WindowUnminimise()
+	a.WindowSetAlwaysOnTop(true)
+	a.WindowCenter()
+	runtime.EventsEmit(a.ctx, "apitool:show-clipboard-history")
+}
+
+// CloseClipboardWindow 关闭剪贴板历史浮层（取消置顶并隐藏窗口回托盘）。
+func (a *App) CloseClipboardWindow() {
+	a.clipWinVisible = false
+	a.WindowSetAlwaysOnTop(false)
+	runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
+	a.WindowHide()
+}
+
+// ShowMainWindow 显示主窗体（取消置顶、恢复显示）。连续两次 Ctrl 调用，用于打开主窗体。
+func (a *App) ShowMainWindow() {
+	a.WindowSetAlwaysOnTop(false)
+	a.WindowShow()
+	a.WindowUnminimise()
+	a.windowVisible = true
+}
+
+// ----------------------------------------------------------------------------
+// 外部连接插件转发层（实现在 internal/plugins：Redis/ES/SSH/SFTP/FTP/DB）
+// ----------------------------------------------------------------------------
+
+// PluginConnect 测试连接（按分类做最小连通性/登录校验）。
+func (a *App) PluginConnect(conn model.PluginConn) plugins.PluginOpResult {
+	return plugins.PluginTest(conn)
+}
+
+// PluginDisconnect 断开连接（当前连接采用 TTL 连接池自动回收，这里直接返回成功）。
+func (a *App) PluginDisconnect(conn model.PluginConn) plugins.PluginOpResult {
+	return plugins.PluginOpResult{Ok: true, Info: "已断开"}
+}
+
+// PluginTest 连接测试。
+func (a *App) PluginTest(conn model.PluginConn) plugins.PluginOpResult {
+	return plugins.PluginTest(conn)
+}
+
+// PluginRedisKeys 列举匹配模式的 Redis 键。
+func (a *App) PluginRedisKeys(conn model.PluginConn, pattern string, db int) ([]plugins.RedisKey, error) {
+	return plugins.PluginRedisKeys(conn, pattern, db)
+}
+
+// PluginRedisValue 获取 Redis 键的值。
+func (a *App) PluginRedisValue(conn model.PluginConn, key string, db int) (plugins.RedisValue, error) {
+	return plugins.PluginRedisValue(conn, key, db)
+}
+
+// PluginRedisSet 设置 Redis 字符串键。
+func (a *App) PluginRedisSet(conn model.PluginConn, key, value string, ttl, db int) error {
+	return plugins.PluginRedisSet(conn, key, value, ttl, db)
+}
+
+// PluginRedisDel 删除 Redis 键。
+func (a *App) PluginRedisDel(conn model.PluginConn, key string, db int) error {
+	return plugins.PluginRedisDel(conn, key, db)
+}
+
+// PluginRedisTTL 返回 Redis 键过期秒数。
+func (a *App) PluginRedisTTL(conn model.PluginConn, key string, db int) (int, error) {
+	return plugins.PluginRedisTTL(conn, key, db)
+}
+
+// PluginESIndices 列出 ES 索引。
+func (a *App) PluginESIndices(conn model.PluginConn) ([]plugins.ESIndex, error) {
+	return plugins.PluginESIndices(conn)
+}
+
+// PluginESSearch 执行 ES 查询。
+func (a *App) PluginESSearch(conn model.PluginConn, index, query string) (string, error) {
+	return plugins.PluginESSearch(conn, index, query)
+}
+
+// PluginSSHExec 在远端执行命令（XShell 风格）。
+func (a *App) PluginSSHExec(conn model.PluginConn, command string) (string, error) {
+	return plugins.PluginSSHExec(conn, command)
+}
+
+// PluginSSHOpen 建立带 PTY 的持久 SSH 会话，输出通过事件实时推送前端。
+func (a *App) PluginSSHOpen(conn model.PluginConn) (string, error) {
+	return plugins.PluginSSHOpen(a, conn)
+}
+
+// PluginSSHInput 向 SSH 会话写入数据。
+func (a *App) PluginSSHInput(id string, data string) error {
+	return plugins.PluginSSHInput(id, data)
+}
+
+// PluginSSHClose 关闭 SSH 会话。
+func (a *App) PluginSSHClose(id string) error {
+	return plugins.PluginSSHClose(id)
+}
+
+// PluginSSHResize 调整 SSH 会话伪终端尺寸。
+func (a *App) PluginSSHResize(id string, rows, cols int) error {
+	return plugins.PluginSSHResize(id, rows, cols)
+}
+
+// PluginSFTPList 列出远端目录。
+func (a *App) PluginSFTPList(conn model.PluginConn, dir string) ([]plugins.FileInfo, error) {
+	return plugins.PluginSFTPList(conn, dir)
+}
+
+// PluginSFTPRead 读取远端文件文本。
+func (a *App) PluginSFTPRead(conn model.PluginConn, path string) (string, error) {
+	return plugins.PluginSFTPRead(conn, path)
+}
+
+// PluginSFTPWrite 写入远端文件。
+func (a *App) PluginSFTPWrite(conn model.PluginConn, path, content string) error {
+	return plugins.PluginSFTPWrite(conn, path, content)
+}
+
+// PluginSFTPUploadB64 上传本地文件（base64）。
+func (a *App) PluginSFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
+	return plugins.PluginSFTPUploadB64(conn, remoteDir, name, b64)
+}
+
+// PluginSFTPRename 重命名 / 移动远端文件。
+func (a *App) PluginSFTPRename(conn model.PluginConn, oldPath, newPath string) error {
+	return plugins.PluginSFTPRename(conn, oldPath, newPath)
+}
+
+// PluginSFTPDownload 下载远端文件到本地。
+func (a *App) PluginSFTPDownload(conn model.PluginConn, path, name string) (string, error) {
+	return plugins.PluginSFTPDownload(a, conn, path, name)
+}
+
+// PluginSFTPMkdir 创建远端目录。
+func (a *App) PluginSFTPMkdir(conn model.PluginConn, path string) error {
+	return plugins.PluginSFTPMkdir(conn, path)
+}
+
+// PluginSFTPDelete 删除远端文件/目录。
+func (a *App) PluginSFTPDelete(conn model.PluginConn, path string) error {
+	return plugins.PluginSFTPDelete(conn, path)
+}
+
+// PluginFTPList 列出 FTP 目录。
+func (a *App) PluginFTPList(conn model.PluginConn, dir string) ([]plugins.FileInfo, error) {
+	return plugins.PluginFTPList(conn, dir)
+}
+
+// PluginFTPRead 读取 FTP 文件文本。
+func (a *App) PluginFTPRead(conn model.PluginConn, path string) (string, error) {
+	return plugins.PluginFTPRead(conn, path)
+}
+
+// PluginFTPWrite 上传 FTP 文件。
+func (a *App) PluginFTPWrite(conn model.PluginConn, path, content string) error {
+	return plugins.PluginFTPWrite(conn, path, content)
+}
+
+// PluginFTPUploadB64 上传本地文件（base64）。
+func (a *App) PluginFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
+	return plugins.PluginFTPUploadB64(conn, remoteDir, name, b64)
+}
+
+// PluginFTPDownload 下载 FTP 文件到本地。
+func (a *App) PluginFTPDownload(conn model.PluginConn, path, name string) (string, error) {
+	return plugins.PluginFTPDownload(a, conn, path, name)
+}
+
+// PluginFTPRename 重命名 / 移动 FTP 文件。
+func (a *App) PluginFTPRename(conn model.PluginConn, oldPath, newPath string) error {
+	return plugins.PluginFTPRename(conn, oldPath, newPath)
+}
+
+// PluginFTPMkdir 创建 FTP 目录。
+func (a *App) PluginFTPMkdir(conn model.PluginConn, path string) error {
+	return plugins.PluginFTPMkdir(conn, path)
+}
+
+// PluginFTPDelete 删除 FTP 文件/目录。
+func (a *App) PluginFTPDelete(conn model.PluginConn, path string) error {
+	return plugins.PluginFTPDelete(conn, path)
+}
+
+// PluginSetClipboard 写入系统剪贴板。
+func (a *App) PluginSetClipboard(text string) error {
+	return plugins.PluginSetClipboard(a, text)
+}
+
+// PluginDBTest 数据库连接测试。
+func (a *App) PluginDBTest(conn model.PluginConn) plugins.PluginOpResult {
+	return plugins.PluginDBTest(conn)
+}
+
+// PluginDBDatabases 列出数据库。
+func (a *App) PluginDBDatabases(conn model.PluginConn) (plugins.DBInfo, error) {
+	return plugins.PluginDBDatabases(conn)
+}
+
+// PluginDBTables 列出表。
+func (a *App) PluginDBTables(conn model.PluginConn, database string) ([]plugins.DBTable, error) {
+	return plugins.PluginDBTables(conn, database)
+}
+
+// PluginDBQuery 执行查询。
+func (a *App) PluginDBQuery(conn model.PluginConn, req plugins.DBQueryReq) (*plugins.DBRow, error) {
+	return plugins.PluginDBQuery(conn, req)
+}
+
+// PluginDBExec 执行 DML/DDL。
+func (a *App) PluginDBExec(conn model.PluginConn, req plugins.DBExecReq) (int64, error) {
+	return plugins.PluginDBExec(conn, req)
 }

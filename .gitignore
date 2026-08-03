@@ -2,3 +2,12 @@ build/bin
 node_modules
 frontend/dist
 vendor/
+
+# 根目录构建产物与日志（非源码）
+*.exe
+*.txt
+*.log
+wails_build.log
+build_frontend.log
+build_err.txt
+vet.txt
