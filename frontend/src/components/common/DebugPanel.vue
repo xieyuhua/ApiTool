@@ -297,6 +297,68 @@ async function bodyToReqFields() {
   }
 }
 
+// 用表单字段生成请求参数文档（formItems 同步到 reqFields）
+function formToReqFields() {
+  const items = (props.api.formItems || []).filter(x => x.enabled && x.key)
+  if (!items.length) { ElMessage.warning('表单无有效字段'); return }
+  const existing = props.api.reqFields || []
+  const map = {}
+  existing.forEach(f => { map[f.name] = f })
+  for (const it of items) {
+    if (!map[it.key]) {
+      map[it.key] = {
+        name: it.key,
+        type: it.type === 'file' ? 'file' : 'string',
+        required: true,
+        example: it.type === 'file' ? '' : it.value,
+        description: it.description || '',
+        children: null,
+      }
+    } else {
+      const f = map[it.key]
+      if (it.type === 'file' && f.type !== 'file') f.type = 'file'
+      if (!f.description && it.description) f.description = it.description
+    }
+  }
+  props.api.reqFields = Object.values(map)
+  store.activeTab = 'params'
+  ElMessage.success('已生成表单参数文档，可在参数设置中补充描述')
+}
+
+// 表单：新增一行（含类型字段）
+function addFormRow() {
+  if (!props.api.formItems) props.api.formItems = []
+  props.api.formItems.push({ key: '', value: '', description: '', enabled: true, type: 'text' })
+  markDebugDirty()
+}
+function removeFormRow(i) {
+  props.api.formItems.splice(i, 1)
+  markDebugDirty()
+}
+// 表单：选择本地文件，写入 value 为文件路径
+function pickFormFile(it) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.onchange = () => {
+    const f = input.files && input.files[0]
+    if (f) { it.value = f.path || f.name; markDebugDirty() }
+  }
+  input.click()
+}
+function formFileName(path) {
+  if (!path) return ''
+  return path.split(/[\\/]/).pop()
+}
+// 切换类型时，文件类型清空文本值，避免误带
+function onFormTypeChange(kv) {
+  if (kv.type === 'file') {
+    if (kv.value && !/\.[\\/]/.test(kv.value) && !kv.value.includes('/')) {
+      // 文本值，切换为文件时清空，等待选择
+    }
+    kv.value = ''
+  }
+}
+
 // 用响应 JSON 生成响应参数文档
 async function respToRespFields() {
   const r = getLiveResponse(props.api.id)
@@ -399,7 +461,46 @@ function buildRespDetail(r) {
               <el-button size="small" @click="bodyToReqFields">生成请求参数文档</el-button>
             </div>
           </template>
-          <KVEditor v-else-if="api.bodyType === 'form'" :items="api.formItems" key-placeholder="字段名" @change="markDebugDirty" />
+          <template v-else-if="api.bodyType === 'form'">
+            <div style="margin-bottom:10px; display:flex; gap:8px">
+              <el-button size="small" @click="formToReqFields">生成表单参数文档</el-button>
+              <span style="color:#86909c; font-size:12px; align-self:center">字段类型可选「文本」或「文件」，文件类型将作为 multipart/form-data 上传</span>
+            </div>
+            <div class="form-grid form-head">
+              <span class="c-enable"></span>
+              <span class="c-type">类型</span>
+              <span class="c-key">字段名</span>
+              <span class="c-val">值 / 文件</span>
+              <span class="c-desc">说明</span>
+              <span class="c-op"></span>
+            </div>
+            <div v-for="(kv, i) in api.formItems" :key="i" class="form-grid form-row">
+              <span class="c-enable"><el-checkbox v-model="kv.enabled" @change="markDebugDirty" /></span>
+              <span class="c-type">
+                <el-select v-model="kv.type" size="small" @change="onFormTypeChange(kv); markDebugDirty()">
+                  <el-option label="文本" value="text" />
+                  <el-option label="文件" value="file" />
+                </el-select>
+              </span>
+              <span class="c-key"><el-input v-model="kv.key" placeholder="字段名" @input="markDebugDirty" /></span>
+              <span class="c-val">
+                <template v-if="kv.type === 'file'">
+                  <el-input :model-value="formFileName(kv.value)" placeholder="选择文件" readonly @click="pickFormFile(kv)">
+                    <template #append>
+                      <el-button @click="pickFormFile(kv)">浏览</el-button>
+                    </template>
+                  </el-input>
+                </template>
+                <el-input v-else v-model="kv.value" placeholder="值" @input="markDebugDirty" />
+              </span>
+              <span class="c-desc"><el-input v-model="kv.description" placeholder="说明（写入文档）" @input="markDebugDirty" /></span>
+              <span class="c-op">
+                <el-button link type="danger" title="删除" @click="removeFormRow(i)">✕</el-button>
+              </span>
+            </div>
+            <div v-if="!api.formItems.length" class="kv-empty">暂无字段，点击下方「添加字段」</div>
+            <el-button link type="primary" style="margin-top:10px" @click="addFormRow">＋ 添加字段</el-button>
+          </template>
           <div v-else style="color:#86909c;font-size:13px">该请求不包含 Body</div>
         </el-tab-pane>
         <el-tab-pane label="前置脚本" name="pre">
@@ -474,4 +575,10 @@ function buildRespDetail(r) {
 .resp-body { user-select: text; cursor: text; }
 .script-tip { font-size: 12px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.7; }
 .script-tip code { background: #e5e6eb; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; color: #165dff; }
+.form-grid { display: grid; grid-template-columns: 42px 90px minmax(150px, 1fr) minmax(190px, 1.3fr) minmax(150px, 1fr) 44px; gap: 12px; align-items: center; }
+.form-head { font-size: 12px; color: #86909c; padding: 0 2px; margin-bottom: 8px; }
+.form-row { margin-bottom: 10px; }
+.form-grid .c-enable { display: flex; justify-content: center; }
+.form-grid .c-key, .form-grid .c-val, .form-grid .c-desc, .form-grid .c-type { min-width: 0; }
+.kv-empty { color: #c9cdd4; font-size: 13px; text-align: center; padding: 16px 0; border: 1px dashed #e5e6eb; border-radius: 8px; margin-bottom: 10px; }
 </style>

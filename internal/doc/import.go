@@ -419,6 +419,56 @@ func contentSchema(obj map[string]interface{}, doc map[string]interface{}) map[s
 	return nil
 }
 
+// isMultipartBody 判断 requestBody 是否为 multipart/form-data
+func isMultipartBody(rb map[string]interface{}) bool {
+	content, ok := rb["content"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, ok = content["multipart/form-data"].(map[string]interface{})
+	return ok
+}
+
+// multipartToFormItems 将 multipart/form-data 的 schema 还原为表单字段
+func multipartToFormItems(rb map[string]interface{}) []model.KV {
+	var items []model.KV
+	content, ok := rb["content"].(map[string]interface{})
+	if !ok {
+		return items
+	}
+	cm, ok := content["multipart/form-data"].(map[string]interface{})
+	if !ok {
+		return items
+	}
+	schema, ok := cm["schema"].(map[string]interface{})
+	if !ok {
+		return items
+	}
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		return items
+	}
+	for name, pv := range props {
+		pm, ok := pv.(map[string]interface{})
+		if !ok {
+			items = append(items, model.KV{Enabled: true, Key: name, Type: "text"})
+			continue
+		}
+		typ := "text"
+		if fmt, ok := pm["format"].(string); ok && fmt == "binary" {
+			typ = "file"
+		} else if t, ok := pm["type"].(string); ok && t == "string" && fmt == "" {
+			typ = "text"
+		}
+		item := model.KV{Enabled: true, Key: name, Type: typ, Value: "", Description: strVal(pm["description"])}
+		if ex, ok := pm["example"]; ok && typ != "file" {
+			item.Value = strVal(ex)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 func paramToKV(p map[string]interface{}) model.KV {
 	kv := model.KV{Enabled: true, Key: strVal(p["name"]), Description: strVal(p["description"])}
 	if req, ok := p["required"].(bool); ok && req {
@@ -516,7 +566,11 @@ func buildOpenAPIOp(api model.ApiInfo, op map[string]interface{}, doc map[string
 		}
 	}
 	if rb, ok := op["requestBody"].(map[string]interface{}); ok {
-		if s := contentSchema(rb, doc); s != nil {
+		// multipart/form-data → 表单参数
+		if isMultipartBody(rb) {
+			api.BodyType = "form"
+			api.FormItems = multipartToFormItems(rb)
+		} else if s := contentSchema(rb, doc); s != nil {
 			if f := schemaToFields("", s, doc, 0); f != nil {
 				api.ReqFields = f.Children
 			}
@@ -623,9 +677,13 @@ func buildSwaggerOp(api model.ApiInfo, op map[string]interface{}, doc map[string
 					api.Body = schemaToExample(s, doc)
 					api.BodyType = "json"
 				}
-			case "formData":
-				api.BodyType = "form"
-				api.FormItems = append(api.FormItems, model.KV{Enabled: true, Key: strVal(p["name"]), Value: strVal(p["type"]), Description: strVal(p["description"])})
+		case "formData":
+			api.BodyType = "form"
+			ftype := "text"
+			if strVal(p["type"]) == "file" {
+				ftype = "file"
+			}
+			api.FormItems = append(api.FormItems, model.KV{Enabled: true, Key: strVal(p["name"]), Value: "", Type: ftype, Description: strVal(p["description"])})
 			case "query":
 				api.Query = append(api.Query, paramToKV(p))
 			case "header":

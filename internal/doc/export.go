@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -100,6 +101,31 @@ func mdKVTable(sb *strings.Builder, title string, kvs []model.KV) {
 	sb.WriteString("\n")
 }
 
+// mdFormTable 渲染表单参数（含文件类型）
+func mdFormTable(sb *strings.Builder, title string, kvs []model.KV) {
+	kvs = EnabledKVs(kvs)
+	if len(kvs) == 0 {
+		return
+	}
+	sb.WriteString("**" + title + "**\n\n")
+	sb.WriteString("| 字段名 | 类型 | 值/文件 | 说明 |\n|---|---|---|---|\n")
+	for _, kv := range kvs {
+		typ := "文本"
+		val := kv.Value
+		if kv.Type == model.FormTypeFile {
+			typ = "文件"
+			if val == "" {
+				val = "（未选择文件）"
+			} else {
+				_, name := filepath.Split(val)
+				val = "📎 " + name
+			}
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", MdEscape(kv.Key), typ, MdEscape(val), MdEscape(kv.Description)))
+	}
+	sb.WriteString("\n")
+}
+
 func mdApi(sb *strings.Builder, api model.ApiInfo, level int, common model.CommonParams) {
 	h := strings.Repeat("#", minInt(level, 6))
 	sb.WriteString(fmt.Sprintf("%s %s\n\n", h, api.Name))
@@ -109,6 +135,7 @@ func mdApi(sb *strings.Builder, api model.ApiInfo, level int, common model.Commo
 	}
 	mdKVTable(sb, "请求头", api.Headers)
 	mdKVTable(sb, "Query 参数", api.Query)
+	mdFormTable(sb, "表单参数（Form / 文件上传）", api.FormItems)
 	// 公共参数：项目级，自动附加到所有接口（接口同名覆盖公共）
 	mdKVTable(sb, "公共请求头", common.Headers)
 	mdKVTable(sb, "公共 Query 参数", common.Query)
@@ -178,6 +205,31 @@ func htmlFieldTable(sb *strings.Builder, title string, fields []*model.Field) {
 	sb.WriteString(`</tbody></table>`)
 }
 
+// htmlFormTable 渲染表单参数（含文件类型）
+func htmlFormTable(sb *strings.Builder, title string, kvs []model.KV) {
+	kvs = EnabledKVs(kvs)
+	if len(kvs) == 0 {
+		return
+	}
+	sb.WriteString(`<h4>` + title + `</h4><table><thead><tr><th>字段名</th><th>类型</th><th>值/文件</th><th>说明</th></tr></thead><tbody>`)
+	for _, kv := range kvs {
+		typ := "文本"
+		val := kv.Value
+		if kv.Type == model.FormTypeFile {
+			typ = `<span style="color:#165dff">文件</span>`
+			if val == "" {
+				val = "（未选择文件）"
+			} else {
+				_, name := filepath.Split(val)
+				val = "📎 " + name
+			}
+		}
+		sb.WriteString(fmt.Sprintf(`<tr><td class="fname">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			html.EscapeString(kv.Key), typ, html.EscapeString(val), html.EscapeString(kv.Description)))
+	}
+	sb.WriteString(`</tbody></table>`)
+}
+
 func htmlKVTable(sb *strings.Builder, title string, kvs []model.KV) {
 	kvs = EnabledKVs(kvs)
 	if len(kvs) == 0 {
@@ -202,6 +254,7 @@ func htmlApi(sb *strings.Builder, api model.ApiInfo, dirName string, common mode
 	}
 	htmlKVTable(sb, "请求头", api.Headers)
 	htmlKVTable(sb, "Query 参数", api.Query)
+	htmlFormTable(sb, "表单参数（Form / 文件上传）", api.FormItems)
 	htmlKVTable(sb, "公共请求头", common.Headers)
 	htmlKVTable(sb, "公共 Query 参数", common.Query)
 	htmlFieldTable(sb, "请求参数", api.ReqFields)
@@ -455,6 +508,39 @@ func BuildOpenAPI(title string, apis []model.ApiInfo, common model.CommonParams)
 				"content": map[string]interface{}{
 					"application/json": map[string]interface{}{
 						"schema": schemaFromFields(api.ReqFields),
+					},
+				},
+			}
+		}
+		// 表单参数（Form / 文件上传）：生成 multipart/form-data requestBody
+		formKVs := EnabledKVs(api.FormItems)
+		if len(formKVs) > 0 {
+			props := map[string]interface{}{}
+			required := []string{}
+			for _, kv := range formKVs {
+				if kv.Type == model.FormTypeFile {
+					props[kv.Key] = map[string]interface{}{
+						"type":        "string",
+						"format":      "binary",
+						"description": kv.Description,
+					}
+				} else {
+					props[kv.Key] = map[string]interface{}{
+						"type":        "string",
+						"description": kv.Description,
+						"example":     kv.Value,
+					}
+				}
+				required = append(required, kv.Key)
+			}
+			op["requestBody"] = map[string]interface{}{
+				"content": map[string]interface{}{
+					"multipart/form-data": map[string]interface{}{
+						"schema": map[string]interface{}{
+							"type":     "object",
+							"properties": props,
+							"required": required,
+						},
 					},
 				},
 			}

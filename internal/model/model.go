@@ -1,12 +1,20 @@
 package model
 
 // KV 键值对（Header / Query / Form 等）
+// Type 仅用于表单（formItems）："text" 普通文本（默认），"file" 文件上传（Value 为本地文件路径）
 type KV struct {
 	Key         string `json:"key"`
 	Value       string `json:"value"`
 	Description string `json:"description"`
 	Enabled     bool   `json:"enabled"`
+	Type        string `json:"type"` // text | file（仅表单使用）
 }
+
+// 表单字段类型常量
+const (
+	FormTypeText = "text"
+	FormTypeFile = "file"
+)
 
 // Field 参数字段（支持嵌套）
 type Field struct {
@@ -213,7 +221,6 @@ type Settings struct {
 	Accent  string       `json:"accent"`  // 主题强调色
 	Hotkey  string       `json:"hotkey"`  // 全局快捷键，如 Ctrl+Shift+V
 	AutoSync bool        `json:"autoSync"` // 是否启用云同步
-	Clipboard ClipSettings `json:"clipboard"`
 }
 
 // AppData 应用全部数据
@@ -267,10 +274,4 @@ type ClipItem struct {
 
 type ClipData struct {
 	History []ClipItem `json:"history"`
-}
-
-// ClipSettings 剪贴板相关设置
-type ClipSettings struct {
-	Monitor  bool `json:"monitor"`  // 是否监听剪贴板自动记录
-	MaxItems int  `json:"maxItems"` // 历史保留上限
 }

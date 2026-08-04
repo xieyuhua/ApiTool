@@ -55,6 +55,10 @@ function highlightVars(text) {
     /^\{\{[^}]+\}\}$/.test(p) ? '<span class="var-chip">' + escapeHtml(p) + '</span>' : escapeHtml(p)
   ).join('')
 }
+function formFileName(path) {
+  if (!path) return ''
+  return String(path).split(/[\\/]/).pop()
+}
 </script>
 
 <template>
@@ -106,6 +110,21 @@ function highlightVars(text) {
             <tbody>
               <tr v-for="(q, i) in docApi.query.filter(x => x.enabled && x.key)" :key="i">
                 <td>{{ q.key }}</td><td v-html="highlightVars(q.value)"></td><td>{{ q.description }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+
+        <template v-if="(docApi.formItems || []).some(f => f.enabled && f.key)">
+          <h4>表单参数（Form / 文件上传）</h4>
+          <table>
+            <thead><tr><th>字段名</th><th>类型</th><th>值/文件</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr v-for="(f, i) in docApi.formItems.filter(x => x.enabled && x.key)" :key="i">
+                <td>{{ f.key }}</td>
+                <td style="color:#165dff">{{ f.type === 'file' ? '文件' : '文本' }}</td>
+                <td v-html="f.type === 'file' ? (f.value ? ('📎 ' + formFileName(f.value)) : '（未选择文件）') : highlightVars(f.value)"></td>
+                <td>{{ f.description }}</td>
               </tr>
             </tbody>
           </table>

@@ -3,10 +3,14 @@ package httpx
 
 import (
 	"apitool/internal/model"
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -80,14 +84,63 @@ func SendRequest(spec model.RequestSpec) model.ResponseData {
 			contentType = "application/json"
 		}
 	case "form":
-		form := url.Values{}
+		// 若存在文件类型字段，则使用 multipart/form-data；否则使用 urlencoded
+		hasFile := false
 		for _, kv := range spec.FormItems {
-			if kv.Enabled && kv.Key != "" {
-				form.Add(kv.Key, applyEnv(kv.Value, env))
+			if kv.Enabled && kv.Key != "" && kv.Type == model.FormTypeFile {
+				hasFile = true
+				break
 			}
 		}
-		bodyReader = strings.NewReader(form.Encode())
-		contentType = "application/x-www-form-urlencoded"
+		if !hasFile {
+			form := url.Values{}
+			for _, kv := range spec.FormItems {
+				if kv.Enabled && kv.Key != "" {
+					form.Add(kv.Key, applyEnv(kv.Value, env))
+				}
+			}
+			bodyReader = strings.NewReader(form.Encode())
+			contentType = "application/x-www-form-urlencoded"
+		} else {
+			var buf bytes.Buffer
+			w := multipart.NewWriter(&buf)
+			for _, kv := range spec.FormItems {
+				if !kv.Enabled || kv.Key == "" {
+					continue
+				}
+				if kv.Type == model.FormTypeFile {
+					path := applyEnv(kv.Value, env)
+					if path == "" {
+						continue
+					}
+					fd, ferr := os.Open(path)
+					if ferr != nil {
+						return fail("打开上传文件失败: " + ferr.Error())
+					}
+					// 以原始文件名作为 part 文件名
+					_, name := filepath.Split(path)
+					part, perr := w.CreateFormFile(kv.Key, name)
+					if perr != nil {
+						fd.Close()
+						return fail("创建文件表单失败: " + perr.Error())
+					}
+					if _, cerr := io.Copy(part, fd); cerr != nil {
+						fd.Close()
+						return fail("读取上传文件失败: " + cerr.Error())
+					}
+					fd.Close()
+				} else {
+					if ferr := w.WriteField(kv.Key, applyEnv(kv.Value, env)); ferr != nil {
+						return fail("写入表单字段失败: " + ferr.Error())
+					}
+				}
+			}
+			if cerr := w.Close(); cerr != nil {
+				return fail("关闭表单失败: " + cerr.Error())
+			}
+			bodyReader = &buf
+			contentType = w.FormDataContentType()
+		}
 	case "text":
 		if spec.Body != "" {
 			bodyReader = strings.NewReader(applyEnv(spec.Body, env))

@@ -60,6 +60,36 @@ async function importFromResponse() {
 }
 
 async function importFromBody() {
+  // 表单模式：直接从 formItems 导入到请求参数
+  if (props.api.bodyType === 'form') {
+    const items = (props.api.formItems || []).filter(x => x.enabled && x.key)
+    if (!items.length) { ElMessage.warning('表单为空，请先在「接口调试」中填写表单字段'); return }
+    const existing = JSON.parse(JSON.stringify(props.api.reqFields || []))
+    const map = {}
+    existing.forEach(f => { map[f.name] = f })
+    for (const it of items) {
+      if (!map[it.key]) {
+        map[it.key] = {
+          name: it.key,
+          type: it.type === 'file' ? 'file' : 'string',
+          required: true,
+          example: it.type === 'file' ? '' : it.value,
+          description: it.description || '',
+          children: null,
+        }
+      } else {
+        const f = map[it.key]
+        if (it.type === 'file' && f.type !== 'file') f.type = 'file'
+        if (!f.description && it.description) f.description = it.description
+      }
+    }
+    props.api.reqFields = Object.values(map)
+    tab.value = 'req'
+    markDebugDirty()
+    ElMessage.success('已从表单字段导入')
+    return
+  }
+  // JSON 模式
   if (!props.api.body || !props.api.body.trim()) { ElMessage.warning('请求体为空，请先在「接口调试」中填写 JSON 请求体'); return }
   try {
     const fields = await ParseFields(props.api.body, JSON.parse(JSON.stringify(props.api.reqFields)))

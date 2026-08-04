@@ -828,6 +828,7 @@ export namespace model {
 	    value: string;
 	    description: string;
 	    enabled: boolean;
+	    type: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new KV(source);
@@ -839,6 +840,7 @@ export namespace model {
 	        this.value = source["value"];
 	        this.description = source["description"];
 	        this.enabled = source["enabled"];
+	        this.type = source["type"];
 	    }
 	}
 	export class ApiInfo {
@@ -1054,6 +1056,10 @@ export namespace model {
 	    cloudUser: string;
 	    version: string;
 	    updateURL: string;
+	    theme: string;
+	    accent: string;
+	    hotkey: string;
+	    autoSync: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1071,6 +1077,10 @@ export namespace model {
 	        this.cloudUser = source["cloudUser"];
 	        this.version = source["version"];
 	        this.updateURL = source["updateURL"];
+	        this.theme = source["theme"];
+	        this.accent = source["accent"];
+	        this.hotkey = source["hotkey"];
+	        this.autoSync = source["autoSync"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
