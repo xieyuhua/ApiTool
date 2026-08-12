@@ -152,8 +152,8 @@
 
           <!-- 按 host 分组模式 -->
           <template v-else>
-            <div v-for="g in groupedRecords" :key="g.host" class="grp">
-              <div class="grp-head" @click="toggleGroup(g.host)">
+            <div v-for="g in groupedRecords" :key="g.key" class="grp">
+              <div class="grp-head" @click="toggleGroup(g.key)">
                 <span class="grp-arrow" :class="{ open: !g.collapsed }">▶</span>
                 <span class="grp-host">{{ g.host || '(未知)' }}</span>
                 <span class="grp-count">{{ g.records.length }}</span>
@@ -375,17 +375,35 @@ const filteredRecords = computed(() => {
   })
 })
 
-// 按 host 分组展示
+// 按 URL 路径分组展示（host + 路径第一段）
+function groupKeyOf(r) {
+  const host = r.host || '(未知)'
+  let seg = ''
+  if (r.path) {
+    const p = r.path.split('/').filter(Boolean)
+    if (p.length) seg = '/' + p[0]
+  } else if (r.url) {
+    try {
+      const u = new URL(r.url)
+      const p = u.pathname.split('/').filter(Boolean)
+      if (p.length) seg = '/' + p[0]
+    } catch (e) { /* ignore */ }
+  }
+  return { host, seg }
+}
+
 const groupedRecords = computed(() => {
   const map = {}
   filteredRecords.value.forEach(r => {
-    const h = r.host || '(未知)'
-    if (!map[h]) map[h] = { host: h, records: [], collapsed: false }
-    map[h].records.push(r)
+    const gk = groupKeyOf(r)
+    const key = gk.host + gk.seg
+    const label = gk.seg ? gk.host + gk.seg : gk.host
+    if (!map[key]) map[key] = { host: label, seg: gk.seg, key, records: [], collapsed: false }
+    map[key].records.push(r)
   })
   const groups = Object.values(map)
   groups.forEach(g => {
-    g.collapsed = collapsedHosts.value.has(g.host)
+    g.collapsed = collapsedHosts.value.has(g.key)
     const set = new Set(selectedIds.value)
     const ids = g.records.map(x => x.id)
     g.allChecked = ids.every(id => set.has(id))
@@ -394,9 +412,9 @@ const groupedRecords = computed(() => {
   return groups
 })
 
-function toggleGroup(host) {
+function toggleGroup(key) {
   const s = new Set(collapsedHosts.value)
-  if (s.has(host)) s.delete(host); else s.add(host)
+  if (s.has(key)) s.delete(key); else s.add(key)
   collapsedHosts.value = s
 }
 
@@ -765,8 +783,8 @@ function onResize(e) {
   const total = rect.width
   if (!total) return
   const pct = ((e.clientX - rect.left) / total) * 100
-  // 限制在 25% ~ 75% 之间
-  leftWidth.value = Math.min(75, Math.max(25, pct))
+  // 最大不超过一半（50%），最小 25%，避免过大/过小
+  leftWidth.value = Math.min(50, Math.max(25, pct))
 }
 
 function stopResize() {
@@ -847,12 +865,14 @@ function isImageResp(r) {
 
 function imgSrc(body) {
   if (!body) return ''
-  // 已是 data URL 直接用；否则尝试作为 base64 拼 data:image
+  // 已是 data URL 直接用
   if (body.startsWith('data:image/')) return body
-  // 去除可能的空白换行
+  // 取干净的 MIME 类型（去掉 ; 后参数）
+  const rawCT = (selected.value && selected.value.respContentType) || 'image/png'
+  const mime = (rawCT.split(';')[0] || 'image/png').trim().toLowerCase()
+  // 去除可能的空白换行后作为 base64
   const cleaned = body.replace(/\s+/g, '')
-  const ct = (selected.value && selected.value.respContentType) || 'image/png'
-  return `data:${ct};base64,${cleaned}`
+  return `data:${mime};base64,${cleaned}`
 }
 
 async function copyProxyAddr() {
@@ -871,14 +891,14 @@ async function copyProxyAddr() {
 </script>
 
 <style scoped>
-.mitm-panel { display: flex; flex-direction: column; height: 100%; padding: 16px; gap: 12px; box-sizing: border-box; }
-.mitm-top { display: flex; justify-content: space-between; align-items: center; }
+.mitm-panel { flex: 1; width: 100%; min-width: 0; display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 14px 16px; gap: 10px; box-sizing: border-box; overflow: hidden; }
+.mitm-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mitm-title h2 { margin: 0; font-size: 18px; }
 .mitm-title .sub { color: #86909c; font-size: 12px; margin-left: 8px; }
 .mitm-actions { display: flex; gap: 8px; align-items: center; }
-.mitm-body { display: flex; gap: 4px; flex: 1; min-height: 0; }
-.mitm-left { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: width .08s ease; }
-.mitm-right { flex: 1; min-width: 0; border-left: 1px solid #e5e6eb; padding-left: 12px; min-height: 0; display: flex; flex-direction: column; }
+.mitm-body { display: flex; gap: 4px; flex: 1; min-height: 0; overflow: hidden; }
+.mitm-left { flex: 0 0 auto; min-width: 300px; max-width: 50%; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: width .08s ease; }
+.mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid #e5e6eb; padding-left: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .mitm-right .detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
 .resize-bar { width: 6px; cursor: col-resize; background: transparent; flex-shrink: 0; border-radius: 3px; transition: background .15s; }
 .resize-bar:hover, .mitm-body.resizing .resize-bar { background: #165dff; }

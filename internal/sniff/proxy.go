@@ -176,11 +176,18 @@ func (p *proxy) Response(f *mitm.Flow) {
 	if f.Response != nil {
 		statusCode = f.Response.StatusCode
 		statusText = http.StatusText(statusCode)
-		respBody = f.Response.Body
+		// 解码压缩响应体（gzip/br/deflate/zstd），否则记录到的是压缩乱码
+		respBody, _ = f.Response.DecodedBody()
+		if respBody == nil {
+			respBody = f.Response.Body
+		}
 		respHeaders = headerToKV(f.Response.Header)
 	}
 
-	rec := p.store.recordFromReqRespExt(req, respBody, req.Body, headerToKV(req.Header),
+	// 请求体也做同样的解压处理
+	reqBody, _ := f.Request.DecodedBody()
+
+	rec := p.store.recordFromReqRespExt(req, respBody, reqBody, headerToKV(req.Header),
 		respHeaders, statusCode, statusText, prot, f.StartTime)
 	p.finalize(rec)
 }

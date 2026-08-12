@@ -1,6 +1,7 @@
 package sniff
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -340,6 +341,12 @@ func (s *SessionStore) recordFromReqRespExt(req *mitm.Request, respBody, reqBody
 		return nil
 	}
 	rawURL := req.URL.String()
+	respCT := firstHeader(respHeaders, "Content-Type")
+	// 图片响应体以 base64 存储，供前端直接预览
+	respBodyStr := string(respBody)
+	if strings.Contains(strings.ToLower(respCT), "image/") && len(respBody) > 0 {
+		respBodyStr = base64.StdEncoding.EncodeToString(respBody)
+	}
 	rec := TrafficRecord{
 		ID:           newID("rec"),
 		Timestamp:    time.Now().Format(time.RFC3339),
@@ -356,9 +363,9 @@ func (s *SessionStore) recordFromReqRespExt(req *mitm.Request, respBody, reqBody
 		StatusCode:   statusCode,
 		StatusText:   statusText,
 		RespHeaders:  respHeaders,
-		RespBody:     string(respBody),
-		RespBodyType: bodyTypeOf(firstHeader(respHeaders, "Content-Type"), respBody),
-		RespContentType: firstHeader(respHeaders, "Content-Type"),
+		RespBody:     respBodyStr,
+		RespBodyType: bodyTypeOf(respCT, respBody),
+		RespContentType: respCT,
 		DurationMs:   int64(time.Since(startTime).Milliseconds()),
 		ProcessName:  "",
 	}
