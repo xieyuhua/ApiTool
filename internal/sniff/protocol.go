@@ -120,6 +120,8 @@ func bodyTypeOf(contentType string, body []byte) string {
 	switch {
 	case ct == "" || len(body) == 0:
 		return "none"
+	case strings.Contains(ct, "image/"):
+		return "image"
 	case strings.Contains(ct, "json"):
 		return "json"
 	case strings.Contains(ct, "x-www-form-urlencoded"):

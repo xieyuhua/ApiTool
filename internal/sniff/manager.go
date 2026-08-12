@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"apitool/internal/bus"
+
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -18,14 +19,14 @@ const (
 
 // Manager 抓包管理器：聚合 CA / 代理 / 会话存储 / 系统代理，对外提供控制面。
 type Manager struct {
-	ca     *caBundle
-	store  *SessionStore
-	proxy  *proxy
-	session *Session
-	bus    bus.Bus
-	caDir  string
-	filter Filter
-	status Status
+	ca       *caBundle
+	store    *SessionStore
+	proxy    *proxy
+	session  *Session
+	bus      bus.Bus
+	caDir    string
+	filter   Filter
+	status   Status
 	sysProxy bool // 是否随抓包自动设置系统代理
 }
 
@@ -40,6 +41,22 @@ type Status struct {
 }
 
 // Filter 抓包过滤条件（前端设置后回传）。
+// 解密失败错误类型分类
+const (
+	ErrPinning   = "pinning"   // 证书固定
+	ErrUntrusted = "untrusted" // 根证书未受信任
+	ErrTLS       = "tls"       // TLS 握手失败
+	ErrConnect   = "connect"   // 连接目标失败
+	ErrNonHTTP   = "non_http"  // 非 HTTP 连接（仅透传）
+)
+
+// ErrorInfo 解密/连接失败的结构化信息（推送给前端分类展示）。
+type ErrorInfo struct {
+	Type    string `json:"type"`
+	Host    string `json:"host"`
+	Message string `json:"message"`
+}
+
 type Filter struct {
 	Host         string   `json:"host"`         // 按主机名包含匹配（逗号分隔，不区分大小写，空=全部）
 	ExcludeHosts []string `json:"excludeHosts"` // 排除的主机名（不区分大小写）
@@ -64,7 +81,7 @@ func NewManager(caDir string, b bus.Bus) (*Manager, error) {
 		caDir: caDir,
 	}
 	m.status.CAFingerprint = ca.FingerprintSHA1()
-	m.status.CAInstalled = IsCAInstalled()
+	m.status.CAInstalled = IsCAInstalled(ca.FingerprintSHA1())
 	return m, nil
 }
 
@@ -210,6 +227,22 @@ func (m *Manager) ExportCAPath() string {
 	return m.ca.CAPath()
 }
 
+// ImportCA 导入用户提供的根证书（证书 + 私钥 PEM），替换当前 CA 并持久化。
+// 返回新 CA 的指纹。可用于直接复用 Fiddler 等现有根证书。
+func (m *Manager) ImportCA(certPEM, keyPEM string) (string, error) {
+	if m.ca == nil {
+		return "", fmt.Errorf("CA 未初始化")
+	}
+	if err := m.ca.ImportCA([]byte(certPEM), []byte(keyPEM)); err != nil {
+		return "", err
+	}
+	fp := m.ca.FingerprintSHA1()
+	m.status.CAFingerprint = fp
+	m.status.CAInstalled = IsCAInstalled(fp)
+	m.emitStatus()
+	return fp, nil
+}
+
 // runtimeSaveDialog 构造保存对话框选项。
 func runtimeSaveDialog(title string) runtime.SaveDialogOptions {
 	return runtime.SaveDialogOptions{
@@ -233,9 +266,9 @@ func (m *Manager) onRecord(rec TrafficRecord) {
 	}
 }
 
-func (m *Manager) onError(msg string) {
+func (m *Manager) onError(info ErrorInfo) {
 	if m.bus != nil {
-		m.bus.Emit(EventError, msg)
+		m.bus.Emit(EventError, info)
 	}
 }
 

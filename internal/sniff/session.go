@@ -41,6 +41,7 @@ type TrafficRecord struct {
 	RespHeaders []model.KV        `json:"respHeaders"`
 	RespBody    string            `json:"respBody"`
 	RespBodyType string           `json:"respBodyType"`
+	RespContentType string        `json:"respContentType"` // 响应 Content-Type（真实值，用于图片等预览）
 	DurationMs  int64             `json:"durationMs"`
 	ProcessName string            `json:"processName"` // 进程名（尽力而为，Windows 需驱动级，暂留空/Host）
 	Note        string            `json:"note"`
@@ -357,6 +358,7 @@ func (s *SessionStore) recordFromReqRespExt(req *mitm.Request, respBody, reqBody
 		RespHeaders:  respHeaders,
 		RespBody:     string(respBody),
 		RespBodyType: bodyTypeOf(firstHeader(respHeaders, "Content-Type"), respBody),
+		RespContentType: firstHeader(respHeaders, "Content-Type"),
 		DurationMs:   int64(time.Since(startTime).Milliseconds()),
 		ProcessName:  "",
 	}

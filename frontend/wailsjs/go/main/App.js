@@ -522,12 +522,20 @@ export function SniffGetSession(arg1) {
   return window['go']['main']['App']['SniffGetSession'](arg1);
 }
 
+export function SniffImportCA(arg1, arg2) {
+  return window['go']['main']['App']['SniffImportCA'](arg1, arg2);
+}
+
 export function SniffInstallCA() {
   return window['go']['main']['App']['SniffInstallCA']();
 }
 
 export function SniffListSessions() {
   return window['go']['main']['App']['SniffListSessions']();
+}
+
+export function SniffPickCAFile() {
+  return window['go']['main']['App']['SniffPickCAFile']();
 }
 
 export function SniffSetFilter(arg1) {

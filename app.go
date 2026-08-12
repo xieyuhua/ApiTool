@@ -19,7 +19,9 @@ import (
 	"apitool/internal/testing"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -632,6 +634,85 @@ func (a *App) SniffCAPEM() string {
 		return ""
 	}
 	return string(a.sniffMgr.CA().CertPEM())
+}
+
+// SniffImportCA 导入用户提供的根证书（证书 + 私钥 PEM），替换当前 CA。
+// 可直接复用 Fiddler 等现有根证书；返回新 CA 的 SHA1 指纹。
+func (a *App) SniffImportCA(certPEM, keyPEM string) (string, error) {
+	if a.sniffMgr == nil {
+		return "", fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.ImportCA(certPEM, keyPEM)
+}
+
+// SniffPickCAFile 弹出文件选择框让用户选择根证书文件（支持 .cer/.crt/.pem/.pfx 等），
+// 读取并解析其中证书（与私钥，若有），返回给前端预览/确认。DER 二进制证书会自动转 PEM。
+func (a *App) SniffPickCAFile() (map[string]string, error) {
+	if a.sniffMgr == nil {
+		return nil, fmt.Errorf("抓包模块未初始化")
+	}
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择根证书文件（FiddlerRoot.cer 等）",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "证书文件", Pattern: "*.cer;*.crt;*.pem;*.crt;*.der;*.pfx;*.*"},
+			{DisplayName: "所有文件", Pattern: "*.*"},
+		},
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseCAFile(data)
+}
+
+// parseCAFile 从证书文件中提取证书 PEM 与私钥 PEM。
+func parseCAFile(data []byte) (map[string]string, error) {
+	text := strings.TrimSpace(string(data))
+	certPEM := ""
+	keyPEM := ""
+	if strings.Contains(text, "BEGIN") {
+		// PEM 文本：分离证书与私钥 block
+		rest := text
+		for {
+			block, r := pem.Decode([]byte(rest))
+			if block == nil {
+				break
+			}
+			enc := pem.EncodeToMemory(block)
+			switch {
+			case block.Type == "CERTIFICATE":
+				if certPEM == "" {
+					certPEM = string(enc)
+				}
+			case strings.Contains(block.Type, "PRIVATE KEY"):
+				if keyPEM == "" {
+					keyPEM = string(enc)
+				}
+			}
+			rest = string(r)
+		}
+		if certPEM == "" {
+			return nil, fmt.Errorf("文件中未找到 CERTIFICATE 证书块")
+		}
+		return map[string]string{"certPem": certPEM, "keyPem": keyPEM, "path": ""}, nil
+	}
+	// DER 二进制证书（.cer 常见）：转 PEM
+	block, _ := pem.Decode(data)
+	if block == nil {
+		if _, err := x509.ParseCertificate(data); err != nil {
+			return nil, fmt.Errorf("无法解析证书文件（仅支持 PEM / DER 格式）：%v", err)
+		}
+		certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: data}))
+		return map[string]string{"certPem": certPEM, "keyPem": "", "path": ""}, nil
+	}
+	if block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("无法解析证书文件：内容不是证书")
+	}
+	certPEM = string(pem.EncodeToMemory(block))
+	return map[string]string{"certPem": certPEM, "keyPem": keyPEM, "path": ""}, nil
 }
 
 // SniffSetSystemProxy 设置抓包时是否自动切换系统代理。

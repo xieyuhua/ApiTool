@@ -272,9 +272,13 @@ export function SniffGenerateApiFromSession(arg1:string,arg2:Array<string>,arg3:
 
 export function SniffGetSession(arg1:string):Promise<sniff.Session>;
 
+export function SniffImportCA(arg1:string,arg2:string):Promise<string>;
+
 export function SniffInstallCA():Promise<void>;
 
 export function SniffListSessions():Promise<Array<sniff.Session>>;
+
+export function SniffPickCAFile():Promise<Record<string, string>>;
 
 export function SniffSetFilter(arg1:sniff.Filter):Promise<void>;
 

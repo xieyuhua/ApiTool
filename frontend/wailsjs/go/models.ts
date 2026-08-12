@@ -1868,6 +1868,7 @@ export namespace sniff {
 	    respHeaders: model.KV[];
 	    respBody: string;
 	    respBodyType: string;
+	    respContentType: string;
 	    durationMs: number;
 	    processName: string;
 	    note: string;
@@ -1897,6 +1898,7 @@ export namespace sniff {
 	        this.respHeaders = this.convertValues(source["respHeaders"], model.KV);
 	        this.respBody = source["respBody"];
 	        this.respBodyType = source["respBodyType"];
+	        this.respContentType = source["respContentType"];
 	        this.durationMs = source["durationMs"];
 	        this.processName = source["processName"];
 	        this.note = source["note"];

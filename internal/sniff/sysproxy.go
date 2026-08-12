@@ -65,13 +65,38 @@ func InstallCA(certPEM []byte) error {
 	return fmt.Errorf("当前平台不支持自动安装根证书，请手动将 ca.pem 导入系统信任库")
 }
 
-// IsCAInstalled 快速判断根 CA 是否已安装到系统信任库（Windows 用 certutil）。
-func IsCAInstalled() bool {
-	if runtime.GOOS != "windows" {
+// IsCAInstalled 判断指定指纹的根 CA 是否已安装到系统「受信任的根证书颁发机构」。
+// fingerprint 需为冒号分隔的大写 SHA1（如 "AA:BB:...")；为空时返回 false。
+func IsCAInstalled(fingerprint string) bool {
+	if runtime.GOOS != "windows" || fingerprint == "" {
 		return false
 	}
-	// 以指纹匹配：certutil -verifystore Root 输出包含指纹
-	return false // 精确检测交由前端/用户确认；此处保守返回 false，提示可一键安装
+	// 归一化指纹：去除冒号、空格，转小写，用于匹配 certutil 输出
+	want := normalizeFingerprint(fingerprint)
+	out, err := exec.Command("certutil", "-store", "Root").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return containsFingerprint(string(out), want)
+}
+
+// normalizeFingerprint 去除冒号与空白并转小写。
+func normalizeFingerprint(fp string) string {
+	s := strings.ToLower(fp)
+	s = strings.ReplaceAll(s, ":", "")
+	return strings.ReplaceAll(s, " ", "")
+}
+
+// containsFingerprint 在 certutil 输出中查找指纹（可能带空格/冒号/大小写差异）。
+func containsFingerprint(output, want string) bool {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		norm := normalizeFingerprint(line)
+		if norm != "" && strings.Contains(norm, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // parsePEMCert 解析 PEM 证书。

@@ -21,7 +21,7 @@ type proxy struct {
 	store     *SessionStore
 	filter    Filter
 	emit      func(TrafficRecord)
-	errEmit   func(string)
+	errEmit   func(ErrorInfo)
 	sessionID string // 当前活动会话 ID（manager.Start 设置）
 
 	mu        sync.Mutex
@@ -52,7 +52,7 @@ func (p *proxy) finalize(rec *TrafficRecord) {
 
 // newProxy 创建并配置一个 go-mitmproxy 实例。
 // addr 为监听地址（如 "127.0.0.1:8888"）。
-func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filter, emit func(TrafficRecord), errEmit func(string)) (*proxy, error) {
+func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filter, emit func(TrafficRecord), errEmit func(ErrorInfo)) (*proxy, error) {
 	p := &proxy{
 		ca:        caBundle,
 		store:     store,
@@ -213,15 +213,49 @@ func (p *proxy) SSEMessage(f *mitm.Flow) {
 	p.finalize(rec)
 }
 
+// classifyErr 依据错误内容分类解密失败原因。
+func classifyErr(f *mitm.Flow, err error) ErrorInfo {
+	msg := err.Error()
+	info := ErrorInfo{Type: ErrConnect, Message: msg}
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "x509"):
+		// 可能是未信任，也可能是证书固定
+		if strings.Contains(lower, "certificate signed by unknown authority") ||
+			strings.Contains(lower, "unknown authority") ||
+			strings.Contains(lower, "self-signed") {
+			info.Type = ErrUntrusted
+			info.Message = "根证书未受信任（请先安装并信任根证书）：" + msg
+		} else {
+			info.Type = ErrPinning
+			info.Message = "疑似证书固定（Certificate Pinning），该站点/App 拒绝伪造证书，无法解密：" + msg
+		}
+	case strings.Contains(lower, "handshake") || strings.Contains(lower, "tls"):
+		info.Type = ErrTLS
+		info.Message = "TLS 握手失败（可能是证书固定或协议不支持）：" + msg
+	case strings.Contains(lower, "connectex") || strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "no such host") || strings.Contains(lower, "timeout"):
+		info.Type = ErrConnect
+		info.Message = "连接目标失败（网络/端口不通）：" + msg
+	case strings.Contains(lower, "upgrade") || strings.Contains(lower, "websocket"):
+		info.Type = ErrNonHTTP
+		info.Message = "非 HTTP/WebSocket 连接，仅透传未解密：" + msg
+	}
+	if f != nil && f.Request != nil && f.Request.URL != nil {
+		info.Host = f.Request.URL.Host
+	}
+	return info
+}
+
 func (p *proxy) RequestError(f *mitm.Flow, err error) {
-	if p.errEmit != nil && err != nil && strings.Contains(err.Error(), "x509") {
-		p.errEmit("TLS/证书错误，HTTPS 未解密（请确认根证书已安装并信任）：" + err.Error())
+	if p.errEmit != nil && err != nil {
+		p.errEmit(classifyErr(f, err))
 	}
 }
 
 func (p *proxy) HTTPConnectError(f *mitm.Flow, err error) {
 	if p.errEmit != nil && err != nil {
-		p.errEmit("连接错误：" + err.Error())
+		p.errEmit(classifyErr(f, err))
 	}
 }
 
