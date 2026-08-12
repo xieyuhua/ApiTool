@@ -8,6 +8,7 @@ import {share} from '../models';
 import {frontend} from '../models';
 import {plugins} from '../models';
 import {stress} from '../models';
+import {sniff} from '../models';
 import {store} from '../models';
 import {sync} from '../models';
 
@@ -256,6 +257,34 @@ export function ShareTestReport(arg1:string,arg2:string,arg3:string):Promise<str
 export function ShowClipboardWindow():Promise<void>;
 
 export function ShowMainWindow():Promise<void>;
+
+export function SniffCAPEM():Promise<string>;
+
+export function SniffCAPath():Promise<string>;
+
+export function SniffDeleteSession(arg1:string):Promise<void>;
+
+export function SniffExportOpenAPI(arg1:string,arg2:string):Promise<string>;
+
+export function SniffGenerateApiFromRecords(arg1:Array<sniff.TrafficRecord>,arg2:string,arg3:string):Promise<number>;
+
+export function SniffGenerateApiFromSession(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<number>;
+
+export function SniffGetSession(arg1:string):Promise<sniff.Session>;
+
+export function SniffInstallCA():Promise<void>;
+
+export function SniffListSessions():Promise<Array<sniff.Session>>;
+
+export function SniffSetFilter(arg1:sniff.Filter):Promise<void>;
+
+export function SniffSetSystemProxy(arg1:boolean):Promise<void>;
+
+export function SniffStart(arg1:string):Promise<void>;
+
+export function SniffStatus():Promise<sniff.Status>;
+
+export function SniffStop():Promise<void>;
 
 export function StartCaptureServer(arg1:string,arg2:string):Promise<string>;
 

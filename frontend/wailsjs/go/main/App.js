@@ -494,6 +494,62 @@ export function ShowMainWindow() {
   return window['go']['main']['App']['ShowMainWindow']();
 }
 
+export function SniffCAPEM() {
+  return window['go']['main']['App']['SniffCAPEM']();
+}
+
+export function SniffCAPath() {
+  return window['go']['main']['App']['SniffCAPath']();
+}
+
+export function SniffDeleteSession(arg1) {
+  return window['go']['main']['App']['SniffDeleteSession'](arg1);
+}
+
+export function SniffExportOpenAPI(arg1, arg2) {
+  return window['go']['main']['App']['SniffExportOpenAPI'](arg1, arg2);
+}
+
+export function SniffGenerateApiFromRecords(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SniffGenerateApiFromRecords'](arg1, arg2, arg3);
+}
+
+export function SniffGenerateApiFromSession(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SniffGenerateApiFromSession'](arg1, arg2, arg3, arg4);
+}
+
+export function SniffGetSession(arg1) {
+  return window['go']['main']['App']['SniffGetSession'](arg1);
+}
+
+export function SniffInstallCA() {
+  return window['go']['main']['App']['SniffInstallCA']();
+}
+
+export function SniffListSessions() {
+  return window['go']['main']['App']['SniffListSessions']();
+}
+
+export function SniffSetFilter(arg1) {
+  return window['go']['main']['App']['SniffSetFilter'](arg1);
+}
+
+export function SniffSetSystemProxy(arg1) {
+  return window['go']['main']['App']['SniffSetSystemProxy'](arg1);
+}
+
+export function SniffStart(arg1) {
+  return window['go']['main']['App']['SniffStart'](arg1);
+}
+
+export function SniffStatus() {
+  return window['go']['main']['App']['SniffStatus']();
+}
+
+export function SniffStop() {
+  return window['go']['main']['App']['SniffStop']();
+}
+
 export function StartCaptureServer(arg1, arg2) {
   return window['go']['main']['App']['StartCaptureServer'](arg1, arg2);
 }

@@ -12,6 +12,7 @@ import (
 	"apitool/internal/platform"
 	"apitool/internal/plugins"
 	"apitool/internal/share"
+	"apitool/internal/sniff"
 	"apitool/internal/store"
 	"apitool/internal/stress"
 	syncsrv "apitool/internal/sync"
@@ -38,6 +39,7 @@ type App struct {
 	store           *store.Store
 	dataFile        string
 	syncDir         string
+	sniffMgr        *sniff.Manager // MITM 抓包管理器
 	mu              sync.Mutex
 	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
 	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
@@ -100,6 +102,16 @@ func (a *App) startup(ctx context.Context) {
 	go platform.StartGlobalHotkey()
 	// 启动剪贴板后台采集（文本 + 图片）
 	go a.StartClipboardCapture()
+	// 初始化 MITM 抓包管理器（CA 与抓包数据目录）
+	sniffDir := filepath.Join(dataDir, "sniff")
+	_ = os.MkdirAll(sniffDir, 0o755)
+	mgr, err := sniff.NewManager(sniffDir, a)
+	if err != nil {
+		// 非致命：抓包功能不可用，但不影响其它功能
+		fmt.Printf("初始化抓包模块失败: %v\n", err)
+	} else {
+		a.sniffMgr = mgr
+	}
 }
 
 // shutdown 在应用退出时清理资源（停止采集）。托盘由 systray.Quit 自行退出。
@@ -521,6 +533,247 @@ func (a *App) CaptureServerRunning() bool { return capture.Running() }
 
 // CaptureInfo 返回捕获服务信息（地址、端口、Token、条数）。
 func (a *App) CaptureInfo() capture.CaptureServerInfo { return capture.Info() }
+
+// ----------------------------------------------------------------------------
+// MITM 抓包转发层（实现在 internal/sniff）
+// ----------------------------------------------------------------------------
+
+// SniffStatus 返回抓包运行状态（代理地址、CA 指纹、是否已安装）。
+func (a *App) SniffStatus() sniff.Status {
+	if a.sniffMgr == nil {
+		return sniff.Status{Error: "抓包模块未初始化"}
+	}
+	return a.sniffMgr.Status()
+}
+
+// SniffStart 启动抓包（addr 形如 "127.0.0.1:8888"，传 "0" 或空则用默认端口）。
+func (a *App) SniffStart(addr string) error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	if addr == "" || addr == "0" {
+		addr = "127.0.0.1:8888"
+	}
+	return a.sniffMgr.Start(addr)
+}
+
+// SniffStop 停止抓包并还原系统代理。
+func (a *App) SniffStop() error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.Stop()
+}
+
+// SniffSetFilter 设置抓包过滤条件（按 Host / 进程名 / 仅 HTTP）。
+func (a *App) SniffSetFilter(f sniff.Filter) error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	a.sniffMgr.SetFilter(f)
+	return nil
+}
+
+// SniffListSessions 返回抓包会话列表。
+func (a *App) SniffListSessions() []sniff.Session {
+	if a.sniffMgr == nil {
+		return nil
+	}
+	return a.sniffMgr.ListSessions()
+}
+
+// SniffGetSession 返回完整抓包会话（含全部流量记录）。
+func (a *App) SniffGetSession(id string) (*sniff.Session, error) {
+	if a.sniffMgr == nil {
+		return nil, fmt.Errorf("抓包模块未初始化")
+	}
+	sess, ok := a.sniffMgr.GetSession(id)
+	if !ok {
+		return nil, fmt.Errorf("会话不存在")
+	}
+	return sess, nil
+}
+
+// SniffDeleteSession 删除抓包会话。
+func (a *App) SniffDeleteSession(id string) error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.DeleteSession(id)
+}
+
+// SniffExportOpenAPI 将抓包会话导出为 OpenAPI 3.0（弹出保存对话框）。
+func (a *App) SniffExportOpenAPI(id, title string) (string, error) {
+	if a.sniffMgr == nil {
+		return "", fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.ExportOpenAPI(id, title)
+}
+
+// SniffInstallCA 将根 CA 安装到系统信任库（需管理员权限）。
+func (a *App) SniffInstallCA() error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.InstallCA()
+}
+
+// SniffCAPath 返回根 CA 证书文件路径（供用户手动安装）。
+func (a *App) SniffCAPath() string {
+	if a.sniffMgr == nil {
+		return ""
+	}
+	return a.sniffMgr.ExportCAPath()
+}
+
+// SniffCAPEM 返回根 CA 证书 PEM 文本（供前端展示/复制）。
+func (a *App) SniffCAPEM() string {
+	if a.sniffMgr == nil {
+		return ""
+	}
+	return string(a.sniffMgr.CA().CertPEM())
+}
+
+// SniffSetSystemProxy 设置抓包时是否自动切换系统代理。
+// 关闭时仅监听端口，供用户在浏览器/应用中手动配置代理。
+func (a *App) SniffSetSystemProxy(enabled bool) {
+	if a.sniffMgr == nil {
+		return
+	}
+	a.sniffMgr.SetSystemProxyEnabled(enabled)
+}
+
+// SniffGenerateApiFromSession 将抓包会话中选中的流量记录转换为接口草稿，
+// 写入指定项目/目录的接口树，返回写入条数。
+func (a *App) SniffGenerateApiFromSession(sessionID string, recordIDs []string, projectID, dirID string) (int, error) {
+	if a.sniffMgr == nil {
+		return 0, fmt.Errorf("抓包模块未初始化")
+	}
+	if len(recordIDs) == 0 {
+		return 0, fmt.Errorf("请至少选择一条流量记录")
+	}
+	sess, ok := a.sniffMgr.GetSession(sessionID)
+	if !ok {
+		return 0, fmt.Errorf("抓包会话不存在")
+	}
+	idSet := map[string]bool{}
+	for _, id := range recordIDs {
+		idSet[id] = true
+	}
+	var sel []sniff.TrafficRecord
+	for _, r := range sess.Records {
+		if idSet[r.ID] && r.Method != "" {
+			sel = append(sel, r)
+		}
+	}
+	if len(sel) == 0 {
+		return 0, fmt.Errorf("所选记录中无有效 HTTP(S) 流量")
+	}
+
+	data := a.store.GetData()
+	idx := -1
+	for i, p := range data.Projects {
+		if p.ID == projectID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		idx = store.ActiveProjectIndex(data)
+	}
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	// 去重：同批次内相同 Method+URL 只保留一条；且与接口树已有接口去重
+	seen := map[string]bool{}
+	existing := data.Projects[idx].Apis
+	added := 0
+	for _, r := range sel {
+		api := sniff.RecordToApi(r, dirID)
+		key := strings.ToLower(api.Method) + "|" + strings.TrimSuffix(strings.TrimSpace(api.URL), "/")
+		if seen[key] || apiExists(existing, api) {
+			continue
+		}
+		seen[key] = true
+		data.Projects[idx].Apis = append(data.Projects[idx].Apis, api)
+		added++
+	}
+	if added == 0 {
+		return 0, fmt.Errorf("所选流量均已存在相同接口，无新增")
+	}
+	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.store.SaveData(data); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+// SniffGenerateApiFromRecords 将前端选中的实时流量记录（自带完整数据）批量转换为接口定义，
+// 写入指定项目/目录的接口树，返回写入条数。不依赖会话存储。
+func (a *App) SniffGenerateApiFromRecords(records []sniff.TrafficRecord, projectID, dirID string) (int, error) {
+	if len(records) == 0 {
+		return 0, fmt.Errorf("请至少选择一条流量记录")
+	}
+	var valid []sniff.TrafficRecord
+	for _, r := range records {
+		if r.Method != "" && r.URL != "" {
+			valid = append(valid, r)
+		}
+	}
+	if len(valid) == 0 {
+		return 0, fmt.Errorf("所选记录中无有效 HTTP(S) 流量")
+	}
+
+	data := a.store.GetData()
+	idx := -1
+	for i, p := range data.Projects {
+		if p.ID == projectID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		idx = store.ActiveProjectIndex(data)
+	}
+	if idx < 0 {
+		return 0, fmt.Errorf("没有可用的项目")
+	}
+	// 去重：同批次内相同 Method+URL 只保留一条；且与接口树已有接口去重
+	seen := map[string]bool{}
+	existing := data.Projects[idx].Apis
+	added := 0
+	for _, r := range valid {
+		api := sniff.RecordToApi(r, dirID)
+		key := strings.ToLower(api.Method) + "|" + strings.TrimSuffix(strings.TrimSpace(api.URL), "/")
+		if seen[key] || apiExists(existing, api) {
+			continue
+		}
+		seen[key] = true
+		data.Projects[idx].Apis = append(data.Projects[idx].Apis, api)
+		added++
+	}
+	if added == 0 {
+		return 0, fmt.Errorf("所选流量均已存在相同接口，无新增")
+	}
+	data.Projects[idx].UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.store.SaveData(data); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+// apiExists 判断接口树中是否已存在相同 Method+URL 的接口。
+func apiExists(apis []model.ApiInfo, target model.ApiInfo) bool {
+	tu := strings.TrimSuffix(strings.TrimSpace(strings.ToLower(target.URL)), "/")
+	tm := strings.ToLower(target.Method)
+	for _, a := range apis {
+		if strings.EqualFold(a.Method, tm) &&
+			strings.TrimSuffix(strings.TrimSpace(strings.ToLower(a.URL)), "/") == tu {
+			return true
+		}
+	}
+	return false
+}
 
 // GetCapturedRequests 返回全部已捕获请求（供前端展示）。
 func (a *App) GetCapturedRequests() []capture.CapturedRequest { return capture.GetRequests() }

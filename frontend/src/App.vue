@@ -13,6 +13,7 @@ import TestCenter from './components/test/TestCenter.vue'
 import EnvManager from './components/common/EnvManager.vue'
 import CommonParams from './components/common/CommonParams.vue'
 import CapturePanel from './components/common/CapturePanel.vue'
+import MitmPanel from './components/mitm/MitmPanel.vue'
 import Tools from './components/tools/Tools.vue'
 import AgentChat from './components/agent/AgentChat.vue'
 import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
@@ -122,6 +123,7 @@ const navs = [
   { key: 'docs', label: '文档中心', icon: '📄' },
   { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
+  { key: 'mitm', label: '网络抓包', icon: '🕵' },
   { key: 'tools', label: '工具', icon: '🔧' },
   { key: 'agent', label: 'AI Agent', icon: '🤖' },
   { key: 'settings', label: '设置', icon: '⚙' },
@@ -180,6 +182,7 @@ const navs = [
     <DocCenter v-else-if="store.view === 'docs'" />
     <TestCenter v-else-if="store.view === 'testing'" />
     <CapturePanel v-else-if="store.view === 'capture'" />
+    <MitmPanel v-else-if="store.view === 'mitm'" />
     <Tools v-else-if="store.view === 'tools'" />
     <AgentChat v-else-if="store.view === 'agent'" />
     <SettingsPanel v-else-if="store.view === 'settings'" />

@@ -1823,6 +1823,169 @@ export namespace share {
 
 }
 
+export namespace sniff {
+	
+	export class Filter {
+	    host: string;
+	    excludeHosts: string[];
+	    processName: string;
+	    method: string;
+	    pathKeyword: string;
+	    onlyHttp: boolean;
+	    protocols: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Filter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.host = source["host"];
+	        this.excludeHosts = source["excludeHosts"];
+	        this.processName = source["processName"];
+	        this.method = source["method"];
+	        this.pathKeyword = source["pathKeyword"];
+	        this.onlyHttp = source["onlyHttp"];
+	        this.protocols = source["protocols"];
+	    }
+	}
+	export class TrafficRecord {
+	    id: string;
+	    sessionId: string;
+	    timestamp: string;
+	    protocol: string;
+	    decrypted: boolean;
+	    method: string;
+	    url: string;
+	    host: string;
+	    path: string;
+	    query: model.KV[];
+	    reqHeaders: model.KV[];
+	    reqBody: string;
+	    reqBodyType: string;
+	    statusCode: number;
+	    statusText: string;
+	    respHeaders: model.KV[];
+	    respBody: string;
+	    respBodyType: string;
+	    durationMs: number;
+	    processName: string;
+	    note: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrafficRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.timestamp = source["timestamp"];
+	        this.protocol = source["protocol"];
+	        this.decrypted = source["decrypted"];
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.host = source["host"];
+	        this.path = source["path"];
+	        this.query = this.convertValues(source["query"], model.KV);
+	        this.reqHeaders = this.convertValues(source["reqHeaders"], model.KV);
+	        this.reqBody = source["reqBody"];
+	        this.reqBodyType = source["reqBodyType"];
+	        this.statusCode = source["statusCode"];
+	        this.statusText = source["statusText"];
+	        this.respHeaders = this.convertValues(source["respHeaders"], model.KV);
+	        this.respBody = source["respBody"];
+	        this.respBodyType = source["respBodyType"];
+	        this.durationMs = source["durationMs"];
+	        this.processName = source["processName"];
+	        this.note = source["note"];
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Session {
+	    id: string;
+	    name: string;
+	    startedAt: string;
+	    stoppedAt: string;
+	    proxyAddr: string;
+	    records: TrafficRecord[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Session(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.startedAt = source["startedAt"];
+	        this.stoppedAt = source["stoppedAt"];
+	        this.proxyAddr = source["proxyAddr"];
+	        this.records = this.convertValues(source["records"], TrafficRecord);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Status {
+	    running: boolean;
+	    proxyAddr: string;
+	    caInstalled: boolean;
+	    caFingerprint: string;
+	    systemProxy: boolean;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.proxyAddr = source["proxyAddr"];
+	        this.caInstalled = source["caInstalled"];
+	        this.caFingerprint = source["caFingerprint"];
+	        this.systemProxy = source["systemProxy"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
 export namespace store {
 	
 	export class Store {
