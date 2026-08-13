@@ -6,6 +6,9 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "build:windows": {
+    "ldflags": "-H windowsgui"
+  },
   "author": {
     "name": "xieyuhua",
     "email": "1130107545@qq.com"

@@ -100,13 +100,20 @@ function startResize(e) {
   window.addEventListener('mouseup', stopResize)
   e.preventDefault()
 }
-function onResize(e) {
-  if (!resizing) return
-  let w = e.clientX - NAV_W
+let lastX = 0
+let rafId = null
+function applySB() {
+  rafId = null
+  let w = lastX - NAV_W
   if (w < MIN_W) w = MIN_W
   if (w > MAX_W) w = MAX_W
   sidebarWidth.value = w
   localStorage.setItem('sb-width', String(w))
+}
+function onResize(e) {
+  if (!resizing) return
+  lastX = e.clientX
+  if (rafId == null) rafId = requestAnimationFrame(applySB)
 }
 function stopResize() {
   resizing = false
@@ -114,6 +121,7 @@ function stopResize() {
   document.body.style.userSelect = ''
   window.removeEventListener('mousemove', onResize)
   window.removeEventListener('mouseup', stopResize)
+  if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
 }
 onBeforeUnmount(stopResize)
 

@@ -7,7 +7,18 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 )
+
+// hiddenCmd 构造一个在 Windows 上不弹出控制台窗口的命令。
+// 抓包启动/停止时会调用 reg/certutil，若不隐藏会闪现黑窗口。
+func hiddenCmd(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	}
+	return cmd
+}
 
 // SetSystemProxy 将本机系统 HTTP/HTTPS 代理指向 addr（格式 host:port）。
 // 采用当前用户 Internet Settings 注册表（多数应用与 WinHTTP 共享感知）。
@@ -27,7 +38,7 @@ func SetSystemProxy(addr string) error {
 		{"reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "00000001", "/f"},
 	}
 	for _, c := range cmds {
-		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
+		if out, err := hiddenCmd(c[0], c[1:]...).CombinedOutput(); err != nil {
 			return fmt.Errorf("设置系统代理失败: %s: %v", string(out), err)
 		}
 	}
@@ -39,7 +50,7 @@ func ClearSystemProxy() error {
 	if runtime.GOOS != "windows" {
 		return nil
 	}
-	out, err := exec.Command("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "00000000", "/f").CombinedOutput()
+	out, err := hiddenCmd("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "00000000", "/f").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("关闭系统代理失败: %s: %v", string(out), err)
 	}
@@ -56,7 +67,7 @@ func InstallCA(certPEM []byte) error {
 			return err
 		}
 		defer removeTemp(tmp)
-		out, err := exec.Command("certutil", "-addstore", "-f", "Root", tmp).CombinedOutput()
+		out, err := hiddenCmd("certutil", "-addstore", "-f", "Root", tmp).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("安装根证书失败（需管理员运行）: %s: %v", strings.TrimSpace(string(out)), err)
 		}
@@ -73,7 +84,7 @@ func IsCAInstalled(fingerprint string) bool {
 	}
 	// 归一化指纹：去除冒号、空格，转小写，用于匹配 certutil 输出
 	want := normalizeFingerprint(fingerprint)
-	out, err := exec.Command("certutil", "-store", "Root").CombinedOutput()
+	out, err := hiddenCmd("certutil", "-store", "Root").CombinedOutput()
 	if err != nil {
 		return false
 	}

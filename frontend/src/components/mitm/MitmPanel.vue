@@ -534,8 +534,14 @@ let pendingRecords = [] // 待合并到 liveRecords 的记录
 let flushRaf = null // rAF 句柄
 
 // 合并缓冲中的记录到 liveRecords，并限制列表长度（保留最新）。
+// 拖动分隔条（resizing）期间暂停合并，避免拖拽重渲染与抓包数据刷新叠加造成卡顿。
 function flushRecords() {
   flushRaf = null
+  if (resizing) {
+    // 延迟到下一个空闲帧再尝试，松手后会立即 flush
+    if (flushRaf == null) flushRaf = requestAnimationFrame(flushRecords)
+    return
+  }
   const batch = pendingRecords
   pendingRecords = []
   if (!batch.length) return
@@ -869,6 +875,20 @@ async function autoImport(records) {
 // ---- 左右宽度拖拽 ----
 const leftWidth = ref(48)
 let resizing = false
+let lastClientX = 0
+let resizeRaf = null
+
+function applyResize() {
+  resizeRaf = null
+  const body = document.querySelector('.mitm-body')
+  if (!body) return
+  const rect = body.getBoundingClientRect()
+  const total = rect.width
+  if (!total) return
+  const pct = ((lastClientX - rect.left) / total) * 100
+  // 最大不超过一半（50%），最小 25%，避免过大/过小
+  leftWidth.value = Math.min(50, Math.max(25, pct))
+}
 
 function startResize(e) {
   resizing = true
@@ -878,16 +898,12 @@ function startResize(e) {
   e.preventDefault()
 }
 
+// 用 rAF 节流：仅记录最新鼠标位置，每帧最多更新一次宽度，
+// 避免每次 mousemove 同步触发整列表重渲染导致拖拽卡顿。
 function onResize(e) {
   if (!resizing) return
-  const body = document.querySelector('.mitm-body')
-  if (!body) return
-  const rect = body.getBoundingClientRect()
-  const total = rect.width
-  if (!total) return
-  const pct = ((e.clientX - rect.left) / total) * 100
-  // 最大不超过一半（50%），最小 25%，避免过大/过小
-  leftWidth.value = Math.min(50, Math.max(25, pct))
+  lastClientX = e.clientX
+  if (resizeRaf == null) resizeRaf = requestAnimationFrame(applyResize)
 }
 
 function stopResize() {
@@ -895,6 +911,10 @@ function stopResize() {
   document.body.classList.remove('resizing')
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+  if (resizeRaf != null) { cancelAnimationFrame(resizeRaf); resizeRaf = null }
+  // 拖拽结束：立即把最后位置应用到宽度，并冲刷暂停的实时流量
+  applyResize()
+  if (flushRaf == null && pendingRecords.length) flushRaf = requestAnimationFrame(flushRecords)
 }
 
 function kvToText(kvs) {
@@ -1000,8 +1020,8 @@ async function copyProxyAddr() {
 .mitm-title .sub { color: #86909c; font-size: 12px; margin-left: 8px; }
 .mitm-actions { display: flex; gap: 8px; align-items: center; }
 .mitm-body { display: flex; gap: 4px; flex: 1; min-height: 0; overflow: hidden; }
-.mitm-left { flex: 0 0 auto; min-width: 300px; max-width: 50%; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: width .08s ease; }
-.mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid #e5e6eb; padding-left: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mitm-left { flex: 0 0 auto; min-width: 300px; max-width: 50%; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: width .08s ease; contain: layout style; }
+.mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid #e5e6eb; padding-left: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: layout style; }
 .mitm-right .detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
 .resize-bar { width: 6px; cursor: col-resize; background: transparent; flex-shrink: 0; border-radius: 3px; transition: background .15s; }
 .resize-bar:hover, .mitm-body.resizing .resize-bar { background: #165dff; }
@@ -1011,7 +1031,7 @@ async function copyProxyAddr() {
 .filter-row { display: flex; align-items: center; gap: 8px; }
 .filter-row .fl { font-size: 12px; color: #4e5969; width: 180px; }
 .traffic-head, .sess-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; }
-.traffic-list { flex: 1; overflow: auto; border: 1px solid #e5e6eb; border-radius: 8px; min-height: 120px; }
+.traffic-list { flex: 1; overflow: auto; border: 1px solid #e5e6eb; border-radius: 8px; min-height: 120px; contain: layout style paint; }
 .traffic-item { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f2f3f5; cursor: pointer; font-size: 13px; }
 .traffic-item:hover { background: #f7f8fa; }
 .traffic-item.active { background: #e8f3ff; }
