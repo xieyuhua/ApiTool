@@ -84,6 +84,9 @@ var (
 	captureSrv   *http.Server
 	captureMu    sync.Mutex
 	capturedList []*CapturedRequest
+	// capturedIdx 以 "method\x00url" 为键记录在 capturedList 中的下标，用于 O(1) 去重，
+	// 避免列表增长后 appendCaptured 全量线性扫描带来的 O(n²) 累积开销。
+	capturedIdx  map[string]int
 	captureToken string
 )
 
@@ -232,14 +235,18 @@ func appendCaptured(c CapturedRequest, captureStatic bool, blacklist []string) {
 	}
 	c.Method = strings.ToUpper(c.Method)
 	captureMu.Lock()
-	// 去重：同一 (method+url) 仅保留最新一条，避免重复刷新页面堆积大量记录
-	for i, old := range capturedList {
-		if old.Method == c.Method && old.URL == c.URL {
-			capturedList[i] = &c
-			captureMu.Unlock()
-			return
-		}
+	// 去重：同一 (method+url) 仅保留最新一条，避免重复刷新页面堆积大量记录。
+	// 通过 capturedIdx 索引 O(1) 定位，避免线性扫描。
+	key := c.Method + "\x00" + c.URL
+	if i, ok := capturedIdx[key]; ok {
+		capturedList[i] = &c
+		captureMu.Unlock()
+		return
 	}
+	if capturedIdx == nil {
+		capturedIdx = make(map[string]int)
+	}
+	capturedIdx[key] = len(capturedList)
 	capturedList = append(capturedList, &c)
 	captureMu.Unlock()
 }
@@ -260,6 +267,7 @@ func Clear() {
 	captureMu.Lock()
 	defer captureMu.Unlock()
 	capturedList = nil
+	capturedIdx = nil
 }
 
 func captureCORS(next http.Handler, token string) http.Handler {

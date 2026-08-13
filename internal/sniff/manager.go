@@ -260,9 +260,9 @@ func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-func (m *Manager) onRecord(rec TrafficRecord) {
-	if m.bus != nil {
-		m.bus.Emit(EventRecord, rec)
+func (m *Manager) onRecord(records []TrafficRecord) {
+	if m.bus != nil && len(records) > 0 {
+		m.bus.Emit(EventRecord, records)
 	}
 }
 

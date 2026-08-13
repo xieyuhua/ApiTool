@@ -139,9 +139,9 @@
               v-for="r in filteredRecords"
               :key="r.id"
               class="traffic-item"
-              :class="{ active: selected && selected.id === r.id, checked: selectedIds.includes(r.id) }"
+              :class="{ active: selected && selected.id === r.id, checked: selectedIdSet.has(r.id) }"
               @click="selectRecord(r)">
-              <el-checkbox size="small" :model-value="selectedIds.includes(r.id)" @click.stop
+              <el-checkbox size="small" :model-value="selectedIdSet.has(r.id)" @click.stop
                 @change="(v) => toggleSelect(r.id, v)" />
               <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
               <span class="method" v-if="r.method">{{ r.method }}</span>
@@ -150,34 +150,22 @@
             </div>
           </template>
 
-          <!-- 按 host 分组模式 -->
+          <!-- 分组模式：Charles 风格分层树（host → 目录 → 请求），默认折叠 -->
           <template v-else>
-            <div v-for="g in groupedRecords" :key="g.key" class="grp">
-              <div class="grp-head" @click="toggleGroup(g.key)">
-                <span class="grp-arrow" :class="{ open: !g.collapsed }">▶</span>
-                <span class="grp-host">{{ g.host || '(未知)' }}</span>
-                <span class="grp-count">{{ g.records.length }}</span>
-                <span class="grp-check" @click.stop>
-                  <el-checkbox size="small" :model-value="g.allChecked" :indeterminate="g.someChecked"
-                    @change="(v) => toggleGroupSelect(g, v)" />
-                </span>
-              </div>
-              <template v-if="!g.collapsed">
-                <div
-                  v-for="r in g.records"
-                  :key="r.id"
-                  class="traffic-item grp-item"
-                  :class="{ active: selected && selected.id === r.id, checked: selectedIds.includes(r.id) }"
-                  @click="selectRecord(r)">
-                  <el-checkbox size="small" :model-value="selectedIds.includes(r.id)" @click.stop
-                    @change="(v) => toggleSelect(r.id, v)" />
-                  <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
-                  <span class="method" v-if="r.method">{{ r.method }}</span>
-                  <span class="url" :title="r.url">{{ r.url }}</span>
-                  <span class="status" v-if="r.statusCode">{{ r.statusCode }}</span>
-                </div>
-              </template>
-            </div>
+            <div v-if="!groupedRecords.length" class="empty">暂无流量</div>
+            <GroupTreeNode
+              v-for="g in groupedRecords"
+              :key="g.key"
+              :node="g"
+              :expanded="expandedKeys.has(g.key)"
+              :expanded-set="expandedKeys"
+              :selected="selected"
+              :selected-set="selectedIdSet"
+              @toggle="toggleGroup"
+              @select-node="onGroupSelectNode"
+              @select-rec="selectRecord"
+              @select-rec-toggle="onSelectRecToggle"
+            />
           </template>
         </div>
       </div>
@@ -335,6 +323,7 @@ import {
 } from '../../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { store, reloadStore } from '../../store'
+import GroupTreeNode from './GroupTreeNode.vue'
 
 const status = reactive({ running: false, proxyAddr: '', caInstalled: false, caFingerprint: '', systemProxy: false, error: '' })
 const proxyAddr = ref('127.0.0.1:8888')
@@ -347,24 +336,42 @@ const selectedIds = ref([])
 const detailTab = ref('overview')
 const liveFilter = ref('')
 const viewMode = ref('list') // list / group
-const collapsedHosts = ref(new Set())
+// 分组模式下记录用户手动展开的节点 key（host 或目录），默认全部折叠
+const expandedKeys = ref(new Set())
 const onlyErr = ref(false) // 仅查看有解密失败记录的连接
 const errTypeFilter = ref('') // 按错误类型筛选（pinning/untrusted/tls/connect/non_http，空=全部）
 const errHostsByType = ref({}) // { type: Set<host> } 按类型收集解密失败 host
 
-// 实时流量窗口内模糊过滤（host/url/方法/仅异常/按类型）
+// selectedIds 对应的 Set 缓存，供列表/分组渲染 O(1) 判断是否勾选，避免大量 includes 数组扫描
+const selectedIdSet = computed(() => new Set(selectedIds.value))
+
+// 实时流量窗口内过滤（协议勾选/host/url/方法/仅异常/按类型）。
+// 协议勾选在本地实时生效：勾选哪些协议就显示哪些，空=全部。
 const filteredRecords = computed(() => {
   const kw = liveFilter.value.trim().toLowerCase()
   const only = onlyErr.value
   const type = errTypeFilter.value
-  return liveRecords.value.filter(r => {
+  const protocols = filterProtocols.value
+  const records = liveRecords.value
+  const errByType = errHostsByType.value
+  // 无任何过滤条件时直接返回，避免不必要的遍历
+  if (!kw && !only && protocols.length === 0) return records
+  return records.filter(r => {
+    // 协议过滤
+    if (protocols.length > 0) {
+      const prot = (r.protocol || '').toLowerCase()
+      if (!protocols.includes(prot)) return false
+    }
+    // 仅异常 + 错误类型过滤
     if (only && r.host) {
-      // 按类型筛选
       if (type) {
-        const hosts = errHostsByType.value[type]
+        const hosts = errByType[type]
         if (!hosts || !hosts.has(r.host)) return false
       } else {
-        const any = Object.values(errHostsByType.value).some(s => s && s.has(r.host))
+        let any = false
+        for (const k in errByType) {
+          if (errByType[k] && errByType[k].has(r.host)) { any = true; break }
+        }
         if (!any) return false
       }
     }
@@ -375,56 +382,113 @@ const filteredRecords = computed(() => {
   })
 })
 
-// 按 URL 路径分组展示（host + 路径第一段）
-function groupKeyOf(r) {
+// ---- Charles 风格分组树 ----
+// 结构：host → 目录（按 URL 路径段分层）→ 请求。默认全部折叠，手动展开。
+// 节点 key 规则：host 节点 "h|<host>"；目录节点 "h|<host>|<path>"；请求叶子就是记录本身。
+
+// 从记录解析 host 与路径分段（不含 query）。
+function pathSegsOf(r) {
   const host = r.host || '(未知)'
-  let seg = ''
-  if (r.path) {
-    const p = r.path.split('/').filter(Boolean)
-    if (p.length) seg = '/' + p[0]
-  } else if (r.url) {
+  if (r.path) return { host, segs: r.path.split('/').filter(Boolean) }
+  if (r.url) {
     try {
       const u = new URL(r.url)
-      const p = u.pathname.split('/').filter(Boolean)
-      if (p.length) seg = '/' + p[0]
+      return { host, segs: u.pathname.split('/').filter(Boolean) }
     } catch (e) { /* ignore */ }
   }
-  return { host, seg }
+  return { host, segs: [] }
 }
 
+// 构建多级分组树。返回 top-level 节点数组。
 const groupedRecords = computed(() => {
-  const map = {}
-  filteredRecords.value.forEach(r => {
-    const gk = groupKeyOf(r)
-    const key = gk.host + gk.seg
-    const label = gk.seg ? gk.host + gk.seg : gk.host
-    if (!map[key]) map[key] = { host: label, seg: gk.seg, key, records: [], collapsed: false }
-    map[key].records.push(r)
-  })
-  const groups = Object.values(map)
-  groups.forEach(g => {
-    g.collapsed = collapsedHosts.value.has(g.key)
-    const set = new Set(selectedIds.value)
-    const ids = g.records.map(x => x.id)
-    g.allChecked = ids.every(id => set.has(id))
-    g.someChecked = ids.some(id => set.has(id)) && !g.allChecked
-  })
-  return groups
+  const set = selectedIdSet.value
+  const hostMap = {} // host -> 该 host 的目录树根
+  // nodeIndex: "host\x00fullPath" -> 目录节点，O(1) 定位避免逐级 find 查找
+  const nodeIndex = {}
+
+  for (const r of filteredRecords.value) {
+    const { host, segs } = pathSegsOf(r)
+    let hostNode = hostMap[host]
+    if (!hostNode) {
+      hostNode = { key: 'h|' + host, host, name: host, type: 'host', level: 0, records: [], children: [] }
+      hostMap[host] = hostNode
+    }
+    // 沿路径段逐级下钻（用 nodeIndex 直接命中目录节点），创建缺失的目录节点
+    let cur = hostNode
+    let fullPath = ''
+    let level = 0
+    for (const seg of segs) {
+      fullPath += '/' + seg
+      level += 1
+      const idxKey = host + '\x00' + fullPath
+      let node = nodeIndex[idxKey]
+      if (!node) {
+        node = { key: 'h|' + host + fullPath, host, seg, name: seg, type: 'dir', level, records: [], children: [] }
+        nodeIndex[idxKey] = node
+        cur.children.push(node)
+      }
+      cur = node
+    }
+    // 到达目录后，请求记录挂到该目录（或 host）下
+    cur.records.push(r)
+  }
+
+  // 计算每个节点的展开态与勾选态
+  const setState = (node) => {
+    // 勾选态：根据自身 records 与子节点推导
+    let all = node.records.length > 0
+    let some = false
+    for (const rec of node.records) {
+      if (set.has(rec.id)) some = true
+      else all = false
+    }
+    for (const child of node.children) {
+      setState(child)
+      if (child.allChecked) some = true
+      else all = false
+      if (child.someChecked) some = true
+    }
+    node.allChecked = all && (node.records.length > 0 || node.children.length > 0)
+    node.someChecked = some && !node.allChecked
+  }
+
+  const roots = Object.values(hostMap)
+  for (const root of roots) setState(root)
+  return roots
 })
 
+// 展开/折叠节点
 function toggleGroup(key) {
-  const s = new Set(collapsedHosts.value)
+  const s = new Set(expandedKeys.value)
   if (s.has(key)) s.delete(key); else s.add(key)
-  collapsedHosts.value = s
+  expandedKeys.value = s
 }
 
-function toggleGroupSelect(g, val) {
+// 收集节点下所有请求 id（含子目录）
+function collectRecordIds(node, acc) {
+  for (const rec of node.records) acc.push(rec.id)
+  for (const child of node.children) collectRecordIds(child, acc)
+}
+
+// 勾选/取消勾选整个 host 或目录（含其下所有请求）
+function toggleGroupSelect(node, val) {
   const set = new Set(selectedIds.value)
-  g.records.forEach(r => {
-    if (val) set.add(r.id); else set.delete(r.id)
-  })
+  const ids = []
+  collectRecordIds(node, ids)
+  ids.forEach(id => { if (val) set.add(id); else set.delete(id) })
   selectedIds.value = Array.from(set)
 }
+
+// 从 GroupTreeNode 冒泡的节点勾选事件：payload = { node, val }
+function onGroupSelectNode(payload) {
+  if (payload) toggleGroupSelect(payload.node, payload.val)
+}
+
+// 从 GroupTreeNode 冒泡的请求勾选事件：payload = { id, val }
+function onSelectRecToggle(payload) {
+  if (payload) toggleSelect(payload.id, payload.val)
+}
+
 const sessions = ref([])
 const caDialog = ref(false)
 const caPem = ref('')
@@ -462,6 +526,44 @@ const projectDirOptions = computed(() => {
 let recOff = null
 let statusOff = null
 let errOff = null
+
+// ---- 实时记录批量接收 + 限流渲染 ----
+// 后端按 40ms 窗口批量推送，前端再做一次 rAF 合并，避免高频 push 触发逐条重渲染。
+const MAX_LIVE = 1000 // 实时列表最多保留条数，防止 DOM 无限增长导致卡顿
+let pendingRecords = [] // 待合并到 liveRecords 的记录
+let flushRaf = null // rAF 句柄
+
+// 合并缓冲中的记录到 liveRecords，并限制列表长度（保留最新）。
+function flushRecords() {
+  flushRaf = null
+  const batch = pendingRecords
+  pendingRecords = []
+  if (!batch.length) return
+  const cur = liveRecords.value
+  // 仅当列表达到上限时才需要裁剪，避免不必要的数组重建
+  if (cur.length + batch.length > MAX_LIVE) {
+    liveRecords.value = cur.concat(batch).slice(-MAX_LIVE)
+  } else {
+    liveRecords.value = cur.concat(batch)
+  }
+  // 自动生成文档：批量静默导入有效 HTTP 流量
+  if (autoDoc.value) {
+    const valid = batch.filter(r => r.method && r.url)
+    if (valid.length) autoImport(valid)
+  }
+}
+
+// 记录到达：先入缓冲，再由 rAF 统一合并渲染（天然限流）。
+function onRecords(raw) {
+  const batch = Array.isArray(raw) ? raw : [raw]
+  if (!batch.length) return
+  for (const r of batch) {
+    if (r && r.id) pendingRecords.push(r)
+  }
+  if (flushRaf == null) {
+    flushRaf = requestAnimationFrame(flushRecords)
+  }
+}
 
 const errorList = ref([])
 function nowStr() {
@@ -538,13 +640,7 @@ onMounted(async () => {
     sysProxy.value = !!s.systemProxy
   } catch (e) { /* ignore */ }
   try { sessions.value = await SniffListSessions() } catch (e) {}
-  recOff = EventsOn('sniff:record', (rec) => {
-    liveRecords.value.push(rec)
-    // 自动生成：勾选了「自动生成文档」且为有效 HTTP 流量时自动导入当前项目
-    if (autoDoc.value && rec.method && rec.url) {
-      autoImport([rec])
-    }
-  })
+  recOff = EventsOn('sniff:record', onRecords)
   statusOff = EventsOn('sniff:status', (s) => { Object.assign(status, s); sysProxy.value = !!s.systemProxy })
   errOff = EventsOn('sniff:error', (info) => {
     const obj = typeof info === 'string' ? { type: 'connect', host: '', message: info } : info
@@ -564,6 +660,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (flushRaf != null) {
+    cancelAnimationFrame(flushRaf)
+    flushRaf = null
+  }
+  pendingRecords = []
   if (recOff) EventsOff('sniff:record', recOff)
   if (statusOff) EventsOff('sniff:status', statusOff)
   if (errOff) EventsOff('sniff:error', errOff)
@@ -675,24 +776,26 @@ async function doImportCA() {
 
 function selectRecord(r) { selected.value = r; detailTab.value = 'overview' }
 function toggleSelect(id, val) {
-  if (val) {
-    if (!selectedIds.value.includes(id)) selectedIds.value.push(id)
-  } else {
-    selectedIds.value = selectedIds.value.filter(x => x !== id)
-  }
+  const set = new Set(selectedIds.value)
+  if (val) set.add(id)
+  else set.delete(id)
+  selectedIds.value = Array.from(set)
 }
 
 function selectAll() {
   // 全选当前过滤后的记录
-  const ids = filteredRecords.value.map(r => r.id)
   const set = new Set(selectedIds.value)
-  ids.forEach(id => set.add(id))
+  filteredRecords.value.forEach(r => set.add(r.id))
   selectedIds.value = Array.from(set)
 }
-function clearLive() { liveRecords.value = []; selected.value = null; selectedIds.value = [] }
+function clearLive() {
+  if (flushRaf != null) { cancelAnimationFrame(flushRaf); flushRaf = null }
+  pendingRecords = []
+  liveRecords.value = []; selected.value = null; selectedIds.value = []
+}
 
 function selectedRecords() {
-  const set = new Set(selectedIds.value)
+  const set = selectedIdSet.value
   return liveRecords.value.filter(r => set.has(r.id))
 }
 
@@ -943,14 +1046,6 @@ async function copyProxyAddr() {
 .mitm-errors .err-host:hover { text-decoration: underline; }
 .mitm-errors .err-body { font-size: 12px; color: #4e5969; word-break: break-all; margin-top: 2px; font-family: monospace; }
 .mitm-errors .err-foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #86909c; padding: 0 4px; }
-.grp { margin-bottom: 2px; }
-.grp-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: #f2f3f5; border-radius: 4px; cursor: pointer; font-size: 13px; }
-.grp-head:hover { background: #e8eaed; }
-.grp-arrow { display: inline-block; font-size: 10px; color: #86909c; transition: transform .15s; }
-.grp-arrow.open { transform: rotate(90deg); }
-.grp-host { flex: 1; font-weight: 600; color: #1d2129; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.grp-count { color: #86909c; font-size: 12px; }
-.grp-check { display: flex; align-items: center; }
 .grp-item { padding-left: 22px; }
 .traffic-head .th-actions .el-radio-group { margin-right: 4px; }
 .mitm-guide { margin: 6px 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.7; }
