@@ -1825,6 +1825,22 @@ export namespace share {
 
 export namespace sniff {
 	
+	export class ErrorInfo {
+	    type: string;
+	    host: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ErrorInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.host = source["host"];
+	        this.message = source["message"];
+	    }
+	}
 	export class Filter {
 	    host: string;
 	    excludeHosts: string[];
@@ -1930,6 +1946,7 @@ export namespace sniff {
 	    stoppedAt: string;
 	    proxyAddr: string;
 	    records: TrafficRecord[];
+	    errors: ErrorInfo[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
@@ -1943,6 +1960,7 @@ export namespace sniff {
 	        this.stoppedAt = source["stoppedAt"];
 	        this.proxyAddr = source["proxyAddr"];
 	        this.records = this.convertValues(source["records"], TrafficRecord);
+	        this.errors = this.convertValues(source["errors"], ErrorInfo);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1966,10 +1984,13 @@ export namespace sniff {
 	export class Status {
 	    running: boolean;
 	    proxyAddr: string;
+	    certURL: string;
+	    localCertURL: string;
 	    caInstalled: boolean;
 	    caFingerprint: string;
 	    systemProxy: boolean;
 	    error: string;
+	    activeSessionId: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
@@ -1979,10 +2000,13 @@ export namespace sniff {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.running = source["running"];
 	        this.proxyAddr = source["proxyAddr"];
+	        this.certURL = source["certURL"];
+	        this.localCertURL = source["localCertURL"];
 	        this.caInstalled = source["caInstalled"];
 	        this.caFingerprint = source["caFingerprint"];
 	        this.systemProxy = source["systemProxy"];
 	        this.error = source["error"];
+	        this.activeSessionId = source["activeSessionId"];
 	    }
 	}
 

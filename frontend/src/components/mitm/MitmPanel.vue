@@ -14,7 +14,8 @@
           <el-button type="success" @click="startSniff" :loading="starting">开始抓包</el-button>
         </template>
         <template v-else>
-          <el-tag type="success" effect="dark">抓包中 · {{ status.proxyAddr }}</el-tag>
+          <el-tag type="success" effect="dark" class="addr-tag" title="点击展开/收起手机证书下载信息"
+            @click="toggleCert">抓包中 · {{ status.proxyAddr }}（点击看手机证书）</el-tag>
           <el-tag v-if="status.systemProxy" type="info">系统代理已开</el-tag>
           <el-tag v-else type="warning">仅监听端口</el-tag>
           <el-button type="primary" plain size="small" @click="copyProxyAddr" title="复制代理地址到剪贴板">复制代理地址</el-button>
@@ -25,6 +26,8 @@
         </el-button>
         <el-button @click="openCADialog">查看证书</el-button>
         <el-button @click="openImportCADialog">导入证书</el-button>
+        <el-button @click="openSessions">抓包会话</el-button>
+        <el-button @click="openErrors">解密失败日志<span v-if="errCount > 0" class="err-badge">{{ errCount }}</span></el-button>
       </div>
     </div>
 
@@ -35,6 +38,36 @@
       show-icon
       title="HTTPS 解密需安装根证书"
       description="点击右上角「安装根证书」将 ApiTool 自签 CA 加入系统信任库（需以管理员身份运行）。未安装时仅能抓取明文 HTTP，HTTPS 会被降级透传（不解密）。" />
+
+    <!-- 手机抓包：默认隐藏，点击控制栏「抓包中」地址才展开（不挤压下方流量列表） -->
+    <el-collapse-transition>
+      <el-card v-if="certOpen && status.running && status.certURL" class="cert-card" shadow="never">
+        <template #header>
+          <div class="cert-head">
+            <span>📱 手机抓包证书（下载根证书用于手机 HTTPS 抓包）</span>
+            <el-tag size="small" type="success" effect="plain">运行中</el-tag>
+          </div>
+        </template>
+        <div class="cert-body">
+          <div class="cert-row">
+            <span class="cert-label">手机下载</span>
+            <code class="cert-url">{{ status.certURL }}</code>
+            <el-button size="small" text type="primary" @click="copyText(status.certURL)">复制</el-button>
+          </div>
+          <div class="cert-row">
+            <span class="cert-label">本机下载</span>
+            <code class="cert-url">{{ status.localCertURL }}</code>
+            <el-button size="small" text type="primary" @click="copyText(status.localCertURL)">复制</el-button>
+          </div>
+          <ol class="cert-steps">
+            <li>手机与电脑连同一 Wi-Fi，WLAN 里把 HTTP 代理手动指向电脑 IP 与端口。</li>
+            <li>手机浏览器打开上方「手机下载」地址，点击下载并安装根证书。</li>
+            <li>iOS：安装后到「设置 → 通用 → 关于本机 → 证书信任设置」启用完全信任。</li>
+            <li>返回本工具即可实时查看手机 HTTPS 流量。</li>
+          </ol>
+        </div>
+      </el-card>
+    </el-collapse-transition>
 
     <el-alert
       v-if="status.error"
@@ -75,9 +108,9 @@
       </div>
     </div>
 
-    <div class="mitm-body" :class="{ resizing }">
+    <div class="mitm-body">
       <!-- 左：流量列表 + 过滤 -->
-      <div class="mitm-left" :style="{ width: leftWidth + '%' }">
+      <div class="mitm-left">
         <!-- 过滤条件 -->
         <div class="filter-box">
           <div class="filter-row">
@@ -130,6 +163,7 @@
         </div>
         <div class="traffic-list">
           <div v-if="!filteredRecords.length" class="empty">
+            <div class="empty-ico">🛰️</div>
             {{ liveRecords.length ? '没有匹配的流量（可调整过滤条件）' : '暂无流量，开始抓包后系统流量将实时显示在这里' }}
           </div>
 
@@ -140,19 +174,20 @@
               :key="r.id"
               class="traffic-item"
               :class="{ active: selected && selected.id === r.id, checked: selectedIdSet.has(r.id) }"
-              @click="selectRecord(r)">
+              @click="selectRecord(r)"
+              @contextmenu.prevent="openCtxMenu(r, $event)">
               <el-checkbox size="small" :model-value="selectedIdSet.has(r.id)" @click.stop
                 @change="(v) => toggleSelect(r.id, v)" />
               <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
-              <span class="method" v-if="r.method">{{ r.method }}</span>
+              <span class="method" v-if="r.method" :class="'m-' + r.method.toUpperCase()">{{ r.method }}</span>
               <span class="url" :title="r.url">{{ r.url || r.host }}</span>
-              <span class="status" v-if="r.statusCode">{{ r.statusCode }}</span>
+              <span class="status" v-if="r.statusCode" :class="'s-' + String(r.statusCode)[0]">{{ r.statusCode }}</span>
             </div>
           </template>
 
           <!-- 分组模式：Charles 风格分层树（host → 目录 → 请求），默认折叠 -->
           <template v-else>
-            <div v-if="!groupedRecords.length" class="empty">暂无流量</div>
+            <div v-if="!groupedRecords.length" class="empty"><div class="empty-ico">🛰️</div>暂无流量</div>
             <GroupTreeNode
               v-for="g in groupedRecords"
               :key="g.key"
@@ -165,13 +200,11 @@
               @select-node="onGroupSelectNode"
               @select-rec="selectRecord"
               @select-rec-toggle="onSelectRecToggle"
+              @ctx-menu="openCtxMenu"
             />
           </template>
         </div>
       </div>
-
-      <!-- 可拖拽分隔条 -->
-      <div class="resize-bar" title="拖动调整宽度" @mousedown="startResize"></div>
 
       <!-- 右：详情 -->
       <div class="mitm-right">
@@ -209,6 +242,12 @@
               </div>
               <pre class="code">{{ displayBody(selected.reqBody, reqFormatted) }}</pre>
             </el-tab-pane>
+            <el-tab-pane label="原始请求" name="rawreq">
+              <div class="body-toolbar">
+                <el-button link type="primary" size="small" @click="copyText(buildRawHttp(selected))">复制</el-button>
+              </div>
+              <pre class="code">{{ buildRawHttp(selected) }}</pre>
+            </el-tab-pane>
             <el-tab-pane label="响应头" name="resh">
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(kvToText(selected.respHeaders))">复制</el-button>
@@ -237,25 +276,18 @@
       </div>
     </div>
 
-    <!-- 会话与导出 -->
-    <div class="mitm-sessions">
-      <div class="sess-head">
-        <span>抓包会话（已保存 {{ sessions.length }}）</span>
-        <el-button size="small" type="primary" @click="refreshSessions">刷新</el-button>
+    <!-- 右键上下文菜单 -->
+    <div v-if="ctxMenu" class="ctx-mask" @click="closeCtxMenu" @contextmenu.prevent="closeCtxMenu">
+      <div class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop @contextmenu.prevent.stop>
+        <div class="ctx-item" @click="ctxCopyAddr">复制地址</div>
+        <div class="ctx-item" @click="ctxCopyCurl">复制为 curl 命令</div>
+        <div class="ctx-item" @click="ctxCopyRawHttp">复制原始请求</div>
+        <div class="ctx-item" @click="ctxCopyReqHeaders">复制请求头</div>
+        <div class="ctx-item" @click="ctxCopyReqBody">复制请求体</div>
+        <div class="ctx-item" @click="ctxCopyResBody" v-if="ctxMenu.rec.respBody">复制响应体</div>
+        <div class="ctx-sep" v-if="ctxMenu.rec.respBody"></div>
+        <div class="ctx-item" @click="selectRecord(ctxMenu.rec); closeCtxMenu()">查看详情</div>
       </div>
-      <el-table :data="sessions" size="small" empty-text="暂无会话">
-        <el-table-column prop="name" label="会话名" min-width="180" />
-        <el-table-column prop="startedAt" label="开始时间" width="180" />
-        <el-table-column label="记录数" width="90">
-          <template #default="{ row }">{{ (row.records || []).length }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="220">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="exportSession(row.id, row.name)">导出 OpenAPI</el-button>
-            <el-button link type="danger" @click="deleteSession(row.id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
     </div>
 
     <!-- 导入接口树弹窗 -->
@@ -309,6 +341,48 @@
         <el-button size="small" type="primary" :loading="importingCA" @click="doImportCA">导入并应用</el-button>
       </template>
     </el-dialog>
+
+    <!-- 抓包会话管理（从顶部「抓包会话」按钮展开，不占用主界面） -->
+    <el-dialog v-model="sessionsDialog" title="抓包会话" width="720px" @open="refreshSessions">
+      <div class="sess-toolbar">
+        <span class="sess-count">已保存 {{ sessions.length }} 个会话</span>
+        <div>
+          <el-button size="small" type="primary" plain @click="refreshSessions">刷新</el-button>
+          <el-button size="small" type="danger" plain :disabled="!sessions.length"
+            @click="clearAllSessions" title="一键清除全部会话包">一键清除会话包</el-button>
+        </div>
+      </div>
+      <el-table :data="sessions" size="small" empty-text="暂无会话" max-height="360">
+        <el-table-column prop="name" label="会话名" min-width="200" />
+        <el-table-column prop="startedAt" label="开始时间" width="180" />
+        <el-table-column label="记录数" width="90">
+          <template #default="{ row }">{{ (row.records || []).length }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="240">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="exportSession(row.id, row.name)">导出 OpenAPI</el-button>
+            <el-button link type="danger" @click="deleteSession(row.id)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 解密失败日志 -->
+    <el-dialog v-model="errorDialog" title="解密 / 连接失败日志" width="640px" append-to-body>
+      <div v-if="errList.length === 0" class="empty-box">
+        <div class="empty-ico">✅</div>
+        <div>暂无失败记录，所有流量均已正常解密。</div>
+      </div>
+      <div v-else class="err-list">
+        <div v-for="(e, i) in errList" :key="i" class="err-item">
+          <div class="err-row">
+            <span class="err-type" :class="'et-' + e.type">{{ errTypeText(e.type) }}</span>
+            <span v-if="e.host" class="err-host">{{ e.host }}</span>
+          </div>
+          <pre class="err-msg">{{ e.message }}</pre>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -319,13 +393,17 @@ import {
   SniffStatus, SniffStart, SniffStop, SniffSetFilter, SniffListSessions,
   SniffGetSession, SniffDeleteSession, SniffExportOpenAPI, SniffInstallCA, SniffCAPEM,
   SniffSetSystemProxy, SniffGenerateApiFromSession, SniffGenerateApiFromRecords,
-  SniffImportCA, SniffPickCAFile, CopyToClipboard
+  SniffImportCA, SniffPickCAFile, SniffGetSessionErrors, CopyToClipboard
 } from '../../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { store, reloadStore } from '../../store'
 import GroupTreeNode from './GroupTreeNode.vue'
 
-const status = reactive({ running: false, proxyAddr: '', caInstalled: false, caFingerprint: '', systemProxy: false, error: '' })
+const status = reactive({ running: false, proxyAddr: '', certURL: '', localCertURL: '', caInstalled: false, caFingerprint: '', systemProxy: false, error: '', activeSessionId: '' })
+
+// 手机证书信息默认隐藏，点击控制栏「抓包中」地址标签才展开（不挤压下方流量列表）。
+const certOpen = ref(false)
+function toggleCert() { certOpen.value = !certOpen.value }
 const proxyAddr = ref('127.0.0.1:8888')
 const sysProxy = ref(false)
 const starting = ref(false)
@@ -490,6 +568,7 @@ function onSelectRecToggle(payload) {
 }
 
 const sessions = ref([])
+const sessionsDialog = ref(false)
 const caDialog = ref(false)
 const caPem = ref('')
 const importCADialog = ref(false)
@@ -534,23 +613,17 @@ let pendingRecords = [] // 待合并到 liveRecords 的记录
 let flushRaf = null // rAF 句柄
 
 // 合并缓冲中的记录到 liveRecords，并限制列表长度（保留最新）。
-// 拖动分隔条（resizing）期间暂停合并，避免拖拽重渲染与抓包数据刷新叠加造成卡顿。
 function flushRecords() {
   flushRaf = null
-  if (resizing) {
-    // 延迟到下一个空闲帧再尝试，松手后会立即 flush
-    if (flushRaf == null) flushRaf = requestAnimationFrame(flushRecords)
-    return
-  }
   const batch = pendingRecords
   pendingRecords = []
   if (!batch.length) return
   const cur = liveRecords.value
-  // 仅当列表达到上限时才需要裁剪，避免不必要的数组重建
+  // 新的记录放在最前面（最新置顶），超出上限时裁剪掉尾部最旧的记录
   if (cur.length + batch.length > MAX_LIVE) {
-    liveRecords.value = cur.concat(batch).slice(-MAX_LIVE)
+    liveRecords.value = batch.concat(cur).slice(0, MAX_LIVE)
   } else {
-    liveRecords.value = cur.concat(batch)
+    liveRecords.value = batch.concat(cur)
   }
   // 自动生成文档：批量静默导入有效 HTTP 流量
   if (autoDoc.value) {
@@ -607,6 +680,24 @@ const errTypeOptions = [
   { value: 'non_http', label: '非HTTP协议' },
 ]
 
+// ---- 解密失败日志弹窗（落盘数据） ----
+const errorDialog = ref(false)
+const errList = ref([]) // 来自后端的持久化错误记录（ErrorInfo[]）
+const errCount = ref(0) // 当前会话失败条数
+async function openErrors() {
+  const sid = status.activeSessionId
+  if (!sid) { ElMessage.info('暂无会话，请先开始抓包'); return }
+  try {
+    const list = await SniffGetSessionErrors(sid)
+    errList.value = list || []
+    errCount.value = errList.value.length
+  } catch (e) {
+    ElMessage.error('加载失败日志失败：' + (e || ''))
+  }
+  errorDialog.value = true
+}
+function errTypeText(type) { return ERR_LABELS[type] || '错误' }
+
 // 各错误类型的解决引导
 const GUIDES = {
   pinning: {
@@ -647,12 +738,13 @@ onMounted(async () => {
   } catch (e) { /* ignore */ }
   try { sessions.value = await SniffListSessions() } catch (e) {}
   recOff = EventsOn('sniff:record', onRecords)
-  statusOff = EventsOn('sniff:status', (s) => { Object.assign(status, s); sysProxy.value = !!s.systemProxy })
+  statusOff = EventsOn('sniff:status', (s) => { Object.assign(status, s); sysProxy.value = !!s.systemProxy; if (s.activeSessionId) status.activeSessionId = s.activeSessionId })
   errOff = EventsOn('sniff:error', (info) => {
     const obj = typeof info === 'string' ? { type: 'connect', host: '', message: info } : info
     const text = (obj && obj.message) || 'HTTPS 解密异常，请确认根证书已安装并信任'
     errorList.value.push({ time: nowStr(), type: (obj && obj.type) || 'connect', host: (obj && obj.host) || '', msg: text })
     if (errorList.value.length > 50) errorList.value = errorList.value.slice(-50)
+    errCount.value += 1
     // 按类型收集解密失败的 host
     if (obj && obj.host && obj.type) {
       const m = { ...errHostsByType.value }
@@ -781,6 +873,59 @@ async function doImportCA() {
 }
 
 function selectRecord(r) { selected.value = r; detailTab.value = 'overview' }
+
+// ---- 右键上下文菜单 ----
+const ctxMenu = ref(null) // { x, y, rec }
+
+function openCtxMenu(recOrPayload, ev) {
+  let rec, e2
+  if (recOrPayload && recOrPayload.rec) { rec = recOrPayload.rec; e2 = recOrPayload.event }
+  else { rec = recOrPayload; e2 = ev }
+  if (!rec) return
+  ctxMenu.value = { x: e2.clientX, y: e2.clientY, rec }
+}
+function closeCtxMenu() { ctxMenu.value = null }
+
+// 生成 bash/curl 命令（单引号包裹并转义内部单引号）
+function bashQuote(s) {
+  if (s == null) return "''"
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
+}
+function buildCurl(rec) {
+  const lines = [`curl -X ${rec.method || 'GET'} ${bashQuote(rec.url)}`]
+  for (const h of (rec.reqHeaders || [])) {
+    if (h && h.disabled) continue
+    const k = h.key != null ? h.key : h.name
+    const v = h.value != null ? h.value : h.val
+    if (!k && !v) continue
+    lines.push(`  -H ${bashQuote(`${k}: ${v}`)}`)
+  }
+  const body = rec.reqBody
+  if (body && String(body).length) {
+    lines.push(`  --data-raw ${bashQuote(body)}`)
+  }
+  return lines.join(' \\\n')
+}
+function buildRawHttp(rec) {
+  const head = [`${rec.method || 'GET'} ${rec.url} HTTP/1.1`]
+  for (const h of (rec.reqHeaders || [])) {
+    if (h && h.disabled) continue
+    const k = h.key != null ? h.key : h.name
+    const v = h.value != null ? h.value : h.val
+    if (!k && !v) continue
+    head.push(`${k}: ${v}`)
+  }
+  let out = head.join('\r\n') + '\r\n'
+  if (rec.reqBody) out += '\r\n' + rec.reqBody
+  return out
+}
+
+function ctxCopyAddr() { copyText(ctxMenu.value.rec.url); closeCtxMenu() }
+function ctxCopyCurl() { copyText(buildCurl(ctxMenu.value.rec)); closeCtxMenu() }
+function ctxCopyRawHttp() { copyText(buildRawHttp(ctxMenu.value.rec)); closeCtxMenu() }
+function ctxCopyReqHeaders() { copyText(kvToText(ctxMenu.value.rec.reqHeaders)); closeCtxMenu() }
+function ctxCopyReqBody() { copyText(displayBody(ctxMenu.value.rec.reqBody, true)); closeCtxMenu() }
+function ctxCopyResBody() { copyText(displayBody(ctxMenu.value.rec.respBody, true)); closeCtxMenu() }
 function toggleSelect(id, val) {
   const set = new Set(selectedIds.value)
   if (val) set.add(id)
@@ -798,6 +943,7 @@ function clearLive() {
   if (flushRaf != null) { cancelAnimationFrame(flushRaf); flushRaf = null }
   pendingRecords = []
   liveRecords.value = []; selected.value = null; selectedIds.value = []
+  errCount.value = 0
 }
 
 function selectedRecords() {
@@ -872,51 +1018,6 @@ async function autoImport(records) {
   } catch (e) { /* 自动生成失败静默 */ }
 }
 
-// ---- 左右宽度拖拽 ----
-const leftWidth = ref(48)
-let resizing = false
-let lastClientX = 0
-let resizeRaf = null
-
-function applyResize() {
-  resizeRaf = null
-  const body = document.querySelector('.mitm-body')
-  if (!body) return
-  const rect = body.getBoundingClientRect()
-  const total = rect.width
-  if (!total) return
-  const pct = ((lastClientX - rect.left) / total) * 100
-  // 最大不超过一半（50%），最小 25%，避免过大/过小
-  leftWidth.value = Math.min(50, Math.max(25, pct))
-}
-
-function startResize(e) {
-  resizing = true
-  document.body.classList.add('resizing')
-  document.addEventListener('mousemove', onResize)
-  document.addEventListener('mouseup', stopResize)
-  e.preventDefault()
-}
-
-// 用 rAF 节流：仅记录最新鼠标位置，每帧最多更新一次宽度，
-// 避免每次 mousemove 同步触发整列表重渲染导致拖拽卡顿。
-function onResize(e) {
-  if (!resizing) return
-  lastClientX = e.clientX
-  if (resizeRaf == null) resizeRaf = requestAnimationFrame(applyResize)
-}
-
-function stopResize() {
-  resizing = false
-  document.body.classList.remove('resizing')
-  document.removeEventListener('mousemove', onResize)
-  document.removeEventListener('mouseup', stopResize)
-  if (resizeRaf != null) { cancelAnimationFrame(resizeRaf); resizeRaf = null }
-  // 拖拽结束：立即把最后位置应用到宽度，并冲刷暂停的实时流量
-  applyResize()
-  if (flushRaf == null && pendingRecords.length) flushRaf = requestAnimationFrame(flushRecords)
-}
-
 function kvToText(kvs) {
   if (!kvs || !kvs.length) return '（无）'
   return kvs.filter(k => k.enabled !== false).map(k => k.key + ': ' + k.value).join('\n')
@@ -942,6 +1043,25 @@ async function deleteSession(id) {
     await SniffDeleteSession(id)
     sessions.value = await SniffListSessions()
     ElMessage.success('已删除')
+  } catch (e) { if (e !== 'cancel') ElMessage.error(String(e)) }
+}
+
+// 打开会话面板（弹窗打开时即刷新列表），不占用主抓包界面
+function openSessions() {
+  sessionsDialog.value = true
+  refreshSessions()
+}
+
+// 一键清除全部会话包
+async function clearAllSessions() {
+  try {
+    if (!sessions.value.length) return
+    await ElMessageBox.confirm(`确定清除全部 ${sessions.value.length} 个抓包会话？此操作不可恢复。`, '提示', { type: 'warning' })
+    for (const s of sessions.value) {
+      await SniffDeleteSession(s.id)
+    }
+    sessions.value = []
+    ElMessage.success('已清除全部会话')
   } catch (e) { if (e !== 'cancel') ElMessage.error(String(e)) }
 }
 
@@ -1014,61 +1134,148 @@ async function copyProxyAddr() {
 </script>
 
 <style scoped>
-.mitm-panel { flex: 1; width: 100%; min-width: 0; display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 14px 16px; gap: 10px; box-sizing: border-box; overflow: hidden; }
-.mitm-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.mitm-title h2 { margin: 0; font-size: 18px; }
-.mitm-title .sub { color: #86909c; font-size: 12px; margin-left: 8px; }
-.mitm-actions { display: flex; gap: 8px; align-items: center; }
-.mitm-body { display: flex; gap: 4px; flex: 1; min-height: 0; overflow: hidden; }
-.mitm-left { flex: 0 0 auto; min-width: 300px; max-width: 50%; display: flex; flex-direction: column; gap: 8px; min-height: 0; transition: width .08s ease; contain: layout style; }
-.mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid #e5e6eb; padding-left: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: layout style; }
+.mitm-panel {
+  --mp-primary: #165dff; --mp-primary-soft: #e8f3ff; --mp-radius: 12px;
+  --mp-bg: #f5f7fa; --mp-border: #eaecef; --mp-text: #1d2129; --mp-sub: #86909c;
+  flex: 1; width: 100%; min-width: 0; display: flex; flex-direction: column; height: 100%; min-height: 0;
+  padding: 16px 18px; gap: 12px; box-sizing: border-box; overflow: hidden;
+  background: var(--mp-bg); color: var(--mp-text);
+}
+.mitm-top {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+  padding: 14px 16px; background: #fff; border: 1px solid var(--mp-border); border-radius: var(--mp-radius);
+  box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
+}
+.mitm-title { display: flex; align-items: baseline; gap: 8px; }
+.mitm-title h2 {
+  margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .3px;
+  background: linear-gradient(90deg, #165dff, #4080ff); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.mitm-title .sub { color: var(--mp-sub); font-size: 12px; }
+.mitm-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mitm-body { display: flex; gap: 12px; flex: 1; min-height: 0; overflow: hidden; }
+.mitm-left { flex: 0 0 42%; width: 42%; min-width: 40%; max-width: 62%; display: flex; flex-direction: column; gap: 10px; min-height: 0; contain: layout style; }
+.mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid var(--mp-border); padding-left: 14px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: layout style; }
 .mitm-right .detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
-.resize-bar { width: 6px; cursor: col-resize; background: transparent; flex-shrink: 0; border-radius: 3px; transition: background .15s; }
-.resize-bar:hover, .mitm-body.resizing .resize-bar { background: #165dff; }
-.mitm-body.resizing { user-select: none; cursor: col-resize; }
-.mitm-body.resizing .mitm-left, .mitm-body.resizing .mitm-right { pointer-events: none; transition: none; }
-.filter-box { border: 1px solid #e5e6eb; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-.filter-row { display: flex; align-items: center; gap: 8px; }
-.filter-row .fl { font-size: 12px; color: #4e5969; width: 180px; }
-.traffic-head, .sess-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; }
-.traffic-list { flex: 1; overflow: auto; border: 1px solid #e5e6eb; border-radius: 8px; min-height: 120px; contain: layout style paint; }
-.traffic-item { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f2f3f5; cursor: pointer; font-size: 13px; }
-.traffic-item:hover { background: #f7f8fa; }
-.traffic-item.active { background: #e8f3ff; }
+.filter-box {
+  border: 1px solid var(--mp-border); border-radius: var(--mp-radius); padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
+}
+.filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-row .fl { font-size: 12px; color: var(--mp-sub); width: 88px; flex-shrink: 0; }
+.traffic-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; color: var(--mp-text); }
+.traffic-list {
+  flex: 1; overflow: auto; border: 1px solid var(--mp-border); border-radius: var(--mp-radius); min-height: 120px;
+  background: #fff; contain: layout style paint; box-shadow: 0 1px 3px rgba(0, 21, 41, .04); padding: 4px;
+}
+.traffic-item {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px; cursor: pointer; font-size: 13px;
+  border-radius: 9px; transition: background .14s ease, box-shadow .14s ease, transform .14s ease; border: 1px solid transparent;
+}
+.traffic-item:hover { background: #f2f7ff; box-shadow: 0 2px 8px rgba(22, 93, 255, .08); transform: translateY(-1px); }
+.traffic-item.active { background: var(--mp-primary-soft); border-color: #bcd4ff; box-shadow: inset 3px 0 0 var(--mp-primary); }
 .traffic-item.checked { background: #f0f6ff; }
 .traffic-head .th-actions { display: flex; gap: 4px; align-items: center; }
-.traffic-item .proto { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; background: #86909c; }
+/* 协议/方法/状态码 彩色徽章 */
+.traffic-item .proto, .traffic-item .method, .traffic-item .status {
+  font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; flex-shrink: 0; letter-spacing: .2px;
+}
+.traffic-item .proto { color: #fff; background: #86909c; }
 .traffic-item .p-https { background: #165dff; }
 .traffic-item .p-http { background: #00b42a; }
+.traffic-item .p-websocket { background: #722ed1; }
+.traffic-item .p-sse { background: #f76707; }
 .traffic-item .p-tls { background: #ff7d00; }
 .traffic-item .p-ssh, .traffic-item .p-ftp, .traffic-item .p-smtp { background: #eb0aa6; }
-.traffic-item .method { color: #165dff; font-weight: 600; }
+.traffic-item .method { color: #165dff; background: #e8f3ff; }
+.traffic-item .m-GET { color: #00b42a; background: #e8ffea; }
+.traffic-item .m-POST { color: #165dff; background: #e8f3ff; }
+.traffic-item .m-PUT { color: #ff7d00; background: #fff3e8; }
+.traffic-item .m-DELETE { color: #f53f3f; background: #ffece8; }
+.traffic-item .m-PATCH { color: #722ed1; background: #f3edff; }
+.traffic-item .m-HEAD, .traffic-item .m-OPTIONS { color: #86909c; background: #f2f3f5; }
+.traffic-item .status { color: #86909c; background: #f2f3f5; }
+.traffic-item .s-2 { color: #00b42a; background: #e8ffea; }
+.traffic-item .s-3 { color: #165dff; background: #e8f3ff; }
+.traffic-item .s-4 { color: #ff7d00; background: #fff3e8; }
+.traffic-item .s-5 { color: #f53f3f; background: #ffece8; }
 .traffic-item .url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1d2129; }
-.traffic-item .status { color: #86909c; }
-.empty, .detail-empty { color: #c9cdd4; font-size: 13px; text-align: center; padding: 24px 0; }
-.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+
+/* 右键菜单 */
+.ctx-mask { position: fixed; inset: 0; z-index: 3000; }
+.ctx-menu {
+  position: fixed; min-width: 168px; background: #fff; border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .14); padding: 5px; font-size: 13px; color: #1d2129;
+}
+.ctx-item { padding: 7px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.ctx-item:hover { background: #f2f7ff; color: #165dff; }
+.ctx-sep { height: 1px; background: #f2f3f5; margin: 4px 2px; }
+.empty, .detail-empty { color: #c9cdd4; font-size: 13px; text-align: center; padding: 32px 0; }
+.detail-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap;
+  padding: 10px 12px; background: #fff; border: 1px solid var(--mp-border); border-radius: var(--mp-radius);
+  box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
+}
 .detail-head .dh-meta { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .detail-head .dh-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.detail-head .du { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #4e5969; max-width: 520px; }
+.detail-head .du {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #4e5969;
+  max-width: 520px; background: #f2f3f5; padding: 3px 8px; border-radius: 6px;
+}
 .detail-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .detail-tabs .el-tabs__content { flex: 1; overflow: auto; min-height: 0; }
-.kv { display: flex; gap: 10px; padding: 4px 0; font-size: 13px; border-bottom: 1px dashed #f2f3f5; }
-.kv b { color: #86909c; width: 80px; font-weight: 500; }
-.code { background: #f7f8fa; border-radius: 8px; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; overflow: auto; }
+.kv { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px dashed #f2f3f5; }
+.kv b { color: var(--mp-sub); width: 80px; font-weight: 500; }
+.code {
+  background: #fbfcfe; border: 1px solid var(--mp-border); border-radius: 10px; padding: 12px;
+  font-size: 12px; line-height: 1.6; white-space: pre; word-break: normal; overflow: auto; max-height: 100%;
+}
+/* 详情区标签栏占满高度，内容超出时出现左右/上下滚动条而非被隐藏 */
+.mitm-right .el-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.mitm-right .el-tabs__header { flex: 0 0 auto; margin-bottom: 8px; }
+.mitm-right .el-tabs__content { flex: 1; min-height: 0; }
+.mitm-right .el-tab-pane { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.mitm-right .el-tab-pane .code { flex: 1; min-height: 0; max-height: none; }
+.mitm-right .el-tab-pane > .body-toolbar + .code { flex: 1; }
 .ca { max-height: 240px; }
 .body-toolbar { display: flex; justify-content: flex-end; margin-bottom: 4px; min-height: 20px; }
 .mitm-errors { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .mitm-errors .err-item { --el-alert-padding: 6px 10px; }
+
+/* 解密失败日志弹窗 */
+.err-badge { margin-left: 4px; background: #f53f3f; color: #fff; border-radius: 10px; padding: 0 6px; font-size: 11px; line-height: 16px; }
+.err-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow: auto; padding-right: 4px; }
+.err-item { border: 1px solid var(--mp-border); border-radius: 10px; padding: 8px 10px; background: #fff; }
+.err-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.err-type { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 8px; }
+.err-type.et-pinning { color: #cb2634; background: #ffece8; }
+.err-type.et-untrusted { color: #d25f00; background: #fff4e3; }
+.err-type.et-tls { color: #d25f00; background: #fff4e3; }
+.err-type.et-connect { color: #cb2634; background: #ffece8; }
+.err-type.et-non_http { color: #1d4ed8; background: #e8f0ff; }
+.err-host { font-size: 12px; color: #4e5969; word-break: break-all; }
+.err-msg { margin: 0; background: #fbfcfe; border: 1px solid var(--mp-border); border-radius: 8px; padding: 8px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; }
+
+/* 手机证书下载卡片 */
+.addr-tag { cursor: pointer; transition: filter .12s ease; }
+.addr-tag:hover { filter: brightness(1.08); }
+.cert-card { margin: 8px 0; border: 1px solid #e8f3ff; border-radius: var(--mp-radius); background: linear-gradient(180deg, #f7fbff, #fff); box-shadow: 0 1px 3px rgba(22, 93, 255, .06); }
+.cert-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; color: var(--mp-primary); }
+.cert-body { display: flex; flex-direction: column; gap: 8px; }
+.cert-row { display: flex; align-items: center; gap: 8px; }
+.cert-label { flex-shrink: 0; width: 60px; color: #4e5969; font-size: 12px; }
+.cert-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #f2f3f5; border-radius: 6px; padding: 4px 8px; font-size: 12px; color: #1d2129; }
+.cert-steps { margin: 4px 0 0; padding-left: 18px; color: #4e5969; font-size: 12px; line-height: 1.9; }
 .mitm-errors .err-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .mitm-errors .err-time { color: #86909c; }
 .mitm-errors .err-tag { flex-shrink: 0; }
-.mitm-errors .err-host { font-size: 12px; color: #165dff; cursor: pointer; }
+.mitm-errors .err-host { font-size: 12px; color: var(--mp-primary); cursor: pointer; }
 .mitm-errors .err-host:hover { text-decoration: underline; }
 .mitm-errors .err-body { font-size: 12px; color: #4e5969; word-break: break-all; margin-top: 2px; font-family: monospace; }
 .mitm-errors .err-foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #86909c; padding: 0 4px; }
 .grp-item { padding-left: 22px; }
 .traffic-head .th-actions .el-radio-group { margin-right: 4px; }
-.mitm-guide { margin: 6px 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.7; }
+.mitm-guide { margin: 6px 0; padding: 10px 12px; border-radius: var(--mp-radius); font-size: 13px; line-height: 1.7; }
 .mitm-guide.g-pinning { background: #fef0f0; border: 1px solid #fbc4c4; }
 .mitm-guide.g-untrusted { background: #fdf6ec; border: 1px solid #f3d19e; }
 .mitm-guide.g-tls { background: #fdf6ec; border: 1px solid #f3d19e; }
@@ -1080,7 +1287,22 @@ async function copyProxyAddr() {
 .mitm-guide .g-act { margin-top: 8px; }
 .img-preview { background: #f7f8fa; border-radius: 8px; padding: 10px; text-align: center; }
 .img-preview img { max-width: 100%; max-height: 460px; object-fit: contain; border-radius: 4px; }
-.mitm-sessions { border-top: 1px solid #e5e6eb; padding-top: 8px; }
+.sess-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.sess-toolbar .sess-count { color: #4e5969; font-size: 13px; }
 .import-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .import-row .ir-label { width: 70px; color: #4e5969; font-size: 13px; flex-shrink: 0; }
+
+/* 空状态图标 */
+.empty-ico { font-size: 26px; margin-bottom: 6px; opacity: .7; }
+
+/* 细滚动条（年轻化） */
+.traffic-list::-webkit-scrollbar, .code::-webkit-scrollbar, .detail-tabs .el-tabs__content::-webkit-scrollbar,
+.mitm-right::-webkit-scrollbar, .mitm-errors::-webkit-scrollbar { width: 8px; height: 8px; }
+.traffic-list::-webkit-scrollbar-thumb, .code::-webkit-scrollbar-thumb,
+.detail-tabs .el-tabs__content::-webkit-scrollbar-thumb, .mitm-right::-webkit-scrollbar-thumb,
+.mitm-errors::-webkit-scrollbar-thumb { background: #d6dbe3; border-radius: 8px; }
+.traffic-list::-webkit-scrollbar-thumb:hover, .code::-webkit-scrollbar-thumb:hover,
+.detail-tabs .el-tabs__content::-webkit-scrollbar-thumb:hover, .mitm-right::-webkit-scrollbar-thumb:hover { background: #c0c6d0; }
+.traffic-list::-webkit-scrollbar-track, .code::-webkit-scrollbar-track,
+.detail-tabs .el-tabs__content::-webkit-scrollbar-track, .mitm-right::-webkit-scrollbar-track { background: transparent; }
 </style>

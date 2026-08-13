@@ -3,7 +3,9 @@ package sniff
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"strings"
 
 	"apitool/internal/bus"
 
@@ -34,10 +36,13 @@ type Manager struct {
 type Status struct {
 	Running       bool   `json:"running"`
 	ProxyAddr     string `json:"proxyAddr"`
+	CertURL       string `json:"certURL"`     // 局域网地址，供手机访问下载证书
+	LocalCertURL  string `json:"localCertURL"` // 本机地址，供电脑浏览器下载证书
 	CAInstalled   bool   `json:"caInstalled"`
 	CAFingerprint string `json:"caFingerprint"`
 	SystemProxy   bool   `json:"systemProxy"`
 	Error         string `json:"error"`
+	ActiveSessionID string `json:"activeSessionId"` // 当前活动会话 ID（供查看错误日志等）
 }
 
 // Filter 抓包过滤条件（前端设置后回传）。
@@ -109,11 +114,15 @@ func (m *Manager) Start(addr string) error {
 	sess := m.store.NewSession(addr)
 	p.SetSessionID(sess.ID)
 	m.session = sess
+	m.status.ActiveSessionID = sess.ID
 
 	p.Start()
 	m.proxy = p
 	m.status.Running = true
 	m.status.ProxyAddr = p.Addr()
+	port := portOf(p.Addr())
+	m.status.LocalCertURL = "http://127.0.0.1:" + port + "/proxy.pem"
+	m.status.CertURL = "http://" + lanIPv4() + ":" + port + "/proxy.pem"
 	m.status.Error = ""
 	m.status.SystemProxy = m.sysProxy
 	m.emitStatus()
@@ -142,6 +151,8 @@ func (m *Manager) Stop() error {
 	}
 	m.status.Running = false
 	m.status.ProxyAddr = ""
+	m.status.CertURL = ""
+	m.status.LocalCertURL = ""
 	if m.sysProxy {
 		_ = ClearSystemProxy()
 	}
@@ -165,6 +176,11 @@ func (m *Manager) ListSessions() []Session {
 // GetSession 获取完整会话（records 全量）。
 func (m *Manager) GetSession(id string) (*Session, bool) {
 	return m.store.Get(id)
+}
+
+// GetSessionErrors 返回指定会话的解密失败日志。
+func (m *Manager) GetSessionErrors(id string) []ErrorInfo {
+	return m.store.GetErrors(id)
 }
 
 // DeleteSession 删除会话。
@@ -276,4 +292,28 @@ func (m *Manager) emitStatus() {
 	if m.bus != nil {
 		m.bus.Emit(EventStatus, m.status)
 	}
+}
+
+// lanIPv4 返回本机第一个非回环 IPv4 地址（供手机通过局域网访问）。
+func lanIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "127.0.0.1"
+	}
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ip4 := ipnet.IP.To4(); ip4 != nil {
+				return ip4.String()
+			}
+		}
+	}
+	return "127.0.0.1"
+}
+
+// portOf 从监听地址（host:port）中提取端口部分。
+func portOf(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i+1:]
+	}
+	return addr
 }

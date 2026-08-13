@@ -57,6 +57,7 @@ type Session struct {
 	StoppedAt string          `json:"stoppedAt"`
 	ProxyAddr string          `json:"proxyAddr"`
 	Records   []TrafficRecord `json:"records"`
+	Errors    []ErrorInfo     `json:"errors"` // 解密/连接失败日志（本地持久化）
 }
 
 // SessionStore 抓包会话存储：内存为主，按会话落盘 JSON，互不打扰现有业务数据。
@@ -121,6 +122,30 @@ func (s *SessionStore) Append(rec TrafficRecord) {
 	if sess, ok := s.sessions[rec.SessionID]; ok {
 		sess.Records = append(sess.Records, rec)
 	}
+}
+
+// AppendError 追加一条解密/连接失败日志到指定会话（随会话落盘）。
+func (s *SessionStore) AppendError(sessionID string, info ErrorInfo) {
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.sessions[sessionID]; ok {
+		sess.Errors = append(sess.Errors, info)
+	}
+}
+
+// GetErrors 返回指定会话的解密失败日志。
+func (s *SessionStore) GetErrors(sessionID string) []ErrorInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.sessions[sessionID]; ok {
+		out := make([]ErrorInfo, len(sess.Errors))
+		copy(out, sess.Errors)
+		return out
+	}
+	return nil
 }
 
 // Save 将会话落盘。

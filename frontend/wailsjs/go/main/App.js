@@ -522,6 +522,10 @@ export function SniffGetSession(arg1) {
   return window['go']['main']['App']['SniffGetSession'](arg1);
 }
 
+export function SniffGetSessionErrors(arg1) {
+  return window['go']['main']['App']['SniffGetSessionErrors'](arg1);
+}
+
 export function SniffImportCA(arg1, arg2) {
   return window['go']['main']['App']['SniffImportCA'](arg1, arg2);
 }

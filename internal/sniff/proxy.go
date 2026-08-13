@@ -171,7 +171,7 @@ func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filte
 
 	opts := &mitm.Options{
 		Addr:              addr,
-		StreamLargeBodies: 5 * 1024 * 1024,
+		StreamLargeBodies: 64 * 1024 * 1024, // 超过该阈值才流式透传（避免大响应体被丢弃/无法查看）
 		SslInsecure:       true,
 		NewCaFunc: func() (cert.CA, error) {
 			return caBundle.newCA(), nil
@@ -204,6 +204,83 @@ func (p *proxy) getFilter() Filter {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.filter
+}
+
+// ---- 证书下载路由（手机抓包安装根证书）----
+
+// certDownloadPaths 命中这些路径时向客户端返回根 CA 证书。
+// 手机在 WLAN 中将代理指向本机后，用浏览器打开
+// http://<电脑IP>:<端口>/proxy.pem 即可下载并安装根证书以解密 HTTPS。
+var certDownloadPaths = map[string]bool{
+	"/proxy.pem": true,
+	"/cert":      true,
+	"/ca.pem":    true,
+	"/cert.pem":  true,
+	"/":          true,
+}
+
+// certLandingHTML 根路径返回的友好安装引导页（手机浏览器直接输入代理地址即可看到）。
+const certLandingHTML = `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>代理 CA 证书下载</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#e8f3ff,#f2f7ff);min-height:100vh;display:flex;align-items:center;justify-content:center;color:#1d2129}
+  .card{background:#fff;border-radius:16px;padding:32px 28px;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(22,93,255,.12)}
+  h1{margin:0 0 6px;font-size:20px;color:#165dff}
+  p{margin:0 0 20px;color:#4e5969;font-size:14px;line-height:1.6}
+  .btn{display:block;text-align:center;background:#165dff;color:#fff;text-decoration:none;padding:12px;border-radius:10px;font-weight:600;margin-bottom:18px;transition:opacity .15s}
+  .btn:active{opacity:.85}
+  ol{margin:0;padding-left:20px;color:#4e5969;font-size:13px;line-height:1.9}
+  .tip{margin-top:16px;font-size:12px;color:#86909c;background:#f7f8fa;border-radius:8px;padding:10px 12px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>手机抓包证书</h1>
+    <p>安装本根证书后，即可在本工具中解密手机的 HTTPS 流量。iOS 首次安装后请到「设置 → 通用 → 关于本机 → 证书信任设置」中手动启用完全信任。</p>
+    <a class="btn" href="/proxy.pem">下载根证书</a>
+    <ol>
+      <li>手机与电脑连接同一 Wi-Fi。</li>
+      <li>在 WLAN 设置中将 HTTP 代理手动指向电脑 IP 与端口。</li>
+      <li>手机浏览器打开本页面，点击「下载根证书」并安装。</li>
+      <li>回到本工具即可看到实时流量。</li>
+    </ol>
+    <div class="tip">提示：若手机无法访问，请将地址中的电脑 IP 替换为当前局域网 IP。</div>
+  </div>
+</body>
+</html>
+`
+
+// Request 在请求发出前调用。命中证书下载路由时直接构造响应短路，不转发上游，
+// 方便手机/浏览器通过代理地址下载并安装根证书。
+func (p *proxy) Request(f *mitm.Flow) {
+	if p.isStopped() || f == nil || f.Request == nil || f.Request.URL == nil {
+		return
+	}
+	path := f.Request.URL.Path
+	if !certDownloadPaths[path] {
+		return
+	}
+	if path == "/" {
+		f.Response = &mitm.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:       []byte(certLandingHTML),
+		}
+		return
+	}
+	pem := p.ca.CertPEM()
+	if len(pem) == 0 {
+		return
+	}
+	f.Response = &mitm.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/x-x509-ca-cert"}},
+		Body:       pem,
+	}
 }
 
 // ---- go-mitmproxy Addon 接口实现（嵌入 BaseAddon）----
@@ -355,14 +432,24 @@ func (p *proxy) RequestError(f *mitm.Flow, err error) {
 	if p.isStopped() || p.errEmit == nil || err == nil {
 		return
 	}
-	p.errEmit(classifyErr(f, err))
+	info := classifyErr(f, err)
+	p.mu.Lock()
+	sid := p.sessionID
+	p.mu.Unlock()
+	p.store.AppendError(sid, info)
+	p.errEmit(info)
 }
 
 func (p *proxy) HTTPConnectError(f *mitm.Flow, err error) {
 	if p.isStopped() || p.errEmit == nil || err == nil {
 		return
 	}
-	p.errEmit(classifyErr(f, err))
+	info := classifyErr(f, err)
+	p.mu.Lock()
+	sid := p.sessionID
+	p.mu.Unlock()
+	p.store.AppendError(sid, info)
+	p.errEmit(info)
 }
 
 // protocolOfRaw 基于原始请求判断协议（无 Flow.SSE/WebScoket 时用）。

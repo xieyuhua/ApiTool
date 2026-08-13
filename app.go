@@ -596,6 +596,14 @@ func (a *App) SniffGetSession(id string) (*sniff.Session, error) {
 	return sess, nil
 }
 
+// SniffGetSessionErrors 返回指定会话的解密/连接失败日志。
+func (a *App) SniffGetSessionErrors(id string) []sniff.ErrorInfo {
+	if a.sniffMgr == nil {
+		return nil
+	}
+	return a.sniffMgr.GetSessionErrors(id)
+}
+
 // SniffDeleteSession 删除抓包会话。
 func (a *App) SniffDeleteSession(id string) error {
 	if a.sniffMgr == nil {

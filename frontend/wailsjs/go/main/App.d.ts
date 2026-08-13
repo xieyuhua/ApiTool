@@ -272,6 +272,8 @@ export function SniffGenerateApiFromSession(arg1:string,arg2:Array<string>,arg3:
 
 export function SniffGetSession(arg1:string):Promise<sniff.Session>;
 
+export function SniffGetSessionErrors(arg1:string):Promise<Array<sniff.ErrorInfo>>;
+
 export function SniffImportCA(arg1:string,arg2:string):Promise<string>;
 
 export function SniffInstallCA():Promise<void>;
