@@ -1,10 +1,13 @@
 package sniff
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 )
@@ -41,7 +44,6 @@ func decodeGRPCBody(body []byte) string {
 			break
 		}
 		compressed := body[off] & grpcCompressedFlag
-		_ = compressed // gRPC 压缩（gzip）标志；当前仅展示原始 payload，未解压
 		length := binary.BigEndian.Uint32(body[off+1 : off+5])
 		off += 5
 		if int(length) > len(body)-off {
@@ -50,6 +52,15 @@ func decodeGRPCBody(body []byte) string {
 		}
 		payload := body[off : off+int(length)]
 		off += int(length)
+		// gRPC 压缩标志位为 1 表示 payload 经 gzip 压缩，需先解压再解析 protobuf
+		if compressed != 0 {
+			decompressed, err := gunzip(payload)
+			if err != nil {
+				messages = append(messages, fmt.Sprintf("<gzip 解压失败: %v>", err))
+				continue
+			}
+			payload = decompressed
+		}
 		count++
 		if count > maxGRPCMessages {
 			messages = append(messages, fmt.Sprintf("<truncated: 超过 %d 条 message>", maxGRPCMessages))
@@ -237,6 +248,20 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// gunzip 解压 gRPC 中经 gzip 压缩的 message payload。
+func gunzip(data []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // grpcSummary 生成 gRPC 流量的简短摘要（用于列表预览 / 调试），避免重复逻辑。

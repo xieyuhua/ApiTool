@@ -360,22 +360,33 @@ func (p *proxy) Response(f *mitm.Flow) {
 	statusCode := 0
 	statusText := ""
 	var respHeaders []model.KV
+	var decodeErr string
 	if f.Response != nil {
 		statusCode = f.Response.StatusCode
 		statusText = http.StatusText(statusCode)
 		// 解码压缩响应体（gzip/br/deflate/zstd），否则记录到的是压缩乱码
-		respBody, _ = f.Response.DecodedBody()
+		var derr error
+		respBody, derr = f.Response.DecodedBody()
 		if respBody == nil {
 			respBody = f.Response.Body
+			if derr != nil {
+				decodeErr = "响应体解压失败（已保留原始数据）: " + derr.Error()
+			}
 		}
 		respHeaders = headerToKV(f.Response.Header)
 	}
 
 	// 请求体也做同样的解压处理
-	reqBody, _ := f.Request.DecodedBody()
+	reqBody, reqDerr := f.Request.DecodedBody()
+	if reqBody == nil && reqDerr != nil {
+		decodeErr = appendDecodeErr(decodeErr, "请求体解压失败（已保留原始数据）: "+reqDerr.Error())
+	}
 
 	rec := p.store.recordFromReqRespExt(req, respBody, reqBody, headerToKV(req.Header),
 		respHeaders, statusCode, statusText, prot, f.StartTime)
+	if decodeErr != "" {
+		rec.Error = appendDecodeErr(rec.Error, decodeErr)
+	}
 
 	// gRPC 解码：将 protobuf 二进制帧转换为可读文本（HTTP/2 上的 gRPC 流量）
 	if prot == "grpc" {
@@ -557,4 +568,12 @@ func splitComma(s string) []string {
 		}
 	}
 	return out
+}
+
+// appendDecodeErr 将解码错误信息追加到已有错误字符串（换行分隔）。
+func appendDecodeErr(existing, msg string) string {
+	if existing == "" {
+		return msg
+	}
+	return existing + "\n" + msg
 }

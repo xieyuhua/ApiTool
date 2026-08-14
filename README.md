@@ -388,6 +388,21 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 - 开启「切换系统代理」后，ApiTool 会改写系统的 `Internet Settings → Proxy`，
   让全系统的流量自动经过本代理（关闭时恢复），无需手动配置浏览器。
 
+#### 支持的抓取协议
+
+| 协议 | 是否解密解析 | 说明 |
+| --- | --- | --- |
+| HTTP / HTTPS | ✅ | 基础明文 / MITM 解密，记录请求头、Query、Body、响应体 |
+| WebSocket / WSS | ✅ | 双向消息逐帧记录（C→S / S→C），标记 `websocket` 协议 |
+| SSE（Server-Sent Events） | ✅ | 服务端流式推送事件记录，标记 `sse` 协议 |
+| gRPC（HTTP/2 + protobuf） | ✅ | 经 HTTP/2 解密后做 protobuf  wire 解码，标记 `grpc` 协议 |
+| GraphQL | ✅ | `application/graphql` 内容类型识别，作为 HTTP 子协议展示 |
+| HTTP/2（h2） | ✅ | go-mitmproxy 已支持 h2 协商与 MITM，gRPC 即承载其上 |
+| TLS（raw）/ SSH / FTP / SMTP | ⚠️ 仅识别不透传解密 | 字节嗅探识别协议类型，标记为不可解密（透传，不解析明文） |
+
+> 除上述经 MITM 代理解密的协议外，还提供**浏览器扩展捕获**通道（`internal/capture`）：
+> 通过扩展回传网页发出的 HTTP/HTTPS 请求，适合只关心页面接口、不想配置系统代理的场景。
+
 ### 14.2 快速开始
 
 1. **安装根证书**：首次进入若提示「HTTPS 解密需安装根证书」，点击顶部「安装根证书」
@@ -413,11 +428,14 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 
 | 元素 | 颜色 |
 | --- | --- |
-| 协议 | `HTTPS` 蓝 / `HTTP` 绿 / `WebSocket` 紫 / `SSE` 橙 / `TLS` 橙 |
+| 协议 | `HTTPS` 蓝 / `HTTP` 绿 / `WebSocket` 紫 / `SSE` 橙 / `gRPC` 青 / `GraphQL` 粉 / `TLS` 橙 |
 | 方法 | `GET` 绿 / `POST` 蓝 / `PUT` 橙 / `DELETE` 红 / `PATCH` 紫 / `HEAD`·`OPTIONS` 灰 |
 | 状态码 | `2xx` 绿 / `3xx` 蓝 / `4xx` 橙 / `5xx` 红 |
 
 **筛选**：顶部可按「关键字、协议（多选）、请求方法、状态码」实时过滤；协议/方法支持多选。
+协议勾选支持 `HTTP / HTTPS / WebSocket / SSE / gRPC / GraphQL`。
+> 别名说明：勾选 `HTTP` 时自动包含 `HTTPS`，勾选 `WebSocket` 时自动包含 `WSS`（加密流量不再被漏抓）；
+> 前端列表筛选与后端一致，勾选 `http` 也会匹配 `https`、`websocket` 匹配 `wss`。
 
 **右键菜单**：在任一条流量上点击右键，弹出常用复制菜单：
 
@@ -438,6 +456,24 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 
 **响应体滚动**：响应体/请求体/头均采用 `pre` + `overflow:auto`，**长内容可上下、左右双向滚动**
 （不再因折行丢失结构，也不被容器裁掉）。
+
+#### 14.4.1 gRPC / GraphQL 解码
+
+抓包对以下两类流量做了**应用层识别与解码**，无需额外配置：
+
+- **gRPC（HTTP/2 上的 protobuf RPC）**
+  - 识别依据：请求/响应 `Content-Type` 以 `application/grpc` 开头。go-mitmproxy 已对 HTTP/2（`h2`）做 MITM 解密，
+    因此 gRPC 流量本就会被解密并标记为 `grpc` 协议。
+  - 解码：自动剥离 gRPC 帧头（压缩标志 + 4 字节长度），对每个 message 做**通用 protobuf wire 解析**——
+    字段号与类型被还原为 `field_1` / `field_2` 形式的可读 JSON（字符串/可打印内容直接展示，嵌套结构递归展开，
+    数值按 int/float 呈现）。若 message 经 gzip 压缩（`compressed` 标志位 = 1），会先解压再解析。
+  - 局限：零依赖解析**不依赖 `.proto` 文件**，能还原全部字符串内容与嵌套结构，但字段名显示为 `field_N`
+    （protobuf 二进制不含字段名）。如需精确字段名，需提供 `.proto` 描述符做精确解码（后续增强）。
+- **GraphQL**
+  - 识别依据：`Content-Type` 为 `application/graphql`。作为 HTTP 子协议展示，请求体/响应体按原内容呈现。
+
+**解压失败提示**：若响应/请求体为不支持的压缩算法（如部分 zstd 实现）导致 `DecodedBody` 失败，
+详情面板「错误」区会给出「响应体/请求体解压失败（已保留原始数据）」提示，并保留原始字节以免信息丢失。
 
 ### 14.5 生成接口并导入接口树
 
@@ -496,9 +532,20 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 
 ### 14.10 目录结构与实现
 
-- 后端：`internal/sniff/`（`proxy.go` MITM 代理与 addon、`manager.go` 生命周期/状态、
-  `sysproxy.go` 系统代理与证书管理、`ca.go` CA 生成、`capture.go` 记录去重）。
+- 后端：`internal/sniff/`
+  - `proxy.go`：MITM 代理与 addon（请求/响应/WebSocket/SSE hook）、协议识别 `protocolOf`、过滤 `shouldIntercept`、错误标记。
+  - `protocol.go`：`IdentifyProtocol` 原始流量嗅探、`matchProtocol` 协议匹配（含 `https→http`、`wss→websocket` 别名）、`ProtocolOptions` 协议枚举（统一来源）。
+  - `grpc.go`：gRPC 帧解析 + 通用 protobuf wire 解码（支持 gzip 压缩 payload）。
+  - `manager.go`：抓包生命周期 / 状态、`Filter` 配置（Host/Method/Path/Protocol/Keyword）。
+  - `sysproxy.go`：系统代理接管与证书信任管理。
+  - `ca.go`：CA 生成与重签。
+  - `capture.go`：记录去重、浏览器扩展回传的流量捕获（含静态资源过滤与 OPTIONS 预检去重）。
 - 前端：`frontend/src/components/mitm/`（`MitmPanel.vue` 主面板、`GroupTreeNode.vue` 递归分组树节点）。
+
+**浏览器扩展捕获增强**：`internal/capture/capture.go` 在回传流量入库前做了服务端兜底过滤——
+除 URL 扩展名判定静态资源（js/css/图片/字体/音视频/pdf/wasm 等）外，还依据响应 `Content-Type`
+（image/*、audio/*、video/*、octet-stream、字体、pdf）兜底过滤二进制流；并对同一 URL 已存在
+非 OPTIONS 业务记录时的 **CORS 预检（OPTIONS）请求做去重**，避免无业务价值的请求堆积。
 
 ---
 
