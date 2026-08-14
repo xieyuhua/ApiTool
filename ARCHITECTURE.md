@@ -27,7 +27,6 @@ apitool/
 ├── main.go          # 进程入口：解析子命令、初始化 App、启动 Wails/独立服务
 ├── app.go           # App：Wails 绑定聚合根，嵌入各业务模块，暴露给前端的方法
 ├── tray.go          # 系统托盘菜单（剪贴板历史入口等）
-├── tools.go         # 子命令注册（build/server/cli 等）
 ├── wails.json       # Wails 构建配置（前端产物、绑定生成）
 ├── internal/        # 业务逻辑（与 UI 框架解耦，可独立测试/复用）
 ├── server/          # 可独立部署的云同步 / 分享服务器（./server/cmd）
@@ -100,6 +99,12 @@ apitool/
 ### 4.5 配置来源
 - Agent 配置（`internal/agent/agent.json`）由 `agent.Manager` 管理；`configs.yaml` 可覆盖模型/Provider 等默认值，
   读取时合并，避免「静态表 vs 动态文件」双重真相。
+
+### 4.6 前端本地状态（不落后端）
+- **多标签调试**：`openTabs: [{id, apiId, sub}]` 与 `activeTabId` 仅存在于 `frontend/src/store.js` 的响应式状态，
+  纯前端记忆（不入库、不跨进程），关闭即丢；接口删除时经 `closeTabsByApi` 联动清理标签。后端 `httpx` 仍按单接口定义发送，标签只是前端的视图组织。
+- **主题方案**：`settings.scheme` 记录所选方案 id，由 `applyScheme()` 在 `document.documentElement` 上叠加 `data-scheme`
+  专属 CSS 变量并同步 `settings.theme`/`settings.accent`；方案配色表（`SCHEMES`）定义在 `store.js`，不依赖后端。
 
 ---
 

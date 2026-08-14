@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, computed, ref, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor } from './store'
+import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -19,6 +19,26 @@ import AgentChat from './components/agent/AgentChat.vue'
 import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
 
 const clipVisible = ref(false)
+
+// 当前激活标签内子页（debug/params/doc）的读写，回写到对应标签
+const activeTabSub = computed({
+  get: () => (store.openTabs.find(t => t.id === store.activeTabId) || {}).sub || store.activeTab,
+  set: (v) => setSubTab(v),
+})
+// 标签栏展示用的接口信息
+const visibleTabs = computed(() => store.openTabs.map(t => {
+  const api = currentProject().apis.find(a => a.id === t.apiId)
+  return { id: t.id, apiId: t.apiId, name: api ? api.name : '(已删除)', method: api ? api.method : 'GET' }
+}))
+// 标签右键菜单状态
+const tabCtx = reactive({ visible: false, x: 0, y: 0, tab: null })
+function openTabCtx(tab, ev) {
+  tabCtx.tab = tab
+  tabCtx.x = ev.clientX
+  tabCtx.y = ev.clientY
+  tabCtx.visible = true
+}
+function closeTabCtx() { tabCtx.visible = false }
 
 onMounted(() => {
   initStore()
@@ -165,19 +185,37 @@ const navs = [
           <el-button size="small" text title="公共参数（对所有接口自动附加）" @click="openCommonDialog">☰ 公共</el-button>
         </div>
         <template v-if="api">
+          <!-- 接口调试多标签：类浏览器标签，可同时打开多个接口窗口 -->
+          <div class="debug-tabs" v-if="visibleTabs.length">
+            <div v-for="t in visibleTabs" :key="t.id" class="debug-tab"
+              :class="{ active: t.id === store.activeTabId }"
+              @click="switchTab(t.id)" @click.middle.prevent="closeTab(t.id)"
+              @contextmenu.prevent="openTabCtx(t, $event)">
+              <span class="tab-method" :class="'m-' + t.method">{{ t.method }}</span>
+              <span class="tab-name" :title="t.name">{{ t.name }}</span>
+              <span class="tab-close" @click.stop="closeTab(t.id)" title="关闭标签">×</span>
+            </div>
+            <div class="debug-tab-ctx-mask" v-if="tabCtx.visible" @click="closeTabCtx" @contextmenu.prevent="closeTabCtx">
+              <div class="debug-tab-ctx" :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }" @click.stop>
+                <div class="ctx-item" @click="closeTabCtx(); closeCurrentTab()">关闭当前标签</div>
+                <div class="ctx-item" @click="closeTabCtx(); closeOtherTabs(tabCtx.tab.id)">关闭其他标签</div>
+                <div class="ctx-item danger" @click="closeTabCtx(); closeAllTabs()">关闭全部标签</div>
+              </div>
+            </div>
+          </div>
           <div class="api-header">
             <span class="method-tag" :class="'m-' + api.method">{{ api.method }}</span>
             <el-input v-model="api.name" class="api-name-input" placeholder="接口名称" />
             <el-input v-model="api.description" placeholder="接口说明（用于文档与 AI 理解接口）" class="api-desc-input" />
           </div>
-          <el-tabs v-model="store.activeTab" class="main-tabs">
+          <el-tabs v-model="activeTabSub" class="main-tabs">
             <el-tab-pane label="接口调试" name="debug" />
             <el-tab-pane label="参数设置" name="params" />
             <el-tab-pane label="文档预览" name="doc" />
           </el-tabs>
-          <DebugPanel v-show="store.activeTab === 'debug'" :api="api" />
-          <ParamsPanel v-show="store.activeTab === 'params'" :api="api" />
-          <DocPreview v-if="store.activeTab === 'doc'" :api="api" />
+          <DebugPanel v-show="activeTabSub === 'debug'" :api="api" />
+          <ParamsPanel v-show="activeTabSub === 'params'" :api="api" />
+          <DocPreview v-if="activeTabSub === 'doc'" :api="api" />
         </template>
         <div v-else class="empty-state">
           <div class="big">🛠</div>
@@ -218,6 +256,37 @@ const navs = [
 .global-bar .gb-env { width: 140px; }
 .global-bar :deep(.el-button.is-text) { color: var(--text-muted); padding: 4px 8px; font-size: 12px; }
 .global-bar :deep(.el-button.is-text:hover) { color: var(--primary); background: var(--surface-2); }
+.debug-tabs {
+  display: flex; align-items: stretch; gap: 2px; padding: 8px 16px 0;
+  background: var(--surface); overflow-x: auto; border-bottom: 1px solid var(--border);
+}
+.debug-tab {
+  display: flex; align-items: center; gap: 6px; max-width: 220px;
+  padding: 7px 10px; font-size: 13px; color: var(--text-muted); cursor: pointer;
+  border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+  background: var(--surface-2); user-select: none; white-space: nowrap;
+}
+.debug-tab:hover { color: var(--text); background: var(--surface-3); }
+.debug-tab.active {
+  color: var(--text); background: var(--surface); border-color: var(--border);
+  font-weight: 600; position: relative; top: 1px;
+}
+.debug-tab .tab-method { font-size: 10px; transform: scale(.85); transform-origin: left center; }
+.debug-tab .tab-name { overflow: hidden; text-overflow: ellipsis; }
+.debug-tab .tab-close {
+  width: 16px; height: 16px; line-height: 14px; text-align: center; border-radius: 4px;
+  font-size: 14px; color: var(--text-muted); flex-shrink: 0;
+}
+.debug-tab .tab-close:hover { background: var(--danger-soft); color: var(--danger); }
+.debug-tab-ctx-mask { position: fixed; inset: 0; z-index: 3000; }
+.debug-tab-ctx {
+  position: fixed; min-width: 140px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 6px; z-index: 3001;
+}
+.debug-tab-ctx .ctx-item { padding: 8px 12px; font-size: 13px; border-radius: 6px; cursor: pointer; }
+.debug-tab-ctx .ctx-item:hover { background: var(--surface-2); }
+.debug-tab-ctx .ctx-item.danger { color: var(--danger); }
+.debug-tab-ctx .ctx-item.danger:hover { background: var(--danger-soft); }
 .api-header {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 22px 0; background: var(--surface);

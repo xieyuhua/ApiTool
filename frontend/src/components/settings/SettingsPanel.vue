@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser } from '../../../wailsjs/go/main/App'
-import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, THEMES } from '../../store'
+import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, THEMES, SCHEMES, setScheme } from '../../store'
 import CloudSync from './CloudSync.vue'
 
 const dataPath = ref('')
@@ -236,7 +236,22 @@ async function toggleSync() {
       <div class="card">
         <div class="card-title">外观（主题）</div>
         <el-form label-width="110px" label-position="left">
-          <el-form-item label="主题">
+          <el-form-item label="主题方案">
+            <div class="scheme-grid">
+              <div v-for="sc in SCHEMES" :key="sc.id" class="scheme-item"
+                :class="{ active: store.data.settings.scheme === sc.id }" @click="setScheme(sc.id)">
+                <span class="scheme-swatch" :style="{ background: sc.swatch }"></span>
+                <span class="scheme-label">{{ sc.label }}</span>
+                <span class="scheme-desc">{{ sc.desc }}</span>
+              </div>
+              <div class="scheme-item" :class="{ active: !store.data.settings.scheme }" @click="setScheme('')">
+                <span class="scheme-swatch scheme-custom">自定义</span>
+                <span class="scheme-label">自定义</span>
+                <span class="scheme-desc">手动选择明暗与主题色</span>
+              </div>
+            </div>
+          </el-form-item>
+          <el-form-item label="明暗">
             <el-radio-group :model-value="store.data.settings.theme" @change="setTheme">
               <el-radio-button v-for="t in THEMES" :key="t.value" :value="t.value">{{ t.label }}</el-radio-button>
             </el-radio-group>

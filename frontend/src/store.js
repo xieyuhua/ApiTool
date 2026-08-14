@@ -48,6 +48,9 @@ export const store = reactive({
   view: 'workspace', // workspace | docs | settings
   currentApiId: '',
   activeTab: 'debug', // debug | params | doc
+  // 接口调试多标签：每个标签绑定一个接口，支持同时打开多个接口窗口（类似浏览器标签）
+  openTabs: [], // [{ id, apiId, sub }]
+  activeTabId: '', // 当前激活的标签 id
   appVersion: '', // 客户端版本号（来自 Go 端）
   data: {
     projects: [
@@ -57,6 +60,7 @@ export const store = reactive({
     settings: {
       aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080',
       theme: 'light',            // light | dark | auto
+      scheme: '',                // 主题方案 id（空=自定义，使用 theme+accent）
       accent: '#165dff',         // 主题色（主色）
       hotkey: 'Ctrl+Shift+V',    // 调出剪贴板历史的快捷键组合
       clipboard: { monitor: true, maxItems: 200 },
@@ -72,6 +76,104 @@ export const THEMES = [
   { value: 'dark', label: '深色' },
   { value: 'auto', label: '跟随系统' },
 ]
+
+// 主题方案（预设风格）：每个方案打包 明暗模式 + 主色 + 一套完整配色变量。
+// 选择方案会同时写入 settings.theme 与 settings.accent，并叠加 data-scheme 专属变量。
+export const SCHEMES = [
+  {
+    id: 'default', label: '默认蓝', mode: 'light', accent: '#165dff',
+    desc: '经典科技蓝，干净专业', swatch: '#165dff',
+    vars: {},
+  },
+  {
+    id: 'cyber', label: '科技青', mode: 'dark', accent: '#00e0c6',
+    desc: '暗夜霓虹青，年轻电竞风', swatch: '#00e0c6',
+    vars: {
+      '--bg': '#0b0f14', '--bg-soft': '#10161d', '--surface': '#11181f', '--surface-2': '#19222c',
+      '--border': '#22303c', '--text': '#d7faf4', '--text-muted': '#6f8a94',
+      '--primary': '#00e0c6', '--primary-soft': '#0c2e2b', '--nav-bg': '#06090d', '--nav-hover': '#15212b',
+      '--nav-active': '#00e0c6', '--code-bg': '#070b0f', '--code-text': '#9ff3e6',
+    },
+  },
+  {
+    id: 'neon', label: '暗夜紫', mode: 'dark', accent: '#8b5cf6',
+    desc: '赛博紫光，潮流炫酷', swatch: '#8b5cf6',
+    vars: {
+      '--bg': '#0f0a16', '--bg-soft': '#160f20', '--surface': '#16101f', '--surface-2': '#211831',
+      '--border': '#322241', '--text': '#ece6f7', '--text-muted': '#8a7aa3',
+      '--primary': '#8b5cf6', '--primary-soft': '#241733', '--nav-bg': '#080510', '--nav-hover': '#1d1430',
+      '--nav-active': '#8b5cf6', '--code-bg': '#0a0612', '--code-text': '#d8ccff',
+    },
+  },
+  {
+    id: 'aurora', label: '极光绿', mode: 'dark', accent: '#22d39a',
+    desc: '极光薄荷绿，清新自然', swatch: '#22d39a',
+    vars: {
+      '--bg': '#08110d', '--bg-soft': '#0e1a14', '--surface': '#0f1a14', '--surface-2': '#16271e',
+      '--border': '#1f3a2c', '--text': '#dcf5ea', '--text-muted': '#6f9b86',
+      '--primary': '#22d39a', '--primary-soft': '#0c2a20', '--nav-bg': '#040907', '--nav-hover': '#13241b',
+      '--nav-active': '#22d39a', '--code-bg': '#050c08', '--code-text': '#a7f0d2',
+    },
+  },
+  {
+    id: 'sunset', label: '日落橙', mode: 'light', accent: '#ff7d00',
+    desc: '暖阳橙调，活力明快', swatch: '#ff7d00',
+    vars: {
+      '--bg': '#fbf6f1', '--bg-soft': '#f3eae2', '--surface': '#ffffff', '--surface-2': '#faf4ee',
+      '--border': '#ecddd0', '--text': '#2b2118', '--text-muted': '#9a8a7d',
+      '--primary': '#ff7d00', '--primary-soft': '#fff0e0', '--nav-bg': '#2b1d12', '--nav-hover': '#3a2718',
+      '--nav-active': '#ff7d00', '--code-bg': '#2b1d12', '--code-text': '#f3e6da',
+    },
+  },
+  {
+    id: 'sakura', label: '樱粉', mode: 'light', accent: '#f759ab',
+    desc: '柔和樱粉，甜美清新', swatch: '#f759ab',
+    vars: {
+      '--bg': '#fdf4f9', '--bg-soft': '#f8e8f1', '--surface': '#ffffff', '--surface-2': '#fdf0f7',
+      '--border': '#f3dbe9', '--text': '#3a2531', '--text-muted': '#a98aa0',
+      '--primary': '#f759ab', '--primary-soft': '#fde6f3', '--nav-bg': '#2a1224', '--nav-hover': '#3a1933',
+      '--nav-active': '#f759ab', '--code-bg': '#2a1224', '--code-text': '#f7d9ec',
+    },
+  },
+  {
+    id: 'graphite', label: '石墨灰', mode: 'dark', accent: '#9aa4b2',
+    desc: '极简中性灰，沉稳专注', swatch: '#9aa4b2',
+    vars: {
+      '--bg': '#15171a', '--bg-soft': '#1b1e22', '--surface': '#1d2024', '--surface-2': '#25292e',
+      '--border': '#33383f', '--text': '#e6e9ed', '--text-muted': '#8b929c',
+      '--primary': '#9aa4b2', '--primary-soft': '#262b31', '--nav-bg': '#0e1012', '--nav-hover': '#23272c',
+      '--nav-active': '#9aa4b2', '--code-bg': '#0e1012', '--code-text': '#d5dae0',
+    },
+  },
+]
+
+const SCHEME_MAP = Object.fromEntries(SCHEMES.map(s => [s.id, s]))
+
+// 应用主题方案：叠加 data-scheme 专属变量（无方案时清除），再同步明暗与主色
+export function applyScheme() {
+  const root = document.documentElement
+  const id = store.data.settings.scheme
+  const scheme = id && SCHEME_MAP[id]
+  if (scheme && scheme.vars) {
+    root.setAttribute('data-scheme', id)
+    for (const k in scheme.vars) root.style.setProperty(k, scheme.vars[k])
+  } else {
+    root.removeAttribute('data-scheme')
+  }
+  applyTheme()
+}
+
+export function setScheme(id) {
+  const scheme = id && SCHEME_MAP[id]
+  store.data.settings.scheme = id || ''
+  if (scheme) {
+    store.data.settings.theme = scheme.mode
+    store.data.settings.accent = scheme.accent
+  }
+  applyScheme()
+  saveNow()
+}
+
 
 function hexToRgb(hex) {
   hex = (hex || '').replace('#', '')
@@ -255,6 +357,7 @@ async function loadInto() {
   d.settings.version ||= '1.0.0'
   d.settings.updateURL ||= 'http://127.0.0.1:8080'
   d.settings.theme ||= 'light'
+  d.settings.scheme ||= ''
   d.settings.accent ||= '#165dff'
   d.settings.hotkey ||= 'Ctrl+Shift+V'
   d.settings.clipboard ||= { monitor: true, maxItems: 200 }
@@ -286,7 +389,7 @@ export async function initStore() {
     try { store.appVersion = await GetVersion() } catch {}
   }
   watch(() => store.data, () => { scheduleSave(); scheduleAutoSync() }, { deep: true })
-  applyTheme() // 应用主题（含跟随系统）
+  applyScheme() // 应用主题方案（含明暗/主色/专属变量，兼容跟随系统）
   try {
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -435,6 +538,85 @@ export function currentApi() {
   return p.apis.find(a => a.id === store.currentApiId) || null
 }
 
+// ---------------- 接口调试多标签（类浏览器标签） ----------------
+// 每个标签绑定一个接口（apiId），多个标签可绑定同一接口；sub 记录该标签内的子页（debug/params/doc）。
+function syncActive() {
+  const t = store.openTabs.find(x => x.id === store.activeTabId)
+  if (t) {
+    store.currentApiId = t.apiId
+    store.activeTab = t.sub
+  } else {
+    store.currentApiId = ''
+    store.activeTab = 'debug'
+  }
+}
+
+// 打开接口到标签：newTab=true 时强制新建标签，否则命中已存在的同接口标签并切换
+export function openApiInTab(apiId, opts = {}) {
+  if (!apiId) return
+  if (!opts.newTab) {
+    const exist = store.openTabs.find(t => t.apiId === apiId)
+    if (exist) { store.activeTabId = exist.id; syncActive(); return }
+  }
+  const tab = { id: uid(), apiId, sub: 'debug' }
+  store.openTabs.push(tab)
+  store.activeTabId = tab.id
+  syncActive()
+}
+
+// 切换标签
+export function switchTab(id) {
+  if (!store.openTabs.find(t => t.id === id)) return
+  store.activeTabId = id
+  syncActive()
+}
+
+// 关闭标签；关闭当前标签时自动切换到相邻标签，关闭最后一个后进入空状态
+export function closeTab(id) {
+  const idx = store.openTabs.findIndex(t => t.id === id)
+  if (idx === -1) return
+  store.openTabs.splice(idx, 1)
+  if (store.activeTabId === id) {
+    const next = store.openTabs[idx] || store.openTabs[idx - 1] || null
+    store.activeTabId = next ? next.id : ''
+  }
+  syncActive()
+}
+
+export function closeCurrentTab() {
+  if (store.activeTabId) closeTab(store.activeTabId)
+}
+
+export function closeOtherTabs(id) {
+  const target = id || store.activeTabId
+  if (!target) return
+  store.openTabs = store.openTabs.filter(t => t.id === target)
+  store.activeTabId = target
+  syncActive()
+}
+
+export function closeAllTabs() {
+  store.openTabs = []
+  store.activeTabId = ''
+  syncActive()
+}
+
+// 切换当前标签内的子页（debug/params/doc），回写至当前标签
+export function setSubTab(sub) {
+  const t = store.openTabs.find(x => x.id === store.activeTabId)
+  if (t) t.sub = sub
+  store.activeTab = sub
+}
+
+// 关闭所有引用了指定接口（已被删除）的标签
+export function closeTabsByApi(apiId) {
+  store.openTabs = store.openTabs.filter(t => t.apiId !== apiId)
+  if (store.openTabs.length === 0) store.activeTabId = ''
+  else if (!store.openTabs.find(t => t.id === store.activeTabId)) store.activeTabId = store.openTabs[store.openTabs.length - 1].id
+  syncActive()
+}
+
+
 // 当前激活环境的变量（仅启用项），用于请求发送时 {{var}} 替换
 export function activeEnvVars() {
   const p = currentProject()
@@ -454,7 +636,7 @@ export function switchProject(id) {
   // 先让「加载中」绘制，再切换，避免大数据量重建目录时主线程阻塞看起来像卡死
   setTimeout(() => {
     store.data.currentProjectId = id
-    store.currentApiId = ''
+    closeAllTabs()
     saveNow()
     store.treeLoading = false
   }, 30)
@@ -483,9 +665,7 @@ export function removeProject(id) {
   if (store.data.currentProjectId === id) {
     store.data.currentProjectId = store.data.projects[0].id
   }
-  if (store.currentApiId && !currentProject().apis.find(a => a.id === store.currentApiId)) {
-    store.currentApiId = ''
-  }
+  closeAllTabs()
   saveNow()
 }
 
@@ -520,8 +700,7 @@ export function addApi(dirId = '') {
     updatedAt: new Date().toISOString(),
   })
   p.apis.push(api)
-  store.currentApiId = api.id
-  store.activeTab = 'debug'
+  openApiInTab(api.id, { newTab: true })
   return api
 }
 
@@ -530,7 +709,7 @@ export function removeApi(id) {
   const i = p.apis.findIndex(a => a.id === id)
   if (i >= 0) p.apis.splice(i, 1)
   delete savedApiSnapshots[id]
-  if (store.currentApiId === id) store.currentApiId = ''
+  closeTabsByApi(id)
 }
 
 export function removeDir(id) {
@@ -544,11 +723,12 @@ export function removeDir(id) {
     }
   }
   p.dirs = p.dirs.filter(d => !ids.has(d.id))
-  p.apis = p.apis.filter(a => {
-    const del = ids.has(a.dirId)
-    if (del && store.currentApiId === a.id) store.currentApiId = ''
-    return !del
-  })
+  const removedApiIds = new Set(p.apis.filter(a => ids.has(a.dirId)).map(a => a.id))
+  p.apis = p.apis.filter(a => !ids.has(a.dirId))
+  // 清空被删除目录下的接口对应的标签
+  if (removedApiIds.size) {
+    for (const aid of removedApiIds) closeTabsByApi(aid)
+  }
 }
 
 // 构建目录树（供 el-tree 使用）type: dir | api

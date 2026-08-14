@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore } from '../../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore, openApiInTab, closeTabsByApi } from '../../store'
 import { parseCli, FORMATS } from '../../cli'
 import { CopyToClipboard } from '../../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
@@ -137,7 +137,7 @@ function onKeyword(v) { treeRef.value?.filter(v) }
 
 function onNodeClick(node) {
   if (node.type === 'api') {
-    store.currentApiId = node.id
+    openApiInTab(node.id) // 命中已存在标签则切换，否则新建标签
   }
 }
 
@@ -166,9 +166,12 @@ async function delSelected() {
       '确定删除选中的 ' + checkedCount.value + ' 个接口？此操作不可恢复。',
       '批量删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     const p = currentProject()
-    p.apis = p.apis.filter(a => !checkedApiIds.value.includes(a.id))
-    for (const id of checkedApiIds.value) delete savedApiSnapshots[id]
-    if (checkedApiIds.value.includes(store.currentApiId)) store.currentApiId = ''
+    const ids = checkedApiIds.value
+    p.apis = p.apis.filter(a => !ids.includes(a.id))
+    for (const id of ids) {
+      delete savedApiSnapshots[id]
+      closeTabsByApi(id)
+    }
     checkedApiIds.value = []
     saveNow()
     ElMessage.success('已删除选中接口')
@@ -267,7 +270,7 @@ function duplicate(node) {
   copy.id = uid()
   copy.name = a.name + ' 副本'
   currentProject().apis.push(copy)
-  store.currentApiId = copy.id
+  openApiInTab(copy.id, { newTab: true })
 }
 
 function handleCmd(cmd, node) {
@@ -276,6 +279,7 @@ function handleCmd(cmd, node) {
   else if (cmd === 'rename') rename(node)
   else if (cmd === 'delete') del(node)
   else if (cmd === 'duplicate') duplicate(node)
+  else if (cmd === 'openTab') openApiInTab(node.id, { newTab: true })
 }
 
 // 新增目录：弹窗输入名称
@@ -489,6 +493,7 @@ async function removeProjectNow() {
           <div class="ctx-item danger" @click="ctxCmd('delete')">删除目录</div>
         </template>
         <template v-else-if="ctx.node">
+          <div class="ctx-item" @click="ctxCmd('openTab')">在新标签打开</div>
           <div class="ctx-item" @click="ctxCmd('rename')">重命名</div>
           <div class="ctx-item" @click="ctxCmd('duplicate')">复制接口</div>
           <div class="ctx-item danger" @click="ctxCmd('delete')">删除接口</div>

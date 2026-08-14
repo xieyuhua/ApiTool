@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { SendRequest, FormatJSON, ParseFields } from '../../../wailsjs/go/main/App'
-import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse } from '../../store'
+import { SendRequest, FormatJSON, ParseFields, OpenFileDialog } from '../../../wailsjs/go/main/App'
+import { store, activeEnvVars, currentProject, uid, pushLog, markDebugDirty, debugDirty, saveDebugNow, setLiveResponse, getLiveResponse, setSubTab } from '../../store'
 import { runScript } from '../../script'
 import KVEditor from '../test/KVEditor.vue'
 
@@ -290,7 +290,7 @@ async function bodyToReqFields() {
   try {
     const fields = await ParseFields(props.api.body, JSON.parse(JSON.stringify(props.api.reqFields)))
     props.api.reqFields = fields || []
-    store.activeTab = 'params'
+    setSubTab('params')
     ElMessage.success('已生成请求参数，可在参数设置中补充描述')
   } catch (e) {
     ElMessage.error(String(e))
@@ -321,7 +321,7 @@ function formToReqFields() {
     }
   }
   props.api.reqFields = Object.values(map)
-  store.activeTab = 'params'
+  setSubTab('params')
   ElMessage.success('已生成表单参数文档，可在参数设置中补充描述')
 }
 
@@ -335,15 +335,20 @@ function removeFormRow(i) {
   props.api.formItems.splice(i, 1)
   markDebugDirty()
 }
-// 表单：选择本地文件，写入 value 为文件路径
-function pickFormFile(it) {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.onchange = () => {
-    const f = input.files && input.files[0]
-    if (f) { it.value = f.path || f.name; markDebugDirty() }
+// 表单：通过 Wails 原生文件对话框选择本地文件，写入 value 为真实绝对路径。
+// 注意：Wails webview 中浏览器 <input type="file"> 的 File.path 为空，无法拿到真实路径，
+// 必须用原生对话框才能取到可用于后端 os.Open 的绝对路径。
+async function pickFormFile(it) {
+  try {
+    const path = await OpenFileDialog({
+      Title: '选择上传文件',
+      ShowHiddenFiles: false,
+    })
+    // 用户取消选择时返回空字符串
+    if (path) { it.value = path; markDebugDirty() }
+  } catch (e) {
+    ElMessage.error('打开文件对话框失败: ' + (e?.message || e))
   }
-  input.click()
 }
 function formFileName(path) {
   if (!path) return ''
@@ -366,7 +371,7 @@ async function respToRespFields() {
   try {
     const fields = await ParseFields(r.body, JSON.parse(JSON.stringify(props.api.respFields)))
     props.api.respFields = fields || []
-    store.activeTab = 'params'
+    setSubTab('params')
     ElMessage.success('已从响应生成响应参数，可在参数设置中补充描述')
   } catch (e) {
     ElMessage.error(String(e))

@@ -43,6 +43,30 @@ func applyEnv(s string, env map[string]string) string {
 	})
 }
 
+// resolveUploadPath 将用户填写的文件路径规范化为可 os.Open 的绝对路径。
+// 处理 file:// 前缀，并对相对路径尝试以数据存储目录为基准解析（防御性兜底）。
+func resolveUploadPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// 兼容 file:// 协议前缀
+	if strings.HasPrefix(raw, "file://") {
+		raw = strings.TrimPrefix(raw, "file://")
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	// 相对路径：优先以数据存储目录为基准，再回退到进程工作目录
+	if dataDir, err := os.UserConfigDir(); err == nil {
+		candidate := filepath.Join(dataDir, "apitool", raw)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return raw
+}
+
 // SendRequest 执行 HTTP 请求
 func SendRequest(spec model.RequestSpec) model.ResponseData {
 	start := time.Now()
@@ -109,7 +133,7 @@ func SendRequest(spec model.RequestSpec) model.ResponseData {
 					continue
 				}
 				if kv.Type == model.FormTypeFile {
-					path := applyEnv(kv.Value, env)
+					path := resolveUploadPath(applyEnv(kv.Value, env))
 					if path == "" {
 						continue
 					}

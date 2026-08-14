@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
-import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports } from '../../store'
+import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 
 const scopeDirId = ref('')
@@ -72,9 +72,9 @@ async function importDoc() {
 }
 
 function openApi(id) {
-  store.currentApiId = id
+  openApiInTab(id)
+  setSubTab('doc')
   store.view = 'workspace'
-  store.activeTab = 'doc'
 }
 
 // ---------------- 测试报告（接入文档中心） ----------------
@@ -164,16 +164,6 @@ const formats = [
             <div class="fmt-name">{{ f.name }} <span class="fmt-ext">{{ f.ext }}</span></div>
             <div class="fmt-desc">{{ f.desc }}</div>
           </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">范围内接口（{{ scopedApis.length }}）</div>
-        <div v-if="!scopedApis.length" style="color:#c9cdd4; text-align:center; padding:20px">暂无接口</div>
-        <div v-for="a in scopedApis" :key="a.id" class="api-row" @click="openApi(a.id)">
-          <span class="method-tag" :class="'m-' + a.method">{{ a.method }}</span>
-          <span class="api-row-name">{{ a.name }}</span>
-          <span class="api-row-url">{{ a.url }}</span>
         </div>
       </div>
 

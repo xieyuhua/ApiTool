@@ -149,3 +149,21 @@ html, body {
   background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 12px;
   font-size: 12.5px; overflow: auto; max-height: 320px;
 }
+
+/* 主题方案选择网格 */
+.scheme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; width: 100%; }
+.scheme-item {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; background: var(--surface-2);
+  transition: border-color .15s, box-shadow .15s;
+}
+.scheme-item:hover { border-color: var(--primary); }
+.scheme-item.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+.scheme-swatch {
+  height: 26px; border-radius: 6px; width: 100%; color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; letter-spacing: .5px;
+}
+.scheme-custom { background: linear-gradient(135deg, #165dff, #00e0c6); }
+.scheme-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.scheme-desc { font-size: 11px; color: var(--text-muted); line-height: 1.3; }
+

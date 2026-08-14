@@ -193,3 +193,20 @@ type Bus interface {
   （Windows 剪贴板/热键 CGo 代码，需谨慎评估后再修）。
 - `internal/plugins/plugins.go:1034`：`non-constant format string in call to PrintfLine`。
 
+### 8.6 前端体验增强（多标签调试 / 主题方案 / 文档中心精简）
+
+同日完成的用户体验与文档完善（`npm run build` 通过，无新增 lint 错误）：
+
+- **多标签调试（类浏览器）**：`store.js` 新增 `openTabs:[{id,apiId,sub}]` 与 `activeTabId` 状态及
+  `openApiInTab/switchTab/closeTab/closeCurrentTab/closeOtherTabs/closeAllTabs/setSubTab/closeTabsByApi`
+  等函数；点击接口节点即开/切标签，右键"在新标签打开"强制新建，`Sidebar.vue` 与 `DocCenter.vue` 联动；
+  `App.vue` 渲染标签栏（方法色标 + 名称 + 关闭按钮 + 右键菜单），每个标签独立记忆子页（调试/参数/文档）。
+  接口被删/批量删/切换项目时经 `closeTabsByApi`/`closeAllTabs` 同步清理。此状态纯前端、不入库。
+- **主题方案**：`store.js` 新增 `SCHEMES`（默认蓝/科技青/暗夜紫/极光绿/日落橙/樱粉/石墨灰）与
+  `applyScheme/setScheme`，经 `data-scheme` 叠加专属 CSS 变量并同步明暗与主色；`SettingsPanel.vue`
+  新增方案网格选择器，`style.css` 补充对应样式。保留"自定义"明暗+取色器。
+- **文档中心精简**：移除"范围内接口"冗余列表卡片（与左侧目录树重复），范围选择/导出/分享卡片保留。
+- **文件上传修复**：`DebugPanel.pickFormFile` 改用 Wails 原生 `OpenFileDialog`（webview 中 `File.path` 为空，
+  原先回退 `f.name` 导致只保存文件名而 `os.Open` 失败）；`internal/httpx` 增加 `resolveUploadPath`
+  （处理 `file://` 前缀与相对路径兜底）。
+
