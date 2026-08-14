@@ -197,10 +197,16 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 func appendCaptured(c CapturedRequest, captureStatic bool, blacklist []string) {
 	// 服务端兜底过滤：即便扩展端因运行异常未过滤，css/图片/字体/data:URI 等静态资源也不会入库。
 	// 仅当用户在扩展端显式关闭「过滤静态资源」（即 captureStatic=true）时才放行。
-	if !captureStatic && isStaticResourceURL(c.URL) {
+	if !captureStatic && isStaticResource(c) {
 		return
 	}
 	if matchBlacklistPat(c.URL, blacklist) {
+		return
+	}
+	// CORS 预检（OPTIONS）去重：浏览器对跨域请求会先发 OPTIONS 探路，这类请求无业务响应体、
+	// 对接口文档无价值，且会随页面交互大量堆积。若同一 URL 已存在非 OPTIONS 记录，则丢弃该 OPTIONS；
+	// 若尚无业务请求，则仍保留（便于用户知晓该接口存在跨域）。
+	if strings.EqualFold(c.Method, "OPTIONS") && hasNonOptionsForURL(c.URL) {
 		return
 	}
 	if c.ID == "" {
@@ -588,6 +594,20 @@ var staticExts = map[string]bool{
 	"png": true, "jpg": true, "jpeg": true, "gif": true, "webp": true, "avif": true, "svg": true, "bmp": true, "ico": true,
 	"woff": true, "woff2": true, "eot": true, "ttf": true, "otf": true, "map": true,
 	"mp3": true, "mp4": true, "webm": true, "wav": true, "ogg": true, "pdf": true,
+	"wasm": true, "webmanifest": true, "manifest": true, "zip": true, "gz": true, "tgz": true,
+}
+
+// staticContentTypes 通过 Content-Type 判定的静态/二进制资源类型（用于扩展未提供扩展名或路径无后缀时兜底）
+var staticContentTypes = map[string]bool{
+	"application/octet-stream": true,
+	"application/font-woff":    true,
+	"font/woff2":               true,
+	"font/ttf":                 true,
+	"font/otf":                 true,
+	"image/":                   true, // 前缀匹配 image/*
+	"audio/":                   true,
+	"video/":                   true,
+	"application/pdf":          true,
 }
 
 // isStaticResourceURL 按扩展名 / 协议判断是否为静态资源（css/图片/字体/data:URI 等）
@@ -607,6 +627,58 @@ func isStaticResourceURL(u string) bool {
 		return false
 	}
 	return staticExts[strings.ToLower(path[dot+1:])]
+}
+
+// isStaticResource 综合 URL 扩展名与响应 Content-Type 判定静态资源。
+// 当 URL 无明确扩展名时，借助扩展回传的响应头 Content-Type 兜底过滤二进制流。
+func isStaticResource(c CapturedRequest) bool {
+	if isStaticResourceURL(c.URL) {
+		return true
+	}
+	// 仅当 URL 无法判定时，才用 Content-Type 兜底（避免误伤 API 的 JSON 响应）
+	for k, v := range c.RespHeaders {
+		if strings.EqualFold(k, "Content-Type") {
+			ct := strings.ToLower(strings.TrimSpace(v))
+			ct = ct[:minIdx(strings.IndexByte(ct, ';'), len(ct))] // 去掉 charset 等参数
+			if staticContentTypes[ct] {
+				return true
+			}
+			for prefix := range staticContentTypes {
+				if strings.HasSuffix(prefix, "/") && strings.HasPrefix(ct, prefix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// minIdx 返回 i 与 n 的最小值（i<0 时取 n），用于安全截断字符串索引
+func minIdx(i, n int) int {
+	if i < 0 {
+		return n
+	}
+	if i > n {
+		return n
+	}
+	return i
+}
+
+// hasNonOptionsForURL 判断指定 URL 是否已存在非 OPTIONS 方法的捕获记录。
+// 用于在 appendCaptured 中丢弃重复的 CORS 预检（OPTIONS）请求，避免无业务价值的请求堆积。
+// 需读取 capturedList，内部加锁保证并发安全。
+func hasNonOptionsForURL(u string) bool {
+	captureMu.Lock()
+	defer captureMu.Unlock()
+	for _, c := range capturedList {
+		if c == nil || c.URL != u {
+			continue
+		}
+		if !strings.EqualFold(c.Method, "OPTIONS") {
+			return true
+		}
+	}
+	return false
 }
 
 // wildcardToRegex 将 * 通配模式转为正则（^...$），如 *.example.com/* -> ^.*\.example\.com/.*$

@@ -128,6 +128,8 @@
               <el-checkbox-button value="https">HTTPS</el-checkbox-button>
               <el-checkbox-button value="websocket">WebSocket</el-checkbox-button>
               <el-checkbox-button value="sse">SSE</el-checkbox-button>
+              <el-checkbox-button value="grpc">gRPC</el-checkbox-button>
+              <el-checkbox-button value="graphql">GraphQL</el-checkbox-button>
             </el-checkbox-group>
             <el-tooltip content="勾选哪些协议就解析哪些；一个都不选则全部抓取解析" placement="top">
               <span style="color:#86909c;margin-left:6px;cursor:help;font-size:13px">?</span>
@@ -432,13 +434,16 @@ const filteredRecords = computed(() => {
   const protocols = filterProtocols.value
   const records = liveRecords.value
   const errByType = errHostsByType.value
+  // 协议别名归一：勾选 http 也匹配 https；勾选 websocket 也匹配 wss（与后端一致）
+  const aliasOf = { https: 'http', wss: 'websocket' }
   // 无任何过滤条件时直接返回，避免不必要的遍历
   if (!kw && !only && protocols.length === 0) return records
   return records.filter(r => {
     // 协议过滤
     if (protocols.length > 0) {
       const prot = (r.protocol || '').toLowerCase()
-      if (!protocols.includes(prot)) return false
+      const mapped = aliasOf[prot] || prot
+      if (!protocols.includes(prot) && !protocols.includes(mapped)) return false
     }
     // 仅异常 + 错误类型过滤
     if (only && r.host) {
@@ -584,7 +589,7 @@ const respFormatted = ref(false)
 const filterHosts = ref('')
 const filterExclude = ref('localhost, 127.0.0.1')
 const filterOnlyHTTP = ref(false)
-const filterProtocols = ref([]) // http/https/websocket/sse，空=全部解析
+const filterProtocols = ref([]) // http/https/websocket/sse/grpc/graphql，空=全部解析
 const autoDoc = ref(false)
 
 // 导入接口树
@@ -1162,7 +1167,7 @@ async function copyProxyAddr() {
   background: #fff; box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
 }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.filter-row .fl { font-size: 12px; color: var(--mp-sub); width: 88px; flex-shrink: 0; }
+.filter-row .fl { font-size: 12px; color: var(--mp-sub); white-space: nowrap; flex-shrink: 0; }
 .traffic-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; color: var(--mp-text); }
 .traffic-list {
   flex: 1; overflow: auto; border: 1px solid var(--mp-border); border-radius: var(--mp-radius); min-height: 120px;

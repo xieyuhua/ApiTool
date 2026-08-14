@@ -69,7 +69,7 @@ type Filter struct {
 	Method       string   `json:"method"`       // 限定 HTTP 方法（空表示不限）
 	PathKeyword  string   `json:"pathKeyword"`  // 路径关键字包含匹配
 	OnlyHTTP     bool     `json:"onlyHttp"`     // 仅记录 HTTP/HTTPS
-	Protocols    []string `json:"protocols"`    // 勾选的协议列表（http/https/websocket/sse）；空=全部解析
+	Protocols    []string `json:"protocols"`    // 勾选的协议列表（http/https/websocket/wss/sse/grpc/graphql）；空=全部解析。https 与 http、wss 与 websocket 互为别名
 }
 
 // NewManager 创建管理器。caDir 为 CA 与抓包数据目录。

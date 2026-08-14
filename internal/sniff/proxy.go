@@ -293,29 +293,37 @@ func (p *proxy) shouldIntercept(req *http.Request) bool {
 		return true // 一个都不选 -> 全部抓取解析
 	}
 	prot := p.protocolOf(req)
-	for _, want := range f.Protocols {
-		if strings.EqualFold(want, prot) {
-			return true
-		}
-	}
-	return false
+	return matchProtocol(prot, f.Protocols)
 }
 
 // protocolOf 推断请求所属协议。
+// 识别顺序：gRPC → WebSocket → SSE → GraphQL → HTTPS → HTTP。
+// gRPC 跑在 HTTP/2 上，go-mitmproxy 已对 h2 做 MITM，这里把其从普通 http/https 区分出来。
+// 注意：SSE 由服务端通过响应 Content-Type: text/event-stream 标识，请求侧仅作启发式辅助，
+// 真正的 SSE 协议标记在 Response 中由 f.SSE 兜底覆盖。
 func (p *proxy) protocolOf(req *http.Request) string {
 	if req == nil {
 		return "http"
 	}
+	ct := strings.ToLower(req.Header.Get("Content-Type"))
+
+	// gRPC：HTTP/2 上的二进制 RPC，content-type 为 application/grpc(± 参数)
+	if strings.HasPrefix(ct, "application/grpc") {
+		return "grpc"
+	}
+
 	// WebSocket 升级
 	if strings.EqualFold(req.Header.Get("Upgrade"), "websocket") ||
 		(strings.EqualFold(req.Header.Get("Connection"), "upgrade") && strings.Contains(strings.ToLower(req.Header.Get("Upgrade")), "websocket")) {
 		return "websocket"
 	}
-	// 服务端推送 SSE
-	if strings.EqualFold(req.Header.Get("Accept"), "text/event-stream") {
-		return "sse"
+
+	// GraphQL：content-type 为 application/graphql（查询体也可能用 JSON，但此处仅按明确类型判定）
+	if strings.HasPrefix(ct, "application/graphql") {
+		return "graphql"
 	}
-	// HTTPS：CONNECT 隧道或已建立 TLS
+
+	// HTTPS：CONNECT 隧道或已建立 TLS（加密流量）
 	if req.Method == "CONNECT" || req.TLS != nil || strings.EqualFold(req.URL.Scheme, "https") {
 		return "https"
 	}
@@ -336,6 +344,11 @@ func (p *proxy) Response(f *mitm.Flow) {
 		prot = "sse"
 	} else if f.WebScoket != nil {
 		prot = "websocket"
+	}
+
+	// 协议勾选过滤：仅当用户勾选了对应协议（或全空）才记录
+	if !matchProtocol(prot, filter.Protocols) {
+		return
 	}
 
 	// 应用 Host / Method / Path 过滤
@@ -363,6 +376,19 @@ func (p *proxy) Response(f *mitm.Flow) {
 
 	rec := p.store.recordFromReqRespExt(req, respBody, reqBody, headerToKV(req.Header),
 		respHeaders, statusCode, statusText, prot, f.StartTime)
+
+	// gRPC 解码：将 protobuf 二进制帧转换为可读文本（HTTP/2 上的 gRPC 流量）
+	if prot == "grpc" {
+		if len(reqBody) > 0 {
+			rec.ReqBody = decodeGRPCBody(reqBody)
+			rec.ReqBodyType = "grpc"
+		}
+		if len(respBody) > 0 {
+			rec.RespBody = decodeGRPCBody(respBody)
+			rec.RespBodyType = "grpc"
+		}
+	}
+
 	p.finalize(rec)
 }
 
@@ -372,6 +398,9 @@ func (p *proxy) WebSocketMessage(f *mitm.Flow) {
 		return
 	}
 	filter := p.getFilter()
+	if !matchProtocol("websocket", filter.Protocols) {
+		return
+	}
 	if !p.passFilter(f.Request, filter) {
 		return
 	}
@@ -386,6 +415,9 @@ func (p *proxy) SSEMessage(f *mitm.Flow) {
 		return
 	}
 	filter := p.getFilter()
+	if !matchProtocol("sse", filter.Protocols) {
+		return
+	}
 	if !p.passFilter(f.Request, filter) {
 		return
 	}
@@ -454,11 +486,15 @@ func (p *proxy) HTTPConnectError(f *mitm.Flow, err error) {
 
 // protocolOfRaw 基于原始请求判断协议（无 Flow.SSE/WebScoket 时用）。
 func (p *proxy) protocolOfRaw(req *mitm.Request) string {
+	ct := strings.ToLower(req.Header.Get("Content-Type"))
+	if strings.HasPrefix(ct, "application/grpc") {
+		return "grpc"
+	}
 	if strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 		return "websocket"
 	}
-	if strings.EqualFold(req.Header.Get("Accept"), "text/event-stream") {
-		return "sse"
+	if strings.HasPrefix(ct, "application/graphql") {
+		return "graphql"
 	}
 	if strings.EqualFold(req.URL.Scheme, "https") {
 		return "https"

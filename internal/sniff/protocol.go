@@ -30,6 +30,55 @@ type ProtoInfo struct {
 	Note string
 }
 
+// ---- 应用层协议字符串（供 Filter.Protocols 与协议识别共享，统一来源）----
+// 这些小写字符串是 protocolOf / protocolOfRaw 的返回值，也是前端协议勾选的取值。
+// 新增协议（如 grpc、graphql）只需在此登记，shouldIntercept 与各记录 hook 通过
+// matchProtocol 统一匹配，避免"勾选项命中不到实际协议"的不一致。
+const (
+	ProtStrHTTP    = "http"
+	ProtStrHTTPS   = "https"
+	ProtStrWS      = "websocket"
+	ProtStrWSS     = "wss"
+	ProtStrSSE     = "sse"
+	ProtStrGRPC    = "grpc"
+	ProtStrGraphQL = "graphql"
+	ProtStrUnknown = "unknown"
+)
+
+// ProtocolOptions 前端协议勾选下拉项（含加密/流式协议）。
+var ProtocolOptions = []string{
+	ProtStrHTTP, ProtStrHTTPS, ProtStrWS, ProtStrWSS, ProtStrSSE, ProtStrGRPC, ProtStrGraphQL,
+}
+
+// protocolAliases 归一化别名：勾选 http 时同时匹配 https；勾选 websocket 时同时匹配 wss。
+// 避免用户只勾选 http/websocket 时漏掉加密流量（此前 https 被视为独立协议被漏抓）。
+var protocolAliases = map[string]string{
+	ProtStrHTTPS: ProtStrHTTP,
+	ProtStrWSS:   ProtStrWS,
+}
+
+// matchProtocol 统一 Filter.Protocols 与 protocolOf 的匹配逻辑。
+// prot 为 protocolOf/protocolOfRaw 的返回值；protocols 为空表示全部放行。
+// 同时处理别名归一（https→http、wss→websocket）。
+func matchProtocol(prot string, protocols []string) bool {
+	if len(protocols) == 0 {
+		return true
+	}
+	for _, want := range protocols {
+		want = strings.ToLower(strings.TrimSpace(want))
+		if want == "" {
+			continue
+		}
+		if want == prot {
+			return true
+		}
+		if alias, ok := protocolAliases[want]; ok && alias == prot {
+			return true
+		}
+	}
+	return false
+}
+
 // IdentifyProtocol 根据握手字节嗅探对端协议类型。
 // 传入的是从客户端读取的前若干个字节（通常为前 1-8 字节）。
 func IdentifyProtocol(head []byte) ProtoInfo {
