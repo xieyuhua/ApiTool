@@ -106,6 +106,15 @@ apitool/
 - **主题方案**：`settings.scheme` 记录所选方案 id，由 `applyScheme()` 在 `document.documentElement` 上叠加 `data-scheme`
   专属 CSS 变量并同步 `settings.theme`/`settings.accent`；方案配色表（`SCHEMES`）定义在 `store.js`，不依赖后端。
 
+### 4.7 持久化与自动保存（性能关键约定）
+- **切勿**对 `store.data` 使用 `watch(..., {deep:true})` 做全局自动保存：每次任意字段编辑都会深度遍历整个 store，
+  数据量大时输入/切换严重卡顿（历史坑，已在 8.7 修复）。
+- 正确做法：用轻量 `store.saveRev` 计数器 + `requestSave()`（仅 `saveRev++`，O(1) 无遍历）触发防抖保存；
+  需要落盘的内联编辑（环境/公共参数/重命名）显式调用 `requestSave()`，结构变更走既有 `saveNow()`。
+- **调试编辑不自动保存**：调试/参数面板内联编辑先 `markDebugDirty()` 抑制自动保存，用户点「保存请求」才 `saveDebugNow()`
+  落盘并刷新该接口文档快照（`captureApiSnapshot`，O(1)，不克隆全部接口）。
+- 自动保存防抖 500ms；云同步（`scheduleAutoSync`）防抖 4s，仅在 `requestSave`/`saveNow` 路径触发。
+
 ---
 
 ## 五、构建与开发

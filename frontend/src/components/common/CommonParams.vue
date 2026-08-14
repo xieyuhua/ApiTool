@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { store, currentProject } from '../../store'
+import { store, currentProject, requestSave } from '../../store'
 import KVEditor from '../test/KVEditor.vue'
 
 const visible = defineModel('visible')
@@ -18,10 +18,10 @@ const proj = computed(() => currentProject())
 
     <el-tabs>
       <el-tab-pane label="公共 Header">
-        <KVEditor :items="proj.common.headers" key-placeholder="Header 名（如 Authorization）" />
+        <KVEditor :items="proj.common.headers" key-placeholder="Header 名（如 Authorization）" @change="requestSave" />
       </el-tab-pane>
       <el-tab-pane label="公共 Query">
-        <KVEditor :items="proj.common.query" key-placeholder="参数名" />
+        <KVEditor :items="proj.common.query" key-placeholder="参数名" @change="requestSave" />
       </el-tab-pane>
     </el-tabs>
 

@@ -210,3 +210,19 @@ type Bus interface {
   原先回退 `f.name` 导致只保存文件名而 `os.Open` 失败）；`internal/httpx` 增加 `resolveUploadPath`
   （处理 `file://` 前缀与相对路径兜底）。
 
+### 8.7 性能优化（打开/切换卡顿）
+
+症状：输入与切换标签卡顿、启动慢。根因与修复：
+
+- **根因 1 — 全局深监听**：`watch(() => store.data, ..., {deep:true})` 每次任意字段编辑都深度遍历整个 store
+  （全项目/接口/用例/报告/插件连接），O(全量数据) 每按键一次。调试面板内联编辑虽被 `debugDirty` 抑制保存，
+  但深 diff 仍每字执行 → 输入卡顿主因。
+  **修复**：用轻量 `store.saveRev` 计数器 + `requestSave()` 取代深监听（`watch(() => store.saveRev, ...)`，O(1) 无遍历）。
+  需要落盘的内联编辑（环境/公共参数/目录与接口重命名）改为显式调用 `requestSave()`；结构变更原有的 `saveNow()` 保留。
+- **根因 2 — 每次保存全量克隆**：`saveNow()` 调用 `captureSnapshots()` 对所有接口做 `JSON.parse(JSON.stringify())`，
+  自动保存频繁时 CPU/GC 抖动。
+  **修复**：`captureSnapshots()` 移出 `saveNow` 热路径；新增 `captureApiSnapshot(api)`，仅在 `saveDebugNow` 中刷新当前接口快照
+  （O(1)）；`saveNow` 仅负责持久化。文档预览读取 `savedApiSnapshots[id]`，缺失时回退实时 `props.api`，行为不变。
+- 效果：调试输入期间不再触发任何深遍历/全量克隆，仅显式保存或轻量计数器 +1；侧边栏树为 `computed(buildTree)`，
+  仅依赖接口 `name/method/url/dirId`，编辑请求体等字段不会重建树。`npm run build` 通过，无新增 lint 错误。
+

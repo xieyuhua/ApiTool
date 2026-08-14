@@ -52,6 +52,9 @@ export const store = reactive({
   openTabs: [], // [{ id, apiId, sub }]
   activeTabId: '', // 当前激活的标签 id
   appVersion: '', // 客户端版本号（来自 Go 端）
+  // 轻量修订计数器：任何需要持久化的修改 +1，替代对整个 store.data 的 deep watch，
+  // 避免每次按键都深度遍历全量数据（性能关键）。
+  saveRev: 0,
   data: {
     projects: [
       { id: 'default', name: '默认项目', dirs: [], apis: [], environments: [], activeEnvId: '', updatedAt: '', common: { headers: [], query: [] }, testCases: [], testPlans: [], testReports: [] },
@@ -81,8 +84,8 @@ export const THEMES = [
 // 选择方案会同时写入 settings.theme 与 settings.accent，并叠加 data-scheme 专属变量。
 export const SCHEMES = [
   {
-    id: 'default', label: '默认蓝', mode: 'light', accent: '#165dff',
-    desc: '经典科技蓝，干净专业', swatch: '#165dff',
+    id: 'default', label: '原始亮色', mode: 'light', accent: '#165dff',
+    desc: '系统默认浅色主题，干净专业', swatch: '#165dff',
     vars: {},
   },
   {
@@ -148,8 +151,11 @@ export const SCHEMES = [
 ]
 
 const SCHEME_MAP = Object.fromEntries(SCHEMES.map(s => [s.id, s]))
+// 所有方案可能设置的 CSS 变量键集合；脱离方案（自定义/明暗切换）时需从根元素清除这些内联变量
+const SCHEME_VAR_KEYS = [...new Set(SCHEMES.flatMap(s => Object.keys(s.vars || {})))]
 
-// 应用主题方案：叠加 data-scheme 专属变量（无方案时清除），再同步明暗与主色
+// 应用主题方案：叠加 data-scheme 专属变量；无方案（自定义/明暗切换）时清除这些内联变量，
+// 否则旧方案的 --bg/--surface 等会继续覆盖浅色，导致亮色无法恢复。
 export function applyScheme() {
   const root = document.documentElement
   const id = store.data.settings.scheme
@@ -159,6 +165,8 @@ export function applyScheme() {
     for (const k in scheme.vars) root.style.setProperty(k, scheme.vars[k])
   } else {
     root.removeAttribute('data-scheme')
+    // 清除此前方案写入的内联变量，让浅色/自定义配色真正生效
+    for (const k of SCHEME_VAR_KEYS) root.style.removeProperty(k)
   }
   applyTheme()
 }
@@ -222,13 +230,17 @@ export function applyTheme() {
 
 export function setTheme(t) {
   store.data.settings.theme = t
-  applyTheme()
+  // 手动切换明暗即视为脱离预设方案，回到「自定义」，否则方案的内联变量会覆盖明暗
+  store.data.settings.scheme = ''
+  applyScheme()
   saveNow()
 }
 export function setAccent(c) {
   if (!c) c = '#165dff'
   store.data.settings.accent = c
-  applyAccent(c)
+  // 手动改主题色同样脱离预设方案
+  store.data.settings.scheme = ''
+  applyScheme()
   saveNow()
 }
 
@@ -288,6 +300,14 @@ function scheduleSave() {
   saveTimer = setTimeout(saveNow, 500)
 }
 
+// 轻量「请求保存」信号：仅递增计数器（O(1)，不触发深遍历），由修订计数器 watch 接管防抖保存。
+// 用于那些通过内联编辑（环境/公共参数/重命名等）修改数据、原本依赖全局 deep watch 才落盘的场景。
+export function requestSave() {
+  store.saveRev++
+  scheduleSave()
+  scheduleAutoSync()
+}
+
 // Wails 桥接（window.go）由桌面运行时注入，可能晚于 Vue 挂载；
 // 浏览器预览（npm run dev）下不存在，此时退回内存数据，避免崩溃。
 function hasGoBridge() {
@@ -313,18 +333,23 @@ export async function saveNow() {
   if (!hasGoBridge()) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
-    captureSnapshots() // 抓拍保存态，文档预览随之更新
     clearDebugDirty() // 任何显式保存后，清除调试脏标记
   } catch (e) {
     console.error('保存失败', e)
   }
 }
 
+// 仅更新单个接口的已保存快照（O(1)，取代每次保存克隆全部接口），供文档预览使用。
+export function captureApiSnapshot(api) {
+  if (api && api.id) savedApiSnapshots[api.id] = JSON.parse(JSON.stringify(api))
+}
+
 // 显式保存当前调试请求数据（用户点击「保存请求」），同时清除脏标记，
-// 使后续自动保存恢复生效。
+// 使后续自动保存恢复生效；仅刷新当前接口的文档快照，避免全量克隆。
 export async function saveDebugNow() {
   clearDebugDirty()
   await saveNow()
+  captureApiSnapshot(currentApi())
 }
 
 async function loadInto() {
@@ -388,7 +413,9 @@ export async function initStore() {
   if (ok) {
     try { store.appVersion = await GetVersion() } catch {}
   }
-  watch(() => store.data, () => { scheduleSave(); scheduleAutoSync() }, { deep: true })
+  // 轻量持久化监听：仅观察修订计数器（O(1)，不再深度遍历整个 store.data），
+  // 由 requestSave() 在需要落盘的编辑处递增，避免每次按键都触发深 diff 导致卡顿。
+  watch(() => store.saveRev, () => { scheduleSave(); scheduleAutoSync() })
   applyScheme() // 应用主题方案（含明暗/主色/专属变量，兼容跟随系统）
   try {
     if (window.matchMedia) {

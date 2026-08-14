@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore, openApiInTab, closeTabsByApi } from '../../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore, openApiInTab, closeTabsByApi, requestSave } from '../../store'
 import { parseCli, FORMATS } from '../../cli'
 import { CopyToClipboard } from '../../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
@@ -250,6 +250,7 @@ async function rename(node) {
       const a = p.apis.find(x => x.id === node.id)
       if (a) a.name = value
     }
+    requestSave()
   } catch { /* 取消 */ }
 }
 

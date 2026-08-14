@@ -237,6 +237,9 @@ async function toggleSync() {
         <div class="card-title">外观（主题）</div>
         <el-form label-width="110px" label-position="left">
           <el-form-item label="主题方案">
+            <div style="font-size:12px;color:#86909c;margin-bottom:8px">
+              选择「原始亮色」即回到默认浅色主题；也可点「自定义」后单独切换明暗与主题色。
+            </div>
             <div class="scheme-grid">
               <div v-for="sc in SCHEMES" :key="sc.id" class="scheme-item"
                 :class="{ active: store.data.settings.scheme === sc.id }" @click="setScheme(sc.id)">
