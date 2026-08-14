@@ -831,8 +831,10 @@ func (m *Manager) callMCPTool(srv MCPServer, tool string, arguments map[string]i
 
 // ============================ 工具函数 ============================
 
+// agentID 生成带前缀的唯一会话/服务 ID（如 "sess_xxx"、"srv_xxx"）。
+// 基于 UUID，避免原 time.Now().UnixNano() 在高并发同前缀下的碰撞风险。
 func agentID(prefix string) string {
-	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	return prefix + "_" + util.GenID()
 }
 
 func toJSON(v interface{}) string {

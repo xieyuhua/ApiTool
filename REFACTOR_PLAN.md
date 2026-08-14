@@ -152,3 +152,44 @@ type Bus interface {
 - `tools.go`：`Tool*` 加解密绑定转发（委托 `internal/crypto`）。
 
 > 通过 `go build -mod=vendor ./...` 验证编译通过，前端 wailsjs 绑定签名保持不变。
+
+## 八、质量优化（2026-08-14）
+
+在分包架构稳定基础上，针对并发安全与重复代码做了如下改进（`go build` / `go vet` 涉及文件均通过）。
+
+### 8.1 Store 读锁优化（并发性能）
+`internal/store/store.go` 的互斥锁由 `sync.Mutex` 改为 `sync.RWMutex`：
+- `GetData()`（读路径，被 capture / stress / cron 等多协程并发调用）改用 `RLock`，
+  允许多个读协程并发读取而不互相阻塞；写路径（`SaveData` / `initBackend`）仍用 `Lock`。
+- 背景：DB 后端 `Read`/`Write` 内部维护原生 map（`AppData` 含切片/映射），无锁并发会触发
+  `concurrent map read and map write` panic；RWMutex 在"读多写少"场景既保证安全又减少串行。
+
+### 8.2 统一 Token / ID 生成（消除重复）
+- 新增 `internal/util.Token()`：生成 32 字符随机十六进制令牌（128bit 熵），统一收口对外服务鉴权。
+- `internal/capture` 的 `LoadOrCreateToken` 原内联 `crypto/rand`+`hex` 逻辑改为调用 `util.Token()`，
+  并移除 capture 包内不再使用的 `crypto/rand` / `encoding/hex` 导入。
+- `internal/agent` 的 `agentID(prefix)` 原基于 `time.Now().UnixNano()` 前缀，
+  高并发同前缀下存在碰撞风险，改为 `prefix + "_" + util.GenID()`（UUID v4），保留前缀语义。
+
+### 8.3 全局状态加锁契约显式化
+`internal/capture` 与 `internal/share` 的包级单例状态（`captureMu`/`captureSrv`/…、
+`shareMu`/`shareSrv`/…）补充注释，明确"所有字段访问须持对应锁，禁止锁外直接读写"，
+避免后续维护者误用引入并发 panic。（注：capture/share 当前以包级单例 + Mutex 形式运行，
+已线程安全；彻底实例化为 `App` 字段属于可选整洁项，因调用点分散且需保持前端绑定签名，暂不改动。）
+
+### 8.4 tools.go 迁移至 internal/tool（解耦 Wails 绑定根）
+根目录 `tools.go`（`package main`）承载加解密工具方法，但 `ToolResult` 与 `internal/crypto.Result`
+字段完全重复，且把业务逻辑留在 `main` 包违反"业务下沉 internal"的分包原则。
+- 新增 `internal/tool` 包，定义 `Service` 与 `ToolHash`/`ToolHmac`/`ToolCipher` 方法（返回 `crypto.Result`，无 `App` 依赖）。
+- `App` 嵌入 `*tool.Service`，方法经嵌入提升为 `App` 的导出方法，Wails 前端绑定 `window.go.App.ToolHash`
+  等签名保持不变（返回 JSON 字段 `ok`/`output`/`error` 一致）。
+- 删除 `main` 包的 `tools.go`；`Startup` 中初始化 `a.Service = &tool.Service{}`。
+- `wails build` 重生成 `frontend/wailsjs`：`ToolResult` 类被移除，`crypto.Result` 进入 `models.ts`，
+  `App.d.ts` 返回类型由 `main.ToolResult` 变为 `crypto.Result`，前端 `Toolbox.vue` 按字段解析不受影响。
+
+### 8.5 既有技术债（不在本次范围，记录备查）
+`go vet ./...` 仍报 5 处历史警告，均与本优化无关，修改变更高风险（涉及 CGo/Windows API）：
+- `internal/platform/clipboard.go:189,227,384`、`hotkey.go:74`：`possible misuse of unsafe.Pointer`
+  （Windows 剪贴板/热键 CGo 代码，需谨慎评估后再修）。
+- `internal/plugins/plugins.go:1034`：`non-constant format string in call to PrintfLine`。
+

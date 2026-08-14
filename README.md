@@ -14,6 +14,8 @@
 - 本地 JSON 配置 + 客户端自动升级检测
 - **剪贴板历史**：系统级监听，连续按两次 Ctrl 调出浮层，自动记录复制过的文本与图片，支持搜索、快捷复制/删除
 
+> **开发者文档**：代码架构、模块依赖、构建与贡献约定见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)；历史重构记录见 [`REFACTOR_PLAN.md`](./REFACTOR_PLAN.md)。
+
 ---
 
 ## 一、功能一览
@@ -42,7 +44,7 @@
 ## 二、安装与构建
 
 ### 环境要求
-- Go 1.21+
+- Go 1.26+（与 `go.mod` 一致）
 - Node.js 18+
 - Wails v2 CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
@@ -691,7 +693,6 @@ apitool/
 ├── main.go                # Wails 应用入口
 ├── app.go                 # App 结构体：嵌入各内部模块，暴露 Wails 绑定（数据读写、剪贴板、升级检测等）
 ├── tray.go                # 系统托盘菜单（含「剪贴板历史…」入口）
-├── tools.go               # 工具注册 / 子命令入口
 ├── internal/              # 业务逻辑（不再平铺于根目录）
 │   ├── model/             # 数据模型（AppData、项目/接口/环境/用例/计划/报告/设置/插件/剪贴板等）
 │   ├── store/             # 存储门面：SQLite/MySQL 双后端切换、旧 JSON 自动导入
@@ -699,16 +700,17 @@ apitool/
 │   ├── agent/             # AI Agent：多会话、MCP 服务器（stdio/http）、内置工具、Agent 运行
 │   ├── ai/                # AI 调用（Chat / ChatRaw / 字段描述生成），Host 接口解耦宿主
 │   ├── testing/           # 测试引擎：用例生成、执行、报告导出
+│   ├── tool/              # 通用工具（Hash/HMAC/对称加解密），由 App 嵌入提升给 Wails 前端
 │   ├── doc/               # 接口文档生成（md/html/word/openapi）与导入（OpenAPI/Swagger/Postman）
 │   ├── share/             # 本地分享服务（独立 HTML / 在线链接，localhost 托管）
 │   ├── sync/              # 桌面端内置同步服务（账号、项目、分享文档）
-│   ├── capture/           # 剪贴板捕获（文本+图片）、浮层窗口控制、复制回写
+│   ├── capture/           # 浏览器扩展流量捕获（服务端兜底过滤、去重）
 │   ├── plugins/           # 插件数据库连接（MySQL/Redis/PG 等）
 │   ├── httpx/             # HTTP 客户端封装（请求发送、代理、超时、拦截）
 │   ├── stress/            # 压力测试
 │   ├── crypto/            # 加解密工具
 │   ├── bus/               # 事件总线（前端事件转发）
-│   ├── sniff/             # 网络抓包（MITM）：proxy.go 代理与 addon、manager.go 生命周期、sysproxy.go 系统代理与证书、ca.go CA 生成、capture.go 记录去重
+│   ├── sniff/             # 网络抓包（MITM）：proxy.go 代理与 addon、manager.go 生命周期、sysproxy.go 系统代理与证书、ca.go CA 生成、capture.go 抓包记录去重
 │   ├── platform/          # 平台相关能力（剪贴板、PNG 读取、文件对话框等）
 │   ├── jsonutil/          # JSON 解析 / 字段树构建
 │   └── util/              # 通用工具（ID 生成、字符串、环境变量等）

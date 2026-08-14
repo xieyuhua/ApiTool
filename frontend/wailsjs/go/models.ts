@@ -569,6 +569,27 @@ export namespace capture {
 
 }
 
+export namespace crypto {
+	
+	export class Result {
+	    ok: boolean;
+	    output: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.output = source["output"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
 export namespace frontend {
 	
 	export class FileFilter {
@@ -733,22 +754,6 @@ export namespace main {
 	        this.hasNew = source["hasNew"];
 	        this.url = source["url"];
 	        this.notes = source["notes"];
-	        this.error = source["error"];
-	    }
-	}
-	export class ToolResult {
-	    ok: boolean;
-	    output: string;
-	    error: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ToolResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ok = source["ok"];
-	        this.output = source["output"];
 	        this.error = source["error"];
 	    }
 	}

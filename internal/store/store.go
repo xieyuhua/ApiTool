@@ -20,8 +20,10 @@ type Store struct {
 	dataFile   string
 	version    string
 	updateURL  string
-	mu         sync.Mutex
-	dbImpl     db.DB // 数据库后端（nil 表示使用 JSON 文件回退）
+	// mu 保护对后端（dbImpl）的并发访问：读用 RLock（GetData），写用 Lock（SaveData/initBackend）。
+	// dbImpl.Read/Write 内部维护原生 map（AppData 含切片/映射），无锁并发会触发 concurrent map panic。
+	mu     sync.RWMutex
+	dbImpl db.DB // 数据库后端（nil 表示使用 JSON 文件回退）
 }
 
 // New 创建存储器。dataFile 为 JSON 数据文件路径（同时作为 SQLite DB 的同级依据）；
@@ -91,9 +93,10 @@ func loadLegacyJSON(dataFile, version, updateURL string) (model.AppData, bool) {
 }
 
 // GetData 读取并修正全部数据（等价于旧 App.readData）。
+// 使用读锁，允许多个读协程（capture、stress、cron 等）并发读取而互不阻塞。
 func (s *Store) GetData() model.AppData {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.dbImpl != nil {
 		data, err := s.dbImpl.Read()
 		if err == nil {

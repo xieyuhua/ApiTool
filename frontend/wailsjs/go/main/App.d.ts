@@ -11,6 +11,7 @@ import {stress} from '../models';
 import {sniff} from '../models';
 import {store} from '../models';
 import {sync} from '../models';
+import {crypto} from '../models';
 
 export function AppVersion():Promise<string>;
 
@@ -322,11 +323,11 @@ export function SyncShareBackend():Promise<sync.ShareBackend>;
 
 export function TestMCPServer(arg1:agent.MCPServer):Promise<Array<agent.MCPTool>>;
 
-export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<main.ToolResult>;
+export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<crypto.Result>;
 
-export function ToolHash(arg1:string,arg2:string):Promise<main.ToolResult>;
+export function ToolHash(arg1:string,arg2:string):Promise<crypto.Result>;
 
-export function ToolHmac(arg1:string,arg2:string,arg3:string):Promise<main.ToolResult>;
+export function ToolHmac(arg1:string,arg2:string,arg3:string):Promise<crypto.Result>;
 
 export function WindowCenter():Promise<void>;
 

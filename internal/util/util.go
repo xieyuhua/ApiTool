@@ -2,7 +2,10 @@
 package util
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"net"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -10,6 +13,17 @@ import (
 // GenID 生成全局唯一 ID（UUID v4 字符串）
 func GenID() string {
 	return uuid.NewString()
+}
+
+// Token 生成 32 字符的随机十六进制令牌（128bit 熵），用于对外服务鉴权，
+// 例如 capture 捕获服务的访问 token。统一收口避免各模块重复实现 crypto/rand。
+func Token() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		// 极端情况下回退 UUID，保证永远能产出可用令牌
+		return strings.ReplaceAll(uuid.NewString(), "-", "")
+	}
+	return hex.EncodeToString(buf)
 }
 
 // LocalIP 返回本机第一个非回环 IPv4 地址（用于生成局域网可访问的分享/同步地址）。

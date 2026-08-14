@@ -51,6 +51,8 @@ type ShareItemView struct {
 	ExpireAt    int64  `json:"expireAt"`
 }
 
+// 包级单例状态：本包以单例服务形式运行（同一进程仅一个分享服务实例）。
+// 所有字段的读写都必须持有 shareMu，禁止在锁外直接访问，否则并发写入会触发 panic。
 var (
 	shareMu    sync.Mutex
 	shareSrv   *http.Server

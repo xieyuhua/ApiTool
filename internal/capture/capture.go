@@ -12,8 +12,6 @@ import (
 	"apitool/internal/store"
 	"apitool/internal/util"
 
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,6 +78,8 @@ const defaultCaptureAddr = "127.0.0.1:8653"
 
 const captureTokenFile = "capture_token.txt"
 
+// 包级单例状态：本包以单例服务形式运行（同一进程仅一个捕获服务实例）。
+// 所有字段的读写都必须持有 captureMu，禁止在锁外直接访问，否则并发写入会触发 panic。
 var (
 	captureSrv   *http.Server
 	captureMu    sync.Mutex
@@ -576,12 +576,7 @@ func LoadOrCreateToken(syncDir string) {
 			return
 		}
 	}
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err == nil {
-		captureToken = "cap_" + hex.EncodeToString(buf)
-	} else {
-		captureToken = "cap_" + uuid.NewString()
-	}
+	captureToken = "cap_" + util.Token()
 	_ = os.WriteFile(p, []byte(captureToken), 0o600)
 }
 

@@ -17,6 +17,7 @@ import (
 	"apitool/internal/stress"
 	syncsrv "apitool/internal/sync"
 	"apitool/internal/testing"
+	"apitool/internal/tool"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
@@ -37,6 +38,7 @@ import (
 type App struct {
 	*agent.Manager  // 嵌入 agent 模块，提升其 Agent*/RunAgent/MCP* 等导出方法供 Wails 绑定
 	*testing.Engine // 嵌入测试引擎，提升其 Generate*/RunTest*/ExportTestReport 等导出方法供 Wails 绑定
+	*tool.Service   // 嵌入通用工具，提升其 ToolHash/ToolHmac/ToolCipher 等导出方法供 Wails 绑定
 	ctx             context.Context
 	store           *store.Store
 	dataFile        string
@@ -90,6 +92,8 @@ func (a *App) startup(ctx context.Context) {
 	a.Manager = agent.NewManager(a, a, filepath.Join(dataDir, "agent.json"))
 	// 初始化测试引擎（用例生成/执行/报告导出），注入宿主能力与事件总线
 	a.Engine = testing.NewEngine(a, ctx)
+	// 初始化通用工具服务（Hash/HMAC/Cipher），嵌入 App 供 Wails 绑定
+	a.Service = &tool.Service{}
 	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
 	if _, err := os.Stat(a.dataFile); err != nil {
 		_ = a.SaveData(a.store.GetData())
