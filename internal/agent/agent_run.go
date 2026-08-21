@@ -17,11 +17,12 @@ import (
 
 // RunAgentArgs 前端发起一次 Agent 对话的入参。
 type RunAgentArgs struct {
-	Input   string      `json:"input"`
-	BaseURL string      `json:"baseUrl"`
-	APIKey  string      `json:"apiKey"`
-	Model   string      `json:"model"`
-	Timeout int         `json:"timeoutSec"`
+	Input     string `json:"input"`
+	BaseURL   string `json:"baseUrl"`
+	APIKey    string `json:"apiKey"`
+	Model     string `json:"model"`
+	Timeout   int    `json:"timeoutSec"`
+	MaxTokens int    `json:"maxTokens"` // 模型回复长度上限（0=模型默认）
 }
 
 // RunAgentResult 一次对话的最终结果。
@@ -35,7 +36,7 @@ type RunAgentResult struct {
 }
 
 // llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
-func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string) (string, error) {
+func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, maxTokens int) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
 		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
@@ -55,7 +56,7 @@ func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperat
 			url += "/v1/chat/completions"
 		}
 	}
-	payload, _ := json.Marshal(ai.Request{Model: model, Messages: messages, Temperature: temperature, Stream: false})
+	payload, _ := json.Marshal(ai.Request{Model: model, Messages: messages, Temperature: temperature, MaxTokens: maxTokens, Stream: false})
 	timeout := args.Timeout
 	if timeout <= 0 {
 		timeout = 60
@@ -124,6 +125,7 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 		Model:         model,
 		Messages:      messages,
 		Temperature:   temperature,
+		MaxTokens:     args.MaxTokens,
 		Stream:        true,
 		StreamOptions: &ai.StreamOptions{IncludeUsage: true},
 	})
@@ -456,6 +458,8 @@ func (m *Manager) emitEvent(name string, payload interface{}) {
 func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	d := m.readAgentData()
 	cfg := d.Config
+	// 回复长度上限统一由配置决定（前端无需单独传），0 表示交给模型服务端默认值
+	args.MaxTokens = cfg.MaxTokens
 	userCtx := m.mcpUserContext(cfg, d.Users)
 
 	// 收集可用工具（启用的 MCP 服务器 + 启用的内置工具）
@@ -680,5 +684,5 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 // PolishText 独立的 AI 润色接口（供输入框"润色"按钮使用）。
 func (m *Manager) PolishText(args RunAgentArgs) (string, error) {
 	sys := "你是文字润色与提示词优化助手。请优化下面这段用户输入，使其作为给 AI 的指令更清晰、完整、无歧义。直接输出优化后的文本，不要解释。"
-	return m.llmCall(args, []ai.ChatMessage{{Role: "system", Content: sys}, {Role: "user", Content: args.Input}}, 0.5, "polish-input")
+	return m.llmCall(args, []ai.ChatMessage{{Role: "system", Content: sys}, {Role: "user", Content: args.Input}}, 0.5, "polish-input", args.MaxTokens)
 }

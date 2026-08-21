@@ -134,6 +134,7 @@ type AgentConfig struct {
 	Tools          ToolFlags `json:"tools"`       // 内置工具开关
 	MaxToolOutput  int      `json:"maxToolOutput"` // 工具结果回灌模型前的最大字符数（0=默认4000）
 	MaxFileRead    int      `json:"maxFileRead"`   // 文件读取最大字符数（0=默认200000）
+	MaxTokens      int      `json:"maxTokens"`     // 模型回复长度上限（0=使用模型服务端默认值）
 }
 
 // AgentMsg 会话消息。
@@ -219,6 +220,7 @@ func defaultAgentData() AgentData {
 			Tools:        defaultToolFlags(),
 			MaxToolOutput: 4000,
 			MaxFileRead:   200000,
+			MaxTokens:     8000,
 		},
 		Skills:  []AgentSkill{},
 		Servers: []MCPServer{},

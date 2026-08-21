@@ -36,6 +36,7 @@ type Request struct {
 	Model         string        `json:"model"`
 	Messages      []ChatMessage `json:"messages"`
 	Temperature   float64       `json:"temperature"`
+	MaxTokens     int           `json:"max_tokens,omitempty"`
 	Stream        bool          `json:"stream"`
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
 }
@@ -79,7 +80,7 @@ func ExtractJSON(s string) string {
 // 兼容以 /v1 结尾或已含 /chat/completions 的 base；超时单位秒（<=0 时回退 30s）。
 // 错误时优先提取响应体中的 error.message，否则回退原始错误文本。
 // CallAI 与 Chat 均委托此函数，避免重复实现 HTTP 调用。
-func ChatRaw(base, apiKey, model string, messages []ChatMessage, timeoutSec int) (string, error) {
+func ChatRaw(base, apiKey, model string, messages []ChatMessage, timeoutSec int, maxTokens int) (string, error) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if base == "" {
 		base = "https://api.openai.com/v1"
@@ -103,6 +104,7 @@ func ChatRaw(base, apiKey, model string, messages []ChatMessage, timeoutSec int)
 		Model:       model,
 		Messages:    messages,
 		Temperature: 0.3,
+		MaxTokens:   maxTokens,
 		Stream:      false,
 	})
 	if err != nil {
@@ -166,7 +168,7 @@ func Chat(s model.Settings, system, user string) (string, error) {
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	}
-	return ChatRaw(base, s.AIKey, model, messages, 180)
+	return ChatRaw(base, s.AIKey, model, messages, 180, 0)
 }
 
 // ---------------- 字段描述生成 ----------------

@@ -27,6 +27,7 @@ export namespace agent {
 	    tools: ToolFlags;
 	    maxToolOutput: number;
 	    maxFileRead: number;
+	    maxTokens: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -46,6 +47,7 @@ export namespace agent {
 	        this.tools = this.convertValues(source["tools"], ToolFlags);
 	        this.maxToolOutput = source["maxToolOutput"];
 	        this.maxFileRead = source["maxFileRead"];
+	        this.maxTokens = source["maxTokens"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -397,6 +399,7 @@ export namespace agent {
 	    apiKey: string;
 	    model: string;
 	    timeoutSec: number;
+	    maxTokens: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new RunAgentArgs(source);
@@ -409,6 +412,7 @@ export namespace agent {
 	        this.apiKey = source["apiKey"];
 	        this.model = source["model"];
 	        this.timeoutSec = source["timeoutSec"];
+	        this.maxTokens = source["maxTokens"];
 	    }
 	}
 	export class RunAgentResult {
@@ -702,6 +706,7 @@ export namespace main {
 	    apiKey: string;
 	    model: string;
 	    timeoutSec: number;
+	    maxTokens: number;
 	    messages: ai.ChatMessage[];
 	
 	    static createFrom(source: any = {}) {
@@ -714,6 +719,7 @@ export namespace main {
 	        this.apiKey = source["apiKey"];
 	        this.model = source["model"];
 	        this.timeoutSec = source["timeoutSec"];
+	        this.maxTokens = source["maxTokens"];
 	        this.messages = this.convertValues(source["messages"], ai.ChatMessage);
 	    }
 	

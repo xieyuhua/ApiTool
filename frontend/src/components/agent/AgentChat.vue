@@ -201,7 +201,7 @@ async function polish() {
   if (!text) return
   const s = store.data.settings
   try {
-    const out = await AgentAPI.polish({ input: text, baseUrl: s.aiBaseUrl, apiKey: s.aiKey, model: s.aiModel, timeoutSec: s.timeoutSec || 60 })
+    const out = await AgentAPI.polish({ input: text, baseUrl: s.aiBaseUrl, apiKey: s.aiKey, model: s.aiModel, timeoutSec: s.timeoutSec || 60, maxTokens: store.data.agentConfig?.maxTokens || 8000 })
     if (out) input.value = out
     ElMessage.success('已润色')
   } catch (e) { ElMessage.error(String(e)) }

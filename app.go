@@ -278,11 +278,12 @@ type ChatMessage = ai.ChatMessage
 
 // CallAIArgs CallAI 入参（由前端传入已解析好的配置，避免在 Go 端读取前端 store）
 type CallAIArgs struct {
-	BaseURL  string        `json:"baseUrl"`
-	APIKey   string        `json:"apiKey"`
-	Model    string        `json:"model"`
-	Timeout  int           `json:"timeoutSec"`
-	Messages []ChatMessage `json:"messages"`
+	BaseURL   string        `json:"baseUrl"`
+	APIKey    string        `json:"apiKey"`
+	Model     string        `json:"model"`
+	Timeout   int           `json:"timeoutSec"`
+	MaxTokens int           `json:"maxTokens"`
+	Messages  []ChatMessage `json:"messages"`
 }
 
 // CallAI 由 Go 后端代发 AI 请求，规避前端 webview 的 CORS 限制。
@@ -297,7 +298,7 @@ func (a *App) CallAI(args CallAIArgs) (string, error) {
 	}
 	model := strings.TrimSpace(args.Model)
 	// 委托 internal/ai 统一处理 URL 拼接、超时与错误解析（与 Chat 共用底层实现）
-	return ai.ChatRaw(base, args.APIKey, model, args.Messages, args.Timeout)
+	return ai.ChatRaw(base, args.APIKey, model, args.Messages, args.Timeout, args.MaxTokens)
 }
 
 // OpenInBrowser 使用系统浏览器打开

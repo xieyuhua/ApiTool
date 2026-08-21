@@ -80,6 +80,7 @@ watch(() => props.visible, async (v) => {
     delete local.config.tools.common
     local.config.maxToolOutput = local.config.maxToolOutput || 4000
     local.config.maxFileRead = local.config.maxFileRead || 200000
+    local.config.maxTokens = local.config.maxTokens || 8000
     local.skills = JSON.parse(JSON.stringify(props.skills || []))
     local.servers = JSON.parse(JSON.stringify(props.servers || []))
     local.users = JSON.parse(JSON.stringify(props.users || []))
@@ -208,6 +209,11 @@ async function saveAll() {
             <label>文件读取上限（字符）</label>
             <el-input-number v-model="local.config.maxFileRead" :min="0" :max="2000000" :step="10000" />
             <div class="hint">read_file 等内置文件工具读取的最大字符数，默认 200000。</div>
+          </div>
+          <div class="form-col">
+            <label>回复长度上限（token）</label>
+            <el-input-number v-model="local.config.maxTokens" :min="0" :max="200000" :step="1000" />
+            <div class="hint">模型回复最大 token 数，默认 8000。若 AI 回复总被截断、显示不全，请调大此项（0=模型默认值，可能偏短）。</div>
           </div>
         </div>
         <div class="form-row switches">

@@ -480,6 +480,7 @@ export async function callAI(messages, opts = {}) {
       apiKey: s.aiKey,
       model,
       timeoutSec: s.timeoutSec || 30,
+      maxTokens: opts.maxTokens || 0,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
     })
   } catch (e) {
