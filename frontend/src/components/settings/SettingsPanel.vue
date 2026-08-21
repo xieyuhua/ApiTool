@@ -16,36 +16,6 @@ const syncURL = ref('') // 实际可访问地址（http://IP:port），与启动
 const checking = ref(false)
 const updateResult = ref(null)
 
-// 快捷键录制
-const recording = ref(false)
-const recText = ref('')
-function startRecord() {
-  if (recording.value) return
-  recording.value = true
-  recText.value = '请按下快捷键组合…（Esc 取消）'
-  const handler = (e) => {
-    e.preventDefault(); e.stopPropagation()
-    if (e.key === 'Escape') {
-      recording.value = false; recText.value = ''
-      window.removeEventListener('keydown', handler, true); return
-    }
-    const parts = []
-    if (e.ctrlKey) parts.push('Ctrl')
-    if (e.metaKey) parts.push('Meta')
-    if (e.shiftKey) parts.push('Shift')
-    if (e.altKey) parts.push('Alt')
-    let key = e.key
-    if (key === ' ') key = 'Space'
-    if (['Control', 'Meta', 'Shift', 'Alt'].includes(key)) return // 仅修饰键，继续等待
-    if (key.length === 1) key = key.toUpperCase()
-    parts.push(key)
-    store.data.settings.hotkey = parts.join('+')
-    recording.value = false
-    window.removeEventListener('keydown', handler, true)
-  }
-  window.addEventListener('keydown', handler, true)
-}
-
 onMounted(async () => {
   try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
   try {
@@ -278,15 +248,6 @@ async function toggleSync() {
           </el-form-item>
           <el-form-item label="最大条数">
             <el-input-number v-model="store.data.settings.clipboard.maxItems" :min="10" :max="2000" />
-          </el-form-item>
-          <el-form-item label="打开快捷键">
-            <el-button :type="recording ? 'warning' : 'default'" :loading="false" @click="startRecord">
-              {{ recording ? recText : (store.data.settings.hotkey || 'Ctrl+Shift+V') }}
-            </el-button>
-            <el-button link @click="store.data.settings.hotkey = 'Ctrl+Shift+V'; ElMessage.success('已恢复默认')">恢复默认</el-button>
-            <span style="font-size:12px;color:#86909c;margin-left:10px">
-              全局快捷键：连续两次 Ctrl 打开主窗体；Ctrl+B 弹出剪贴板历史（已固定）
-            </span>
           </el-form-item>
         </el-form>
       </div>

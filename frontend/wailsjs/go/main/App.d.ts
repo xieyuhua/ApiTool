@@ -257,8 +257,6 @@ export function ShareTestReport(arg1:string,arg2:string,arg3:string):Promise<str
 
 export function ShowClipboardWindow():Promise<void>;
 
-export function ShowMainWindow():Promise<void>;
-
 export function SniffCAPEM():Promise<string>;
 
 export function SniffCAPath():Promise<string>;

@@ -104,7 +104,7 @@ func (a *App) startup(ctx context.Context) {
 	a.windowVisible = true
 	go a.startTray()
 	// 安装系统级全局快捷键（即使窗口失焦也能调出剪贴板历史）
-	platform.SetHotkeyHandlers(a.ShowMainWindow, a.toggleClipboardWindow)
+	platform.SetHotkeyHandlers(a.toggleClipboardWindow)
 	go platform.StartGlobalHotkey()
 	// 启动剪贴板后台采集（文本 + 图片）
 	go a.StartClipboardCapture()
@@ -1149,14 +1149,6 @@ func (a *App) CloseClipboardWindow() {
 	a.WindowSetAlwaysOnTop(false)
 	runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
 	a.WindowHide()
-}
-
-// ShowMainWindow 显示主窗体（取消置顶、恢复显示）。连续两次 Ctrl 调用，用于打开主窗体。
-func (a *App) ShowMainWindow() {
-	a.WindowSetAlwaysOnTop(false)
-	a.WindowShow()
-	a.WindowUnminimise()
-	a.windowVisible = true
 }
 
 // ----------------------------------------------------------------------------

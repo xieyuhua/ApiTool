@@ -1063,7 +1063,6 @@ export namespace model {
 	    updateURL: string;
 	    theme: string;
 	    accent: string;
-	    hotkey: string;
 	    autoSync: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -1084,7 +1083,6 @@ export namespace model {
 	        this.updateURL = source["updateURL"];
 	        this.theme = source["theme"];
 	        this.accent = source["accent"];
-	        this.hotkey = source["hotkey"];
 	        this.autoSync = source["autoSync"];
 	    }
 	

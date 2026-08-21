@@ -3,14 +3,12 @@
 package platform
 
 import (
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 // 全局快捷键：在 Windows 系统层面监听键盘（即使主窗口失焦 / 隐藏到托盘也能触发）。
-//   - 连续按两次 Ctrl（默认 500ms 内）→ 打开主窗体
 //   - Ctrl+B → 打开剪贴板历史浮层
 //
 // 写死，不依赖设置。
@@ -23,8 +21,6 @@ const (
 	vkControl  = 0xA2 // VK_CONTROL / VK_LCONTROL
 	vkRControl = 0xA3 // VK_RCONTROL
 	vkB        = 0x42 // B
-
-	doubleCtrlWindow = 500 * time.Millisecond // 两次 Ctrl 按下的最大间隔
 )
 
 type kbdLLHookStruct struct {
@@ -41,16 +37,13 @@ var (
 	procGetMsg  = user32.NewProc("GetMessageW")
 	procNextHook = user32.NewProc("CallNextHookEx")
 
-	hotkeyHook      windows.Handle
-	lastCtrlTime    time.Time
-	ctrlDown        bool
-	onDoubleCtrl    func() // 由 App 注入：打开主窗体
-	onCtrlB         func() // 由 App 注入：打开剪贴板历史浮层
+	hotkeyHook windows.Handle
+	ctrlDown   bool
+	onCtrlB    func() // 由 App 注入：打开剪贴板历史浮层
 )
 
 // SetHotkeyHandlers 注册全局热键回调（App 在 startup 时调用，注入自身方法）。
-func SetHotkeyHandlers(doubleCtrl, ctrlB func()) {
-	onDoubleCtrl = doubleCtrl
+func SetHotkeyHandlers(ctrlB func()) {
 	onCtrlB = ctrlB
 }
 
@@ -79,16 +72,6 @@ func lowLevelKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 		switch {
 		case down && (vk == vkControl || vk == vkRControl):
 			ctrlDown = true
-			now := time.Now()
-			if now.Sub(lastCtrlTime) <= doubleCtrlWindow {
-				lastCtrlTime = time.Time{} // 复位，避免三次连按立即再触发
-				ctrlDown = false
-				if onDoubleCtrl != nil {
-					go onDoubleCtrl()
-				}
-				return 1
-			}
-			lastCtrlTime = now
 
 		case up && (vk == vkControl || vk == vkRControl):
 			ctrlDown = false

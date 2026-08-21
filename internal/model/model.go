@@ -216,10 +216,9 @@ type Settings struct {
 	// 版本与升级
 	Version   string `json:"version"`   // 客户端版本号（同时作为配置初始化标记）
 	UpdateURL string `json:"updateURL"` // 升级服务地址，如 http://127.0.0.1:8080
-	// 外观与快捷键
+	// 外观
 	Theme   string       `json:"theme"`   // light | dark | system
 	Accent  string       `json:"accent"`  // 主题强调色
-	Hotkey  string       `json:"hotkey"`  // 全局快捷键，如 Ctrl+Shift+V
 	AutoSync bool        `json:"autoSync"` // 是否启用云同步
 }
 

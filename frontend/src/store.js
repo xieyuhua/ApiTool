@@ -65,7 +65,6 @@ export const store = reactive({
       theme: 'light',            // light | dark | auto
       scheme: '',                // 主题方案 id（空=自定义，使用 theme+accent）
       accent: '#165dff',         // 主题色（主色）
-      hotkey: 'Ctrl+Shift+V',    // 调出剪贴板历史的快捷键组合
       clipboard: { monitor: true, maxItems: 200 },
     },
     plugins: { connections: [] },
@@ -384,7 +383,6 @@ async function loadInto() {
   d.settings.theme ||= 'light'
   d.settings.scheme ||= ''
   d.settings.accent ||= '#165dff'
-  d.settings.hotkey ||= 'Ctrl+Shift+V'
   d.settings.clipboard ||= { monitor: true, maxItems: 200 }
   if (typeof d.settings.clipboard.maxItems !== 'number') d.settings.clipboard.maxItems = 200
   if (typeof d.settings.clipboard.monitor !== 'boolean') d.settings.clipboard.monitor = true

@@ -270,7 +270,7 @@ request.body.data.page = 1
 - 入口：设置 → 「剪贴板」。`监控剪贴板`（开关）控制是否记录；`最大保留条数`限制历史上限，超出后自动丢弃最旧的条目。
 - 记录保存在本地数据目录下的 `clipimg/` 子目录（图片以 PNG 存储），应用退出时清理被删除图片的文件。
 
-> 说明：全局快捷键（双击 Ctrl）为固定行为，不依赖设置；其实现见 `hotkey_windows.go`（Windows 低级键盘钩子）+ `clipboard_windows.go`（剪贴板捕获 / 浮层窗口控制）。
+> 说明：全局快捷键 `Ctrl+B`（弹出剪贴板历史）为固定行为，不依赖设置；其实现见 `hotkey_windows.go`（Windows 低级键盘钩子）+ `clipboard_windows.go`（剪贴板捕获 / 浮层窗口控制）。
 
 ### 12.5 外观与主题（主题方案）
 

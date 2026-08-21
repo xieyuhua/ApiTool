@@ -490,10 +490,6 @@ export function ShowClipboardWindow() {
   return window['go']['main']['App']['ShowClipboardWindow']();
 }
 
-export function ShowMainWindow() {
-  return window['go']['main']['App']['ShowMainWindow']();
-}
-
 export function SniffCAPEM() {
   return window['go']['main']['App']['SniffCAPEM']();
 }
