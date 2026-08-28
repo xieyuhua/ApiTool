@@ -1874,6 +1874,28 @@ export namespace sniff {
 	        this.protocols = source["protocols"];
 	    }
 	}
+	export class HostRewrite {
+	    id: string;
+	    from: string;
+	    to: string;
+	    enabled: boolean;
+	    desc: string;
+	    scheme?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostRewrite(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.enabled = source["enabled"];
+	        this.desc = source["desc"];
+	        this.scheme = source["scheme"];
+	    }
+	}
 	export class TrafficRecord {
 	    id: string;
 	    sessionId: string;
@@ -1898,6 +1920,8 @@ export namespace sniff {
 	    processName: string;
 	    note: string;
 	    error: string;
+	    reqClipped?: boolean;
+	    respClipped?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TrafficRecord(source);
@@ -1928,6 +1952,8 @@ export namespace sniff {
 	        this.processName = source["processName"];
 	        this.note = source["note"];
 	        this.error = source["error"];
+	        this.reqClipped = source["reqClipped"];
+	        this.respClipped = source["respClipped"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1956,6 +1982,7 @@ export namespace sniff {
 	    proxyAddr: string;
 	    records: TrafficRecord[];
 	    errors: ErrorInfo[];
+	    recordCount?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
@@ -1970,6 +1997,7 @@ export namespace sniff {
 	        this.proxyAddr = source["proxyAddr"];
 	        this.records = this.convertValues(source["records"], TrafficRecord);
 	        this.errors = this.convertValues(source["errors"], ErrorInfo);
+	        this.recordCount = source["recordCount"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

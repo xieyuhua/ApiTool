@@ -269,6 +269,8 @@ export function SniffGenerateApiFromRecords(arg1:Array<sniff.TrafficRecord>,arg2
 
 export function SniffGenerateApiFromSession(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<number>;
 
+export function SniffGetRewrites():Promise<Array<sniff.HostRewrite>>;
+
 export function SniffGetSession(arg1:string):Promise<sniff.Session>;
 
 export function SniffGetSessionErrors(arg1:string):Promise<Array<sniff.ErrorInfo>>;
@@ -282,6 +284,8 @@ export function SniffListSessions():Promise<Array<sniff.Session>>;
 export function SniffPickCAFile():Promise<Record<string, string>>;
 
 export function SniffSetFilter(arg1:sniff.Filter):Promise<void>;
+
+export function SniffSetRewrites(arg1:Array<sniff.HostRewrite>):Promise<void>;
 
 export function SniffSetSystemProxy(arg1:boolean):Promise<void>;
 

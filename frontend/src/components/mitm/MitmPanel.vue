@@ -28,6 +28,9 @@
         <el-button @click="openImportCADialog">导入证书</el-button>
         <el-button @click="openSessions">抓包会话</el-button>
         <el-button @click="openErrors">解密失败日志<span v-if="errCount > 0" class="err-badge">{{ errCount }}</span></el-button>
+        <el-button type="warning" plain @click="openRewrites" title="把域名指向本地地址，便于测试（如 dev.test.com → 127.0.0.1:8200）">
+          域名重定向
+        </el-button>
       </div>
     </div>
 
@@ -143,7 +146,9 @@
 
         <!-- 实时流量 -->
         <div class="traffic-head">
-          <span>实时流量（{{ filteredRecords.length }} / {{ liveRecords.length }}）</span>
+          <span>实时流量（{{ filteredRecords.length }} / {{ liveRecords.length }}）
+            <em v-if="filteredRecords.length > MAX_RENDER" class="render-limit">仅显示最新 {{ MAX_RENDER }} 条</em>
+          </span>
           <div class="th-actions">
             <el-input v-model="liveFilter" size="small" placeholder="模糊过滤 host/url/方法" clearable style="width:120px" />
             <el-radio-group v-model="viewMode" size="small">
@@ -172,7 +177,7 @@
           <!-- 平铺模式 -->
           <template v-if="viewMode === 'list'">
             <div
-              v-for="r in filteredRecords"
+              v-for="r in listRecords"
               :key="r.id"
               class="traffic-item"
               :class="{ active: selected && selected.id === r.id, checked: selectedIdSet.has(r.id) }"
@@ -257,6 +262,7 @@
               <pre class="code">{{ kvToText(selected.respHeaders) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="响应体" name="resb">
+              <div v-if="selected.respClipped" class="clipped-tip">⚠️ 响应体超过实时推送上限（1MB）已被截断，会话历史中保留完整数据</div>
               <template v-if="isImageResp(selected)">
                 <div class="img-preview">
                   <img :src="imgSrc(selected.respBody)" alt="响应图片预览" />
@@ -358,7 +364,7 @@
         <el-table-column prop="name" label="会话名" min-width="200" />
         <el-table-column prop="startedAt" label="开始时间" width="180" />
         <el-table-column label="记录数" width="90">
-          <template #default="{ row }">{{ (row.records || []).length }}</template>
+          <template #default="{ row }">{{ row.recordCount ?? (row.records || []).length }}</template>
         </el-table-column>
         <el-table-column label="操作" width="240">
           <template #default="{ row }">
@@ -385,6 +391,57 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 域名重定向（Host Rewrite） -->
+    <el-dialog v-model="rewritesDialog" title="域名重定向（Host Rewrite）" width="720px" append-to-body>
+      <p class="rw-tip">
+        将请求的域名改写为本地地址，便于测试。例如
+        <code>dev.test.com → 127.0.0.1:8200</code>（未写端口时 HTTPS 自动补 :443、HTTP 补 :80；
+        目标端口非 443 时默认按 HTTP 转发，本地联调服务通常为明文 HTTP）。
+        配置保存后立即对后续抓到的请求生效，HTTPS 仍按原域名签发证书。
+      </p>
+      <el-table :data="rewrites" size="small" empty-text="暂无配置，点击下方「添加一行」" max-height="360">
+        <el-table-column label="启用" width="64" align="center">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="原域名 (From)" min-width="190">
+          <template #default="{ row }">
+            <el-input v-model="row.from" size="small" placeholder="dev.test.com" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="改写为 (To)" min-width="170">
+          <template #default="{ row }">
+            <el-input v-model="row.to" size="small" placeholder="127.0.0.1:8200" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="协议" width="100" align="center">
+          <template #default="{ row }">
+            <el-select v-model="row.scheme" size="small" style="width: 88px">
+              <el-option label="自动" value="" />
+              <el-option label="HTTP" value="http" />
+              <el-option label="HTTPS" value="https" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="120">
+          <template #default="{ row }">
+            <el-input v-model="row.desc" size="small" placeholder="可选" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="66" align="center">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" @click="removeRewrite($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button size="small" @click="rewritesDialog = false">取消</el-button>
+        <el-button size="small" @click="addRewrite">添加一行</el-button>
+        <el-button size="small" type="primary" :loading="savingRewrites" @click="saveRewrites">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -395,7 +452,8 @@ import {
   SniffStatus, SniffStart, SniffStop, SniffSetFilter, SniffListSessions,
   SniffGetSession, SniffDeleteSession, SniffExportOpenAPI, SniffInstallCA, SniffCAPEM,
   SniffSetSystemProxy, SniffGenerateApiFromSession, SniffGenerateApiFromRecords,
-  SniffImportCA, SniffPickCAFile, SniffGetSessionErrors, CopyToClipboard
+  SniffImportCA, SniffPickCAFile, SniffGetSessionErrors, SniffGetRewrites, SniffSetRewrites,
+  CopyToClipboard
 } from '../../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { store, reloadStore } from '../../store'
@@ -484,6 +542,8 @@ function pathSegsOf(r) {
 
 // 构建多级分组树。返回 top-level 节点数组。
 const groupedRecords = computed(() => {
+  // 平铺模式不构建分组树，避免流量刷新时全量重建
+  if (viewMode.value !== 'group') return []
   const set = selectedIdSet.value
   const hostMap = {} // host -> 该 host 的目录树根
   // nodeIndex: "host\x00fullPath" -> 目录节点，O(1) 定位避免逐级 find 查找
@@ -610,12 +670,17 @@ const projectDirOptions = computed(() => {
 let recOff = null
 let statusOff = null
 let errOff = null
+let lastErrToastAt = 0 // 错误 toast 节流时间戳
 
 // ---- 实时记录批量接收 + 限流渲染 ----
 // 后端按 40ms 窗口批量推送，前端再做一次 rAF 合并，避免高频 push 触发逐条重渲染。
-const MAX_LIVE = 1000 // 实时列表最多保留条数，防止 DOM 无限增长导致卡顿
+const MAX_LIVE = 1000 // 实时列表最多保留条数，防止内存无限增长
+const MAX_RENDER = 400 // 平铺模式单次渲染上限：只渲染最新 N 条，避免大列表每次全量 DOM patch
+// 平铺模式渲染列表（新记录在前，slice 保留最新）
+const listRecords = computed(() => filteredRecords.value.slice(0, MAX_RENDER))
 let pendingRecords = [] // 待合并到 liveRecords 的记录
 let flushRaf = null // rAF 句柄
+let lastFlushAt = 0 // 上次实际 flush 的时间戳，用于渲染节流
 
 // 合并缓冲中的记录到 liveRecords，并限制列表长度（保留最新）。
 function flushRecords() {
@@ -623,6 +688,14 @@ function flushRecords() {
   const batch = pendingRecords
   pendingRecords = []
   if (!batch.length) return
+  // 渲染节流：流量高峰期每帧都有新 batch 时，仍保持至少 ~8fps 的合并渲染，
+  // 避免每帧全量 patch 大列表把主线程占满
+  const now = performance.now()
+  if (now - lastFlushAt < 120) {
+    flushRaf = requestAnimationFrame(flushRecords)
+    return
+  }
+  lastFlushAt = now
   const cur = liveRecords.value
   // 新的记录放在最前面（最新置顶），超出上限时裁剪掉尾部最旧的记录
   if (cur.length + batch.length > MAX_LIVE) {
@@ -703,6 +776,61 @@ async function openErrors() {
 }
 function errTypeText(type) { return ERR_LABELS[type] || '错误' }
 
+// ---- 域名重定向（Host Rewrite） ----
+const rewritesDialog = ref(false)
+const rewrites = ref([])
+const savingRewrites = ref(false)
+
+function newRewrite() {
+  return {
+    id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    from: '', to: '', enabled: true, desc: '', scheme: '',
+  }
+}
+
+function addRewrite() {
+  rewrites.value.push(newRewrite())
+}
+
+function removeRewrite(i) {
+  rewrites.value.splice(i, 1)
+}
+
+async function openRewrites() {
+  try {
+    const list = await SniffGetRewrites()
+    rewrites.value = (list || []).map(r => ({
+      id: r.id, from: r.from || '', to: r.to || '', enabled: r.enabled !== false, desc: r.desc || '',
+      scheme: r.scheme || '',
+    }))
+  } catch (e) {
+    ElMessage.error('加载重定向配置失败：' + String(e))
+    rewrites.value = []
+  }
+  rewritesDialog.value = true
+}
+
+async function saveRewrites() {
+  const list = rewrites.value
+  for (const r of list) {
+    if (!r.from || !r.from.trim()) { ElMessage.warning('请填写原域名 (From)'); return }
+    if (!r.to || !r.to.trim()) { ElMessage.warning('请填写改写地址 (To)'); return }
+  }
+  savingRewrites.value = true
+  try {
+    await SniffSetRewrites(list.map(r => ({
+      id: r.id, from: r.from.trim(), to: r.to.trim(), enabled: !!r.enabled, desc: (r.desc || '').trim(),
+      scheme: r.scheme || '',
+    })))
+    ElMessage.success('已保存，重定向配置即时生效')
+    rewritesDialog.value = false
+  } catch (e) {
+    ElMessage.error('保存失败：' + String(e))
+  } finally {
+    savingRewrites.value = false
+  }
+}
+
 // 各错误类型的解决引导
 const GUIDES = {
   pinning: {
@@ -758,7 +886,12 @@ onMounted(async () => {
       m[obj.type] = s
       errHostsByType.value = m
     }
-    ElMessage.warning(text)
+    // 错误 toast 节流：大量解密失败时避免瞬间弹出几十条全局提示卡死 UI（错误已入列表展示）
+    const _n = Date.now()
+    if (_n - lastErrToastAt > 2000) {
+      lastErrToastAt = _n
+      ElMessage.warning(text)
+    }
   })
 })
 
@@ -1093,6 +1226,8 @@ function toggleFormat(kind) {
 
 function displayBody(text, formatted) {
   if (!text) return text || '（无）'
+  // 超大 body 不做 JSON 格式化，避免 JSON.parse 大字符串阻塞主线程
+  if (text.length > 2 * 1024 * 1024) return '（内容过大，已省略展示，可在会话历史中查看完整内容）'
   if (!formatted) return text
   // 尝试 JSON 美化
   try {
@@ -1175,9 +1310,11 @@ async function copyProxyAddr() {
 }
 .traffic-item {
   display: flex; gap: 8px; align-items: center; padding: 8px 12px; cursor: pointer; font-size: 13px;
-  border-radius: 9px; transition: background .14s ease, box-shadow .14s ease, transform .14s ease; border: 1px solid transparent;
+  border-radius: 9px; transition: background .12s ease; border: 1px solid transparent;
 }
-.traffic-item:hover { background: #f2f7ff; box-shadow: 0 2px 8px rgba(22, 93, 255, .08); transform: translateY(-1px); }
+.traffic-item:hover { background: #f2f7ff; }
+.traffic-head .render-limit { font-style: normal; font-size: 12px; color: #f76707; font-weight: 400; margin-left: 6px; }
+.clipped-tip { font-size: 12px; color: #f76707; background: #fff7e8; border: 1px solid #ffd25e; border-radius: 6px; padding: 4px 8px; margin-bottom: 8px; }
 .traffic-item.active { background: var(--mp-primary-soft); border-color: #bcd4ff; box-shadow: inset 3px 0 0 var(--mp-primary); }
 .traffic-item.checked { background: #f0f6ff; }
 .traffic-head .th-actions { display: flex; gap: 4px; align-items: center; }
@@ -1299,6 +1436,10 @@ async function copyProxyAddr() {
 
 /* 空状态图标 */
 .empty-ico { font-size: 26px; margin-bottom: 6px; opacity: .7; }
+
+/* 域名重定向弹窗 */
+.rw-tip { color: #4e5969; font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
+.rw-tip code { background: #f2f3f5; border-radius: 5px; padding: 1px 6px; font-size: 12px; color: #165dff; }
 
 /* 细滚动条（年轻化） */
 .traffic-list::-webkit-scrollbar, .code::-webkit-scrollbar, .detail-tabs .el-tabs__content::-webkit-scrollbar,

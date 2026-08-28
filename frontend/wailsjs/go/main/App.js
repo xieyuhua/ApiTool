@@ -514,6 +514,10 @@ export function SniffGenerateApiFromSession(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SniffGenerateApiFromSession'](arg1, arg2, arg3, arg4);
 }
 
+export function SniffGetRewrites() {
+  return window['go']['main']['App']['SniffGetRewrites']();
+}
+
 export function SniffGetSession(arg1) {
   return window['go']['main']['App']['SniffGetSession'](arg1);
 }
@@ -540,6 +544,10 @@ export function SniffPickCAFile() {
 
 export function SniffSetFilter(arg1) {
   return window['go']['main']['App']['SniffSetFilter'](arg1);
+}
+
+export function SniffSetRewrites(arg1) {
+  return window['go']['main']['App']['SniffSetRewrites'](arg1);
 }
 
 export function SniffSetSystemProxy(arg1) {

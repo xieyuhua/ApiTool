@@ -47,31 +47,36 @@ type TrafficRecord struct {
 	ProcessName string            `json:"processName"` // 进程名（尽力而为，Windows 需驱动级，暂留空/Host）
 	Note        string            `json:"note"`
 	Error       string            `json:"error"`
+	ReqClipped  bool              `json:"reqClipped,omitempty"`  // 实时推送时请求体过大被截断标记（会话内保存完整数据）
+	RespClipped bool              `json:"respClipped,omitempty"` // 实时推送时响应体过大被截断标记
 }
 
 // Session 一次抓包会话。
 type Session struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	StartedAt string          `json:"startedAt"`
-	StoppedAt string          `json:"stoppedAt"`
-	ProxyAddr string          `json:"proxyAddr"`
-	Records   []TrafficRecord `json:"records"`
-	Errors    []ErrorInfo     `json:"errors"` // 解密/连接失败日志（本地持久化）
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	StartedAt   string          `json:"startedAt"`
+	StoppedAt   string          `json:"stoppedAt"`
+	ProxyAddr   string          `json:"proxyAddr"`
+	Records     []TrafficRecord `json:"records"`
+	Errors      []ErrorInfo     `json:"errors"` // 解密/连接失败日志（本地持久化）
+	RecordCount int             `json:"recordCount,omitempty"` // 记录数（列表摘要用，历史会话懒加载时由文件头统计）
 }
 
-// SessionStore 抓包会话存储：内存为主，按会话落盘 JSON，互不打扰现有业务数据。
+// SessionStore 抓包会话存储：活跃会话驻留内存，历史会话落盘 JSON 懒加载。
+// 启动时仅扫描文件名建立索引，不读取文件内容，避免历史会话（含大响应体）全量载入内存。
 type SessionStore struct {
 	mu       sync.Mutex
 	dir      string
-	sessions map[string]*Session
+	sessions map[string]*Session // 仅活跃会话（正在抓包/尚未落盘）
+	index    map[string]string   // 历史会话 id -> 文件名（按需懒加载）
 }
 
 // NewSessionStore 创建存储（dir 为抓包数据目录）。
 func NewSessionStore(dir string) *SessionStore {
 	_ = os.MkdirAll(dir, 0o755)
-	s := &SessionStore{dir: dir, sessions: map[string]*Session{}}
-	s.loadAll()
+	s := &SessionStore{dir: dir, sessions: map[string]*Session{}, index: map[string]string{}}
+	s.scanDisk()
 	return s
 }
 
@@ -79,7 +84,8 @@ func (s *SessionStore) pathOf(id string) string {
 	return filepath.Join(s.dir, "session-"+id+".json")
 }
 
-func (s *SessionStore) loadAll() {
+// scanDisk 只扫描文件名建立索引（不读取内容），历史会话按需懒加载。
+func (s *SessionStore) scanDisk() {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return
@@ -88,14 +94,105 @@ func (s *SessionStore) loadAll() {
 		if e.IsDir() || !hasPrefix(e.Name(), "session-") || !hasSuffix(e.Name(), ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
+		id := strings.TrimSuffix(strings.TrimPrefix(e.Name(), "session-"), ".json")
+		if id != "" {
+			s.index[id] = e.Name()
+		}
+	}
+}
+
+// readSessionFile 从磁盘读取完整会话。
+func readSessionFile(path string) (*Session, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var sess Session
+	if err := json.Unmarshal(b, &sess); err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+// skipJSONValue 流式跳过一个完整的 JSON 值（不解析其内容），内存占用 O(1)。
+func skipJSONValue(dec *json.Decoder) error {
+	depth := 0
+	for {
+		t, err := dec.Token()
 		if err != nil {
-			continue
+			return err
 		}
-		var sess Session
-		if json.Unmarshal(b, &sess) == nil {
-			s.sessions[sess.ID] = &sess
+		if d, ok := t.(json.Delim); ok {
+			switch d {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return nil
+				}
+			}
+		} else if depth == 0 {
+			return nil
 		}
+	}
+}
+
+// readSessionMeta 流式读取会话文件的元信息并统计 records 数量。
+// 不反序列化 records/errors 大字段，内存占用 O(1)。
+func readSessionMeta(path string) (Session, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Session{}, 0, err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var sess Session
+	recCount := 0
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return sess, 0, err
+	}
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return sess, 0, err
+		}
+		key, _ := kt.(string)
+		switch key {
+		case "id":
+			_ = dec.Decode(&sess.ID)
+		case "name":
+			_ = dec.Decode(&sess.Name)
+		case "startedAt":
+			_ = dec.Decode(&sess.StartedAt)
+		case "stoppedAt":
+			_ = dec.Decode(&sess.StoppedAt)
+		case "proxyAddr":
+			_ = dec.Decode(&sess.ProxyAddr)
+		case "records":
+			if at, err := dec.Token(); err == nil && at == json.Delim('[') {
+				for dec.More() {
+					_ = skipJSONValue(dec)
+					recCount++
+				}
+				_, _ = dec.Token() // 消费 ']'
+			}
+		default:
+			_ = skipJSONValue(dec)
+		}
+	}
+	return sess, recCount, nil
+}
+
+// summaryOf 取活跃会话的摘要字段（不复制 records/errors 大字段）。
+func summaryOf(sess *Session) Session {
+	return Session{
+		ID:          sess.ID,
+		Name:        sess.Name,
+		StartedAt:   sess.StartedAt,
+		StoppedAt:   sess.StoppedAt,
+		ProxyAddr:   sess.ProxyAddr,
+		RecordCount: len(sess.Records),
 	}
 }
 
@@ -136,19 +233,28 @@ func (s *SessionStore) AppendError(sessionID string, info ErrorInfo) {
 	}
 }
 
-// GetErrors 返回指定会话的解密失败日志。
+// GetErrors 返回指定会话的解密失败日志（历史会话按需从磁盘读取）。
 func (s *SessionStore) GetErrors(sessionID string) []ErrorInfo {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if sess, ok := s.sessions[sessionID]; ok {
-		out := make([]ErrorInfo, len(sess.Errors))
-		copy(out, sess.Errors)
+	if v, ok := s.sessions[sessionID]; ok {
+		out := make([]ErrorInfo, len(v.Errors))
+		copy(out, v.Errors)
+		s.mu.Unlock()
 		return out
 	}
-	return nil
+	name, ok := s.index[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	sess, err := readSessionFile(filepath.Join(s.dir, name))
+	if err != nil {
+		return nil
+	}
+	return sess.Errors
 }
 
-// Save 将会话落盘。
+// Save 将会话落盘，落盘后从内存移除（转为磁盘懒加载），释放大体积会话内存。
 func (s *SessionStore) Save(sess *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,26 +263,55 @@ func (s *SessionStore) Save(sess *Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.pathOf(sess.ID), b, 0o644)
+	if err := os.WriteFile(s.pathOf(sess.ID), b, 0o644); err != nil {
+		return err
+	}
+	delete(s.sessions, sess.ID)
+	s.index[sess.ID] = "session-" + sess.ID + ".json"
+	return nil
 }
 
-// List 返回会话摘要列表。
+// List 返回会话摘要列表（不含 records/errors 大字段），供前端列表展示。
 func (s *SessionStore) List() []Session {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Session, 0, len(s.sessions))
+	out := make([]Session, 0, len(s.sessions)+len(s.index))
 	for _, v := range s.sessions {
-		out = append(out, *v)
+		out = append(out, summaryOf(v))
+	}
+	names := make([]string, 0, len(s.index))
+	for _, n := range s.index {
+		names = append(names, n)
+	}
+	s.mu.Unlock()
+
+	// 历史会话：流式读取元信息 + records 计数，不载入大 body 到内存
+	for _, name := range names {
+		sess, count, err := readSessionMeta(filepath.Join(s.dir, name))
+		if err == nil {
+			sess.RecordCount = count
+			out = append(out, sess)
+		}
 	}
 	return out
 }
 
-// Get 获取完整会话。
+// Get 获取完整会话。内存中活跃会话直接返回；历史会话按需从磁盘读取（不缓存，用后即释放）。
 func (s *SessionStore) Get(id string) (*Session, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.sessions[id]
-	return v, ok
+	if v, ok := s.sessions[id]; ok {
+		s.mu.Unlock()
+		return v, true
+	}
+	name, ok := s.index[id]
+	s.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	sess, err := readSessionFile(filepath.Join(s.dir, name))
+	if err != nil {
+		return nil, false
+	}
+	return sess, true
 }
 
 // Delete 删除会话（含磁盘文件）。
@@ -184,6 +319,7 @@ func (s *SessionStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
+	delete(s.index, id)
 	return os.Remove(s.pathOf(id))
 }
 

@@ -37,6 +37,8 @@ type proxy struct {
 	stopEmit     chan struct{}   // 停止推送协程
 
 	stopped bool // 是否已停止：停止后忽略 go-mitmproxy 残留回调（错误/记录）
+
+	rewrites []HostRewrite // 域名重定向规则（SetRewrites 更新）
 }
 
 // SetSessionID 设置当前活动会话 ID，使实时记录能正确落入该会话。
@@ -206,6 +208,19 @@ func (p *proxy) getFilter() Filter {
 	return p.filter
 }
 
+// SetRewrites 更新域名重定向规则。
+func (p *proxy) SetRewrites(r []HostRewrite) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rewrites = r
+}
+
+func (p *proxy) getRewrites() []HostRewrite {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]HostRewrite(nil), p.rewrites...)
+}
+
 // ---- 证书下载路由（手机抓包安装根证书）----
 
 // certDownloadPaths 命中这些路径时向客户端返回根 CA 证书。
@@ -253,6 +268,31 @@ const certLandingHTML = `<!doctype html>
 </body>
 </html>
 `
+
+// Requestheaders 在请求头阶段触发（HTTP 明文与 HTTPS 解密后内层请求都会触发）。
+// 依据域名重定向规则改写请求目标地址，便于把线上域名指向本地测试服务。
+// 对 CONNECT 请求不改写：保持证书按原始域名签发，解密后的内层请求自然走重定向。
+func (p *proxy) Requestheaders(f *mitm.Flow) {
+	if p.isStopped() || f == nil || f.Request == nil || f.Request.URL == nil {
+		return
+	}
+	if f.Request.Method == "CONNECT" {
+		return
+	}
+	rules := p.getRewrites()
+	if len(rules) == 0 {
+		return
+	}
+	r := matchRewrite(rules, f.Request.URL.Host)
+	if r == nil {
+		return
+	}
+	// 改写目标地址与转发协议：目标端口非 443 时默认按 HTTP 转发（本地联调服务通常为明文 HTTP），
+	// 避免 "server gave HTTP response to HTTPS client"；HTTPS 证书仍按原域名签发不受影响。
+	to, scheme := applyRewriteTarget(r.To, f.Request.URL.Scheme, r.Scheme)
+	f.Request.URL.Host = to
+	f.Request.URL.Scheme = scheme
+}
 
 // Request 在请求发出前调用。命中证书下载路由时直接构造响应短路，不转发上游，
 // 方便手机/浏览器通过代理地址下载并安装根证书。

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	"apitool/internal/bus"
 
@@ -30,6 +31,9 @@ type Manager struct {
 	filter   Filter
 	status   Status
 	sysProxy bool // 是否随抓包自动设置系统代理
+
+	rwMu     sync.Mutex
+	rewrites []HostRewrite // 域名重定向规则（持久化到 caDir/rewrites.json）
 }
 
 // Status 抓包运行状态（推送给前端）。
@@ -87,6 +91,7 @@ func NewManager(caDir string, b bus.Bus) (*Manager, error) {
 	}
 	m.status.CAFingerprint = ca.FingerprintSHA1()
 	m.status.CAInstalled = IsCAInstalled(ca.FingerprintSHA1())
+	m.loadRewrites()
 	return m, nil
 }
 
@@ -110,6 +115,9 @@ func (m *Manager) Start(addr string) error {
 	if err != nil {
 		return err
 	}
+	m.rwMu.Lock()
+	p.SetRewrites(m.rewrites)
+	m.rwMu.Unlock()
 	// 创建活动会话，使实时记录能落入其中（Stop 时落盘）
 	sess := m.store.NewSession(addr)
 	p.SetSessionID(sess.ID)
@@ -276,9 +284,31 @@ func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// liveBodyClipLimit 实时推送单条 body 剪裁阈值：超大非图片 body 截断，
+// 避免大响应体（最大 64MB）通过 IPC 传输与前端内存占用导致界面卡顿。
+// 会话存储仍保存完整数据，不影响历史查看与生成接口等功能。
+const liveBodyClipLimit = 1 << 20 // 1MB
+
+// clipLiveRecords 对实时推送的记录做剪裁：非图片 body 超过阈值时截断并打标记。
+// 图片响应保留完整 base64（预览需要）。仅修改推送切片副本，不影响已入库的完整数据。
+func clipLiveRecords(records []TrafficRecord) []TrafficRecord {
+	for i := range records {
+		r := &records[i]
+		if len(r.ReqBody) > liveBodyClipLimit {
+			r.ReqBody = r.ReqBody[:liveBodyClipLimit] + "\n...[已截断]"
+			r.ReqClipped = true
+		}
+		if len(r.RespBody) > liveBodyClipLimit && !strings.HasPrefix(strings.ToLower(r.RespContentType), "image/") {
+			r.RespBody = r.RespBody[:liveBodyClipLimit] + "\n...[已截断]"
+			r.RespClipped = true
+		}
+	}
+	return records
+}
+
 func (m *Manager) onRecord(records []TrafficRecord) {
 	if m.bus != nil && len(records) > 0 {
-		m.bus.Emit(EventRecord, records)
+		m.bus.Emit(EventRecord, clipLiveRecords(records))
 	}
 }
 

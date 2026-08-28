@@ -39,6 +39,7 @@
 | AI 配置 | 配置 OpenAI 兼容接口，自动生成字段描述 |
 | AI Agent | 多会话对话助手，可调用本地内置工具（文件/目录/网页搜索/系统信息等），独立开关与描述可编辑；实时累计 Token 统计 |
 | 剪贴板历史 | 系统级监听复制内容（文本 + 图片），连续两次 Ctrl 调出浮层，支持搜索、复制、删除 |
+| 网络抓包 | 内置 MITM 代理：HTTP/HTTPS 解密，WebSocket/SSE/gRPC/GraphQL 识别，域名重定向，抓包会话与 OpenAPI 导出，一键生成接口导入接口树 |
 | 版本与升级 | 本地 JSON 记录版本号与升级地址，支持一键检测更新 |
 
 ---
@@ -444,6 +445,9 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 
 > 性能说明：抓包数据采用**批量推送 + 40ms 节流 + requestAnimationFrame 合并渲染**，
 > 列表上限 1000 条（保留最新），即使高并发流量也不会卡顿。
+> **实时推送大 Body 自动截断**：单条请求/响应体超过 1MB 时，实时推送会截断并标记
+> `[已截断]`（图片响应保留完整 base64 以支持预览），避免超大响应体通过 IPC 传输导致界面卡顿；
+> 停止并保存后的会话仍保留**完整数据**，不影响历史查看与生成接口等功能。
 > 移动端证书下载卡片**默认折叠**，点击状态栏「抓包中 · 地址」标签才展开，不挤压下方流量列表。
 > 流量列表与详情面板采用固定布局（左侧列表、右侧详情自适应），无需手动拖拽分隔条。
 
@@ -551,7 +555,31 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 若你已在系统信任了 Fiddler / Charles 的 CA，可在「导入证书」对话框中粘贴其
 **证书 PEM** 与**私钥 PEM**，ApiTool 会复用该 CA 进行重签，避免重复安装、并保持与既有抓包工具的信任链一致。
 
-### 14.9 常见抓包问题排查
+### 14.9 域名重定向（Host Rewrite）
+
+点击顶部按钮栏的 **「域名重定向」**（黄色按钮）打开弹窗维护规则，把请求的域名改写为指定地址，
+适合**把线上域名指向本地联调服务**，例如 `dev.test.com → 127.0.0.1:8200`：
+
+| 字段 | 说明 |
+| --- | --- |
+| 启用 | 开关，停用的规则不参与匹配 |
+| From（原域名） | 匹配请求的域名（忽略端口与大小写），支持通配前缀 `*.example.com` 匹配任意子域 |
+| To（改写地址） | 目标地址，如 `127.0.0.1:8200`、`10.0.0.5:8080` |
+| 协议 | 可选「自动 / HTTP / HTTPS」；显式指定优先 |
+| 描述 | 备注说明 |
+
+**转发协议判定**：未显式指定时，目标**带端口且端口 ≠ 443 → 按 HTTP 转发**（本地联调服务通常为明文
+HTTP，避免报 `server gave HTTP response to HTTPS client`）；端口为 443 或无端口时跟随原请求 scheme。
+目标未带端口时按最终 scheme 补默认端口（HTTPS `:443` / HTTP `:80`）。
+
+**HTTPS 处理**：对 `CONNECT` 请求不做改写，证书仍按**原域名**签发（信任链不受影响）；
+解密后的内层请求自然命中重定向规则后转发到目标地址。
+
+规则**持久化**在 CA 同目录的 `rewrites.json`，保存后立即对后续抓到的请求生效，无需重启抓包。
+典型的本地联调流程：开启抓包 → 配置 `线上域名 → 127.0.0.1:8200` → 正常请求线上地址，
+流量实际打到本地服务，同时请求/响应仍以线上域名展示、可正常生成接口文档。
+
+### 14.10 常见抓包问题排查
 
 - **HTTPS 显示「证书未信任 / 连接被重置」**：未安装或未信任根证书。点「安装根证书」并以管理员运行；
   浏览器若仍报错，检查系统/浏览器证书管理器里 ApiTool CA 是否存在并设为信任。
@@ -561,13 +589,15 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 - **只看到 CONNECT / TLS，看不到明文**：仍未解密成功（证书未信任），按上面排查。
 - **首次开启抓包「等半天」**：代理启动已改为后台 goroutine + 500ms 超时，点击后立即生效；若仍慢多为证书信任检查阻塞，可先装好证书。
 
-### 14.10 目录结构与实现
+### 14.11 目录结构与实现
 
 - 后端：`internal/sniff/`
   - `proxy.go`：MITM 代理与 addon（请求/响应/WebSocket/SSE hook）、协议识别 `protocolOf`、过滤 `shouldIntercept`、错误标记。
   - `protocol.go`：`IdentifyProtocol` 原始流量嗅探、`matchProtocol` 协议匹配（含 `https→http`、`wss→websocket` 别名）、`ProtocolOptions` 协议枚举（统一来源）。
   - `grpc.go`：gRPC 帧解析 + 通用 protobuf wire 解码（支持 gzip 压缩 payload）。
-  - `manager.go`：抓包生命周期 / 状态、`Filter` 配置（Host/Method/Path/Protocol/Keyword）。
+  - `manager.go`：抓包生命周期 / 状态、`Filter` 配置（Host/Method/Path/Protocol/Keyword）、实时推送大 body 剪裁。
+  - `session.go`：抓包会话的存储 / 加载 / 删除 / OpenAPI 导出。
+  - `rewrite.go`：域名重定向规则（匹配、转发协议判定、持久化 `rewrites.json`）。
   - `sysproxy.go`：系统代理接管与证书信任管理。
   - `ca.go`：CA 生成与重签。
   - `capture.go`：记录去重、浏览器扩展回传的流量捕获（含静态资源过滤与 OPTIONS 预检去重）。
@@ -748,7 +778,7 @@ apitool/
 │   ├── stress/            # 压力测试
 │   ├── crypto/            # 加解密工具
 │   ├── bus/               # 事件总线（前端事件转发）
-│   ├── sniff/             # 网络抓包（MITM）：proxy.go 代理与 addon、manager.go 生命周期、sysproxy.go 系统代理与证书、ca.go CA 生成、capture.go 抓包记录去重
+│   ├── sniff/             # 网络抓包（MITM）：proxy.go 代理与 addon、manager.go 生命周期、session.go 会话、rewrite.go 域名重定向、sysproxy.go 系统代理与证书、ca.go CA 生成、capture.go 抓包记录去重
 │   ├── platform/          # 平台相关能力（剪贴板、PNG 读取、文件对话框等）
 │   ├── jsonutil/          # JSON 解析 / 字段树构建
 │   └── util/              # 通用工具（ID 生成、字符串、环境变量等）

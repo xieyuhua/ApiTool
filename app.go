@@ -581,6 +581,22 @@ func (a *App) SniffSetFilter(f sniff.Filter) error {
 	return nil
 }
 
+// SniffGetRewrites 返回域名重定向规则列表（供前端弹窗维护）。
+func (a *App) SniffGetRewrites() []sniff.HostRewrite {
+	if a.sniffMgr == nil {
+		return nil
+	}
+	return a.sniffMgr.GetRewrites()
+}
+
+// SniffSetRewrites 整体保存域名重定向规则并持久化，运行中的代理立即生效。
+func (a *App) SniffSetRewrites(list []sniff.HostRewrite) error {
+	if a.sniffMgr == nil {
+		return fmt.Errorf("抓包模块未初始化")
+	}
+	return a.sniffMgr.SetRewrites(list)
+}
+
 // SniffListSessions 返回抓包会话列表。
 func (a *App) SniffListSessions() []sniff.Session {
 	if a.sniffMgr == nil {
