@@ -349,8 +349,8 @@ var toolCallTagRe = regexp.MustCompile(`(?s)<tool_call>(.*?)</tool_call>`)
 // 函数名在标签体内：<function>name</function>
 var toolCallFuncRe = regexp.MustCompile(`(?s)<function\s*>\s*(.*?)\s*</function>`)
 // 函数名在属性里：<function name="name">...</function>
-var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*"([^"]*)"\s*>(.*?)</function>`)
-var toolCallParamRe = regexp.MustCompile(`(?s)<parameter\s+name\s*=\s*"([^"]*)"\s*>(.*?)</parameter>`)
+var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*"([^"]*)"(?:\s+[^>]*)?>(.*?)</function>`)
+var toolCallParamRe = regexp.MustCompile(`(?s)<parameter\s+name\s*=\s*"([^"]*)"(?:\s+[^>]*)?>(.*?)</parameter>`)
 // 外层可能包 <function_calls> ... </function_calls>
 var funcCallsRe = regexp.MustCompile(`(?s)<function_calls>(.*?)</function_calls>`)
 
@@ -611,25 +611,37 @@ func parseToolAction(text string) (*toolAction, bool) {
 	return nil, false
 }
 
-// normalizeToolTags 规范化工具调用标签：某些模型/中间件会把标签写成
-// <｜｜DSML｜｜tool_call> / <｜｜DSML｜｜function> / <｜｜DSML｜｜parameter ...>
-// 这类带前缀的形式，且常伴随畸形闭合（如 </｜｜DSML｜｜invoke> 代替 </tool_call>，
-// 或 <function>名</parameter> 这种错误闭合）。这里统一还原为标准
-// <tool_call><function>名</function><parameter name="k">v</parameter></tool_call>，
-// 保证后续解析与正文剥离都能正常工作。
+// normalizeToolTags 规范化工具调用标签：模型/中间件会输出多种畸形格式，统一还原为
+// 标准 <tool_call><function name="x">...</function><parameter name="k">v</parameter></tool_call>。
+// 已覆盖的形态：
+//  1. 带前缀：<｜｜DSML｜｜tool_call> / <｜｜DSML｜｜function>
+//  2. 复数+invoke 风格（Claude 系）：<tool_calls><invoke name="x"><parameter .../></invoke></tool_calls>
+//  3. 畸形闭合：<function>名</parameter>（function 被 parameter 错误闭合）
 var dsmlStripRe = regexp.MustCompile(`｜｜DSML｜｜`)
+// 复数外层 <tool_calls> / </tool_calls> -> <tool_call> / </tool_call>
+var dsmlToolCallsOpenRe = regexp.MustCompile(`(?s)<\s*tool_calls\s*>`)
+var dsmlToolCallsCloseRe = regexp.MustCompile(`(?s)<\s*/\s*tool_calls\s*>`)
+// <invoke name="x"> -> <function name="x">，以及 </invoke> -> </function>
+var dsmlInvokeOpenRe = regexp.MustCompile(`(?s)<\s*invoke\s+name\s*=\s*"([^"]*)"\s*>`)
+var dsmlInvokeCloseRe = regexp.MustCompile(`(?s)<\s*/\s*invoke\s*>`)
 // 修复畸形：<function ...>内容</parameter>  ->  <function ...>内容</function>
 var dsmlFuncCloseRe = regexp.MustCompile(`(?s)<function\b([^>]*)>([\s\S]*?)</parameter>`)
-// 把畸形的 </invoke> 闭合标签还原为标准 </tool_call>
-var dsmlInvokeCloseRe = regexp.MustCompile(`(?s)</invoke>`)
+// 去除 function 的双闭合残留（畸形修复 + invoke 转换可能叠加产生）
+var dsmlDupCloseRe = regexp.MustCompile(`(?s)</function>\s*</function>`)
 
 func normalizeToolTags(text string) string {
-	if !strings.Contains(text, "DSML") {
+	if !strings.Contains(text, "DSML") &&
+		!strings.Contains(text, "tool_calls") &&
+		!strings.Contains(text, "<invoke") {
 		return text
 	}
-	text = dsmlStripRe.ReplaceAllString(text, "")                                       // 移除所有 ｜｜DSML｜｜ 前缀
-	text = dsmlFuncCloseRe.ReplaceAllString(text, "<function$1>$2</function>")           // 修复 <function>..</parameter> 畸形
-	text = dsmlInvokeCloseRe.ReplaceAllString(text, "</tool_call>")                      // </invoke> -> </tool_call>
+	text = dsmlStripRe.ReplaceAllString(text, "")                                  // 移除所有 ｜｜DSML｜｜ 前缀
+	text = dsmlToolCallsOpenRe.ReplaceAllString(text, "<tool_call>")               // <tool_calls> -> <tool_call>
+	text = dsmlToolCallsCloseRe.ReplaceAllString(text, "</tool_call>")             // </tool_calls> -> </tool_call>
+	text = dsmlInvokeOpenRe.ReplaceAllString(text, "<function name=\"$1\">")        // <invoke name="x"> -> <function name="x">
+	text = dsmlInvokeCloseRe.ReplaceAllString(text, "</function>")                  // </invoke> -> </function>
+	text = dsmlFuncCloseRe.ReplaceAllString(text, "<function$1>$2</function>")       // 修复 <function>..</parameter> 畸形
+	text = dsmlDupCloseRe.ReplaceAllString(text, "</function>")                     // 去掉重复的 </function>
 	return text
 }
 func stripTags(text string) string {

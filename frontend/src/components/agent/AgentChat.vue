@@ -96,7 +96,17 @@ function bindEvents() {
   // 思考区整块（收尾，用于去重换行）
   offFns.push(EventsOn('agent:thinking', () => { scheduleScroll() }))
   offFns.push(EventsOn('agent:plan', (t) => { live.steps.push({ type: 'plan', name: '计划', output: t }); scheduleScroll() }))
-  offFns.push(EventsOn('agent:step', (s) => { live.steps.push(s); scheduleScroll() }))
+  offFns.push(EventsOn('agent:step', (s) => {
+    // 同一工具（按 name+server）仅保留一条，运行中更新入参，结束更新结果；避免重复卡片
+    if (s && (s.type === 'tool' || s.type === 'skill')) {
+      const idx = live.steps.findIndex(x => x && (x.type === 'tool' || x.type === 'skill') && x.name === s.name && (x.server || '') === (s.server || ''))
+      if (idx >= 0) live.steps[idx] = s
+      else live.steps.push(s)
+    } else {
+      live.steps.push(s)
+    }
+    scheduleScroll()
+  }))
 }
 function unbindEvents() {
   EventsOff('agent:loop-start'); EventsOff('agent:polish-start'); EventsOff('agent:delta')

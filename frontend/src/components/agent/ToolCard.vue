@@ -1,13 +1,15 @@
 <template>
-  <div class="tool-card" :class="{ err: step.error || step.type === 'tool-failed', open: expanded }">
-    <div class="tc-head" @click="toggle" :title="hasDetail ? '点击查看执行参数' : ''">
+  <div class="tool-card" :class="{ err: step.error || step.type === 'tool-failed', open: expanded, running }">
+    <div class="tc-head" @click="toggle" :title="canToggle ? '点击查看执行参数' : ''">
       <span class="tc-ic">{{ icon }}</span>
       <span class="tc-name">{{ step.name }}</span>
       <span v-if="step.server && step.server !== 'builtin'" class="tc-server">@{{ step.server }}</span>
       <span v-else-if="step.server === 'builtin'" class="tc-server builtin">内置</span>
       <span v-if="step.error || step.type === 'tool-failed'" class="tc-badge err">失败</span>
+      <span v-else-if="running" class="tc-badge run">运行中</span>
       <span v-else class="tc-badge ok">成功</span>
-      <span v-if="hasDetail" class="tc-toggle">{{ expanded ? '▾' : '▸' }}</span>
+      <span v-if="running" class="tc-spin"></span>
+      <span v-if="canToggle" class="tc-toggle">{{ expanded ? '▾' : '▸' }}</span>
     </div>
 
     <!-- 展开详情：执行参数与返回结果 -->
@@ -27,18 +29,30 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({ step: { type: Object, required: true } })
 
 const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'tool-failed': '⚠️' }
 const icon = iconMap[props.step.type] || '🔧'
 
-const expanded = ref(true)
+// 由 step 自身推断「是否运行中」：已有入参、但还没有结果/错误 → 仍在进行中
+const running = computed(() => {
+  const s = props.step
+  return !!(s.input || s.type === 'tool' || s.type === 'skill') &&
+    !(s.output || s.error || s.type === 'tool-failed')
+})
+// 有内容才允许展开/折叠
 const hasDetail = computed(() => !!(props.step.input || props.step.output || props.step.error))
+const canToggle = computed(() => hasDetail.value && !running.value)
+
+// 运行中自动展开；一旦结束（running 变 true → false）自动折叠
+const expanded = ref(running.value)
+watch(running, (v) => { expanded.value = v }, { immediate: true })
 
 function toggle() {
-  if (hasDetail.value) expanded.value = !expanded.value
+  // 运行中不允许折叠，仅手动（运行结束）可切换
+  if (!running.value && hasDetail.value) expanded.value = !expanded.value
 }
 </script>
 
@@ -55,6 +69,8 @@ function toggle() {
 }
 .tool-card.err { border-color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
 .tool-card.open { background: var(--surface); }
+/* 运行中的工具单独占一整行 */
+.tool-card.running { width: 100%; flex-basis: 100%; border-color: var(--primary); background: var(--el-color-primary-light-9); }
 .tc-head { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; cursor: default; }
 .tc-head[title] { cursor: pointer; }
 .tc-ic { font-size: 13px; }
@@ -64,7 +80,11 @@ function toggle() {
 .tc-badge { font-size: 11px; padding: 0 8px; border-radius: 10px; }
 .tc-badge.ok { color: var(--el-color-success); background: var(--el-color-success-light-9); }
 .tc-badge.err { color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
+.tc-badge.run { color: var(--primary); background: var(--el-color-primary-light-9); }
 .tc-toggle { color: var(--text-muted); margin-left: 2px; font-size: 11px; }
+/* 运行中旋转的加载小圈 */
+.tc-spin { width: 11px; height: 11px; margin-left: 2px; border: 2px solid var(--primary); border-top-color: transparent; border-radius: 50%; animation: tc-spin 0.8s linear infinite; }
+@keyframes tc-spin { to { transform: rotate(360deg); } }
 
 .tc-detail { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
 .tc-sec { margin-bottom: 6px; }
