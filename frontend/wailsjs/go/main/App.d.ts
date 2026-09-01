@@ -135,11 +135,15 @@ export function ParseFields(arg1:string,arg2:Array<model.Field>):Promise<Array<m
 
 export function PluginConnect(arg1:model.PluginConn):Promise<plugins.PluginOpResult>;
 
+export function PluginDBColumns(arg1:model.PluginConn,arg2:string,arg3:string):Promise<Array<plugins.DBColumn>>;
+
 export function PluginDBDatabases(arg1:model.PluginConn):Promise<plugins.DBInfo>;
 
 export function PluginDBExec(arg1:model.PluginConn,arg2:plugins.DBExecReq):Promise<number>;
 
 export function PluginDBQuery(arg1:model.PluginConn,arg2:plugins.DBQueryReq):Promise<plugins.DBRow>;
+
+export function PluginDBSchema(arg1:model.PluginConn,arg2:string,arg3:Array<string>):Promise<Array<plugins.DBSchema>>;
 
 export function PluginDBTables(arg1:model.PluginConn,arg2:string):Promise<Array<plugins.DBTable>>;
 

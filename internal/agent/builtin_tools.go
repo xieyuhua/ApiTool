@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"apitool/internal/model"
+	"apitool/internal/plugins"
 )
 
 // builtinServerID 内置工具归属的虚拟服务器 ID（模型通过 server="builtin" 调用）。
@@ -73,6 +76,17 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 		"run_command": {map[string]interface{}{
 			"command": map[string]interface{}{"type": "string", "description": "要执行的 shell 命令字符串，例如 \"ls -la\" 或 \"git status\""},
 		}, []string{"command"}},
+		"db_schema": {map[string]interface{}{
+			"connId": map[string]interface{}{"type": "string", "description": "数据库连接 ID（在 Agent「数据连接」管理中配置的 ID，如 mysql-1 / pg-1 / ora-1）"},
+			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）"},
+			"tables":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "要同步的表名列表；留空则同步该库全部表"},
+		}, []string{"connId", "database"}},
+		"db_query": {map[string]interface{}{
+			"connId":  map[string]interface{}{"type": "string", "description": "数据库连接 ID"},
+			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名"},
+			"sql":      map[string]interface{}{"type": "string", "description": "要执行的 SELECT 语句（禁止写操作）"},
+			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200"},
+		}, []string{"connId", "database", "sql"}},
 	}
 	var out []MCPTool
 	for _, t := range BuiltinToolMeta() {
@@ -116,9 +130,157 @@ func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, file
 		return builtinCalc(args)
 	case "run_command":
 		return builtinRunCommand(args)
+	case "db_schema":
+		return builtinDBSchema(m, args)
+	case "db_query":
+		return builtinDBQuery(m, args)
 	default:
 		return "", fmt.Errorf("未知内置工具: %s", name)
 	}
+}
+
+// findDBConn 从应用数据中按 connId 找到 db 分类的连接配置
+func findDBConn(m *Manager, connID string) (model.PluginConn, error) {
+	if m == nil || m.host == nil {
+		return model.PluginConn{}, fmt.Errorf("agent 未正确初始化")
+	}
+	for _, c := range m.host.ReadData().Plugins.Connections {
+		if c.ID == connID {
+			if c.Category != "" && c.Category != "db" {
+				return model.PluginConn{}, fmt.Errorf("连接 %s 类型为 %s，不是数据库(db)连接", connID, c.Category)
+			}
+			return c, nil
+		}
+	}
+	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（请先在「数据连接」管理中配置）", connID)
+}
+
+// dbSemantic 读取用户在「数据连接」管理中维护的字段/表语义。
+// key = connId|database|table|column（全小写）；column 为空时查表级语义（key 不含 column 段）。
+func dbSemantic(m *Manager, connID, database, table, column string) string {
+	if m == nil {
+		return ""
+	}
+	cfg := m.LoadAgentData().Config
+	sem := cfg.DBSemantics
+	if len(sem) == 0 {
+		return ""
+	}
+	if column != "" {
+		key := strings.ToLower(fmt.Sprintf("%s|%s|%s|%s", connID, database, table, column))
+		if v, ok := sem[key]; ok && strings.TrimSpace(v) != "" {
+			return v
+		}
+		return ""
+	}
+	key := strings.ToLower(fmt.Sprintf("%s|%s|%s", connID, database, table))
+	if v, ok := sem[key]; ok && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return ""
+}
+
+// builtinDBSchema 读取表结构（含字段、类型、注释、行数），整理为便于大模型理解的文本
+func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
+	connID, _ := args["connId"].(string)
+	database, _ := args["database"].(string)
+	if connID == "" {
+		connID = m.LoadAgentData().Config.ActiveDBConn // 未指定则使用当前激活的连接
+	}
+	if connID == "" || database == "" {
+		return "", fmt.Errorf("缺少 connId 或 database 参数（可在「插件 / 数据库连接」中启用一个连接作为分析连接）")
+	}
+	conn, err := findDBConn(m, connID)
+	if err != nil {
+		return "", err
+	}
+	var tables []string
+	if t, ok := args["tables"].([]interface{}); ok {
+		for _, x := range t {
+			if s, ok := x.(string); ok && s != "" {
+				tables = append(tables, s)
+			}
+		}
+	}
+	schemas, err := plugins.PluginDBSchema(conn, database, tables)
+	if err != nil {
+		return "", err
+	}
+	if len(schemas) == 0 {
+		return fmt.Sprintf("库 %s 中没有表或未能读取到表结构。", database), nil
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# 数据库结构：%s（库 %s，共 %d 张表）\n\n", conn.DbType, database, len(schemas)))
+	for _, s := range schemas {
+		sb.WriteString(fmt.Sprintf("## 表 `%s`", s.Table))
+		if s.Rows > 0 {
+			sb.WriteString(fmt.Sprintf("（约 %d 行）", s.Rows))
+		}
+		sb.WriteString("\n")
+		// 叠加用户在「数据连接」管理中维护的表级语义
+		if tsem := dbSemantic(m, connID, database, s.Table, ""); tsem != "" {
+			sb.WriteString(fmt.Sprintf("> 表语义：%s\n\n", tsem))
+		}
+		if len(s.Columns) == 0 {
+			sb.WriteString("_（无字段信息）_\n")
+		} else {
+			sb.WriteString("| 字段 | 类型 | 可空 | 默认值 | 注释/语义 |\n")
+			sb.WriteString("| --- | --- | --- | --- | --- |\n")
+			for _, c := range s.Columns {
+				cmt := c.Comment
+				if cmt == "" {
+					cmt = "—"
+				}
+				// 叠加用户在「数据连接」管理中维护的字段语义（优先于数据库自带注释）
+				if sem := dbSemantic(m, connID, database, s.Table, c.Name); sem != "" {
+					if cmt == "" || cmt == "—" {
+						cmt = sem
+					} else {
+						cmt = cmt + "；" + sem
+					}
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", c.Name, c.Type, c.Nullable, c.Default, cmt))
+			}
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String(), nil
+}
+
+// builtinDBQuery 在连接上执行只读 SELECT 并返回结果（限制行数）
+func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
+	connID, _ := args["connId"].(string)
+	database, _ := args["database"].(string)
+	sql, _ := args["sql"].(string)
+	if connID == "" {
+		connID = m.LoadAgentData().Config.ActiveDBConn
+	}
+	if connID == "" || database == "" || sql == "" {
+		return "", fmt.Errorf("缺少 connId / database / sql 参数（可在「插件 / 数据库连接」中启用一个连接作为分析连接）")
+	}
+	upper := strings.ToUpper(strings.TrimSpace(sql))
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
+		return "", fmt.Errorf("仅允许 SELECT / WITH 查询，禁止写操作")
+	}
+	conn, err := findDBConn(m, connID)
+	if err != nil {
+		return "", err
+	}
+	limit := 200
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+	res, err := plugins.PluginDBQuery(conn, plugins.DBQueryReq{Database: database, SQL: sql, Limit: limit})
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("查询返回 %d 行 %d 列：\n", len(res.Rows), len(res.Columns)))
+	sb.WriteString(strings.Join(res.Columns, "\t") + "\n")
+	for _, row := range res.Rows {
+		sb.WriteString(strings.Join(row, "\t") + "\n")
+	}
+	return sb.String(), nil
 }
 
 func builtinReadFile(args map[string]interface{}, fileLimit int) (string, error) {

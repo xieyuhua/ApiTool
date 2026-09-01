@@ -4,7 +4,7 @@ import PluginManager from './PluginManager.vue'
 import Toolbox from './Toolbox.vue'
 import ToolClipboard from '../clipboard/ToolClipboard.vue'
 
-const PLUGIN_KEYS = ['ssh', 'ftp', 'sftp']
+const PLUGIN_KEYS = ['ssh', 'ftp', 'sftp', 'db']
 
 const groups = [
   {
@@ -19,6 +19,7 @@ const groups = [
       { key: 'ssh', label: 'XShell (SSH)', ico: '💻' },
       { key: 'ftp', label: 'FTP', ico: '📁' },
       { key: 'sftp', label: 'SFTP', ico: '📂' },
+      { key: 'db', label: '数据库连接', ico: '🗄️' },
     ],
   },
   {

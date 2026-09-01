@@ -1,7 +1,11 @@
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { AgentAPI } from './agentApi'
+import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../../store.js'
+import {
+  PluginTest, PluginDBDatabases, PluginDBTables, PluginDBColumns,
+} from '../../../wailsjs/go/main/App'
 
 const props = defineProps({
   visible: Boolean,
@@ -57,12 +61,13 @@ watch(() => props.visible, async (v) => {
     }
     const old = local.config.tools
     const hadOldGroup = typeof old.fileOp === 'boolean' || typeof old.webSearch === 'boolean' ||
-      typeof old.sysInfo === 'boolean' || typeof old.common === 'boolean'
+      typeof old.sysInfo === 'boolean' || typeof old.common === 'boolean' || typeof old.dbAnalysis === 'boolean'
     const groupOn = {
       '文件操作': !hadOldGroup ? true : !!old.fileOp,
       '网页搜索': !hadOldGroup ? true : !!old.webSearch,
       '系统信息': !hadOldGroup ? true : !!old.sysInfo,
       '常用工具': !hadOldGroup ? true : !!old.common,
+      '数据库连接分析': !hadOldGroup ? true : !!old.dbAnalysis,
     }
     for (const t of toolList.value) {
       if (typeof old.enabled[t.name] !== 'boolean') {
@@ -74,10 +79,14 @@ watch(() => props.visible, async (v) => {
         local.config.tools.desc[t.name] = t.def
       }
     }
+    // 数据库连接分析总开关：与 db_schema/db_query 两个工具的开启状态保持一致（任一开启即视为开启）
+    local.config.enableDBAnalysis = !!old.dbAnalysis ||
+      local.config.tools.enabled['db_schema'] || local.config.tools.enabled['db_query']
     delete local.config.tools.fileOp
     delete local.config.tools.webSearch
     delete local.config.tools.sysInfo
     delete local.config.tools.common
+    delete local.config.tools.dbAnalysis
     local.config.maxToolOutput = local.config.maxToolOutput || 4000
     local.config.maxFileRead = local.config.maxFileRead || 200000
     local.config.maxTokens = local.config.maxTokens || 8000
@@ -88,6 +97,12 @@ watch(() => props.visible, async (v) => {
 })
 
 function close() { emit('update:visible', false) }
+
+// 数据库连接分析总开关变化时，联动两个 DB 工具的独立开关
+function syncDBAnalysis(v) {
+  local.config.tools.enabled['db_schema'] = v
+  local.config.tools.enabled['db_query'] = v
+}
 
 // ---- 工具描述编辑 ----
 function startEdit(name) { editing[name] = true }
@@ -147,6 +162,8 @@ function setRoles(u, v) { u.roles = v.split(',').map(s => s.trim()).filter(Boole
 
 async function saveAll() {
   try {
+    // 保存前将总开关状态同步到两个 DB 工具
+    syncDBAnalysis(!!local.config.enableDBAnalysis)
     await AgentAPI.saveConfig(JSON.parse(JSON.stringify(local.config)))
     await AgentAPI.saveSkills(JSON.parse(JSON.stringify(local.skills)))
     await AgentAPI.saveServers(JSON.parse(JSON.stringify(local.servers)))
@@ -157,6 +174,14 @@ async function saveAll() {
   } catch (e) {
     ElMessage.error('保存失败：' + String(e))
   }
+}
+
+// ===================== 数据库连接列表（供运行配置「激活分析连接」下拉使用） =====================
+const dbConns = computed(() => (pluginConnections() || []).filter(c => c.category === 'db'))
+// call 封装：wails 函数可能返回 Promise 或带 .then 的对象
+function call(fn, ...args) {
+  const r = fn(...args)
+  return r && typeof r.then === 'function' ? r : Promise.resolve(r)
 }
 </script>
 
@@ -220,6 +245,25 @@ async function saveAll() {
           <el-switch v-model="local.config.showThinking" active-text="输出思考过程" />
           <el-switch v-model="local.config.enableChart" active-text="图表输出" />
           <el-switch v-model="local.config.enablePolish" active-text="回答 AI 润色" />
+        </div>
+        <div class="form-subtitle">数据配置 / 数据库连接分析</div>
+        <div class="form-row switches">
+          <el-switch
+            v-model="local.config.enableDBAnalysis"
+            active-text="数据库连接分析（同步表结构 / 字段语义维护）"
+            @change="syncDBAnalysis"
+          />
+        </div>
+        <div class="form-row" v-if="local.config.enableDBAnalysis">
+          <label style="width:120px">激活分析连接</label>
+          <el-select v-model="local.config.activeDBConn" size="small" placeholder="选择用于分析的连接（仅可一个）" style="width:300px" filterable>
+            <el-option v-for="c in dbConns" :key="c.id" :label="c.name + ' (' + (c.dbType||'mysql').toUpperCase() + ')'" :value="c.id" />
+          </el-select>
+          <span class="hint" style="margin:0">同一时间仅允许一个数据库连接参与分析；可在「插件 / 数据库连接」中启用。</span>
+        </div>
+        <div class="hint" style="margin-top:-6px;margin-bottom:12px">
+          开启后，Agent 可连接已配置的 MySQL / PostgreSQL / Oracle 数据库，读取并同步表结构与字段语义（注释）用于数据分析；
+          也可在「内置工具」中单独微调 db_schema / db_query 的开关与描述。需先在「插件 / 数据库连接」中配置连接。
         </div>
       </el-tab-pane>
 
@@ -319,6 +363,7 @@ async function saveAll() {
           <el-input :model-value="rolesText(u)" @update:model-value="setRoles(u, $event)" size="small" placeholder="角色（逗号分隔），如 admin,tester" />
         </div>
       </el-tab-pane>
+
     </el-tabs>
 
     <template #footer>
@@ -350,4 +395,36 @@ async function saveAll() {
 .tab-tip { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; }
 .card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 10px 0; background: var(--surface-2); }
 .card-head { display: flex; align-items: center; gap: 8px; }
+.conn-name { font-weight: 600; font-size: 13px; }
+.conn-host { font-size: 12px; color: var(--text-muted); }
+.spacer { flex: 1; }
+.empty-hint { font-size: 12px; color: var(--text-muted); padding: 6px 0; }
+.table-pick { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--surface-2); }
+.tp-head { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.tp-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tp-rows { color: var(--text-muted); font-size: 11px; }
+.sem-card { background: var(--surface-2); }
+.tp-count { font-size: 12px; color: var(--text-muted); }
+.sem-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+.sem-col { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; min-width: 140px; font-weight: 600; }
+.sem-type { font-size: 11px; color: var(--text-muted); flex: 1; min-width: 120px; }
+.sem-input { max-width: 280px; }
+.db-conns-bar { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 6px; }
+.db-conn-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.db-conn-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.db-conn-chip.active { border-color: var(--primary, #409eff); box-shadow: 0 0 0 2px rgba(64,158,255,.15); }
+.db-conn-chip .conn-host { margin-left: 2px; }
+.db-cols-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+.db-col { min-width: 0; }
+.db-col .form-subtitle { margin-top: 0; }
+.synced-list { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow: auto; padding-right: 4px; }
+.tbl-search { width: 160px; float: right; }
+.expand-toggle { cursor: pointer; user-select: none; margin-right: 6px; color: var(--primary, #409eff); font-size: 12px; }
+.table-sem-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border); }
+.sem-col.sm { min-width: 48px; color: #888; font-size: 12px; }
+.tp-synced { color: #2e7d32; font-size: 11px; margin-left: 4px; }
+@media (max-width: 860px) { .db-cols-layout { grid-template-columns: 1fr; } }
+.test-res { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.test-res.ok { color: #2e7d32; background: #e8f5e9; }
+.test-res.err { color: #c62828; background: #ffebee; }
 </style>

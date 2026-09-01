@@ -146,17 +146,19 @@ func (m *Manager) Start(addr string) error {
 }
 
 // Stop 停止抓包、保存会话并还原系统代理（仅在启用过时）。
+// 为避免大流量会话（含完整响应体，单条可达数十 MB）的序列化落盘阻塞
+// Wails 主调用线程导致前端「停止」按钮长时间无响应，这里仅同步关闭代理
+// 并立即将状态置为已停止（前端 await 秒回），将耗时的会话落盘放入后台 goroutine。
 func (m *Manager) Stop() error {
 	if m.proxy == nil {
 		return nil
 	}
+	// 同步关闭代理：立刻停止接收新流量，状态立即更新
 	m.proxy.Stop()
+	saved := m.session
 	m.proxy = nil
-	// 保存活动会话
-	if m.session != nil {
-		_ = m.store.Save(m.session)
-		m.session = nil
-	}
+	m.session = nil
+
 	m.status.Running = false
 	m.status.ProxyAddr = ""
 	m.status.CertURL = ""
@@ -165,6 +167,13 @@ func (m *Manager) Stop() error {
 		_ = ClearSystemProxy()
 	}
 	m.emitStatus()
+
+	// 后台异步落盘：不阻塞前端「停止」操作
+	if saved != nil {
+		go func(sess *Session) {
+			_ = m.store.Save(sess)
+		}(saved)
+	}
 	return nil
 }
 

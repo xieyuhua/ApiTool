@@ -91,6 +91,23 @@ type DBTable struct {
 	Engine string `json:"engine"`
 }
 
+// DBColumn 字段定义（用于表结构分析）
+type DBColumn struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable string `json:"nullable"` // YES / NO
+	Default  string `json:"default"`
+	Comment  string `json:"comment"`
+}
+
+// DBSchema 一张表的完整结构（含字段列表），用于同步给大模型分析
+type DBSchema struct {
+	Database string      `json:"database"`
+	Table    string      `json:"table"`
+	Rows     int64       `json:"rows"`
+	Columns  []DBColumn  `json:"columns"`
+}
+
 // DBRow 查询结果
 type DBRow struct {
 	Columns []string   `json:"columns"`

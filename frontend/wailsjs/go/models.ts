@@ -14,6 +14,64 @@ export namespace agent {
 	        this.desc = source["desc"];
 	    }
 	}
+	export class DBSyncedColumn {
+	    name: string;
+	    type: string;
+	    nullable: string;
+	    default: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DBSyncedColumn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.nullable = source["nullable"];
+	        this.default = source["default"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class DBSyncedTable {
+	    connId: string;
+	    database: string;
+	    table: string;
+	    rows: number;
+	    columns: DBSyncedColumn[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DBSyncedTable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connId = source["connId"];
+	        this.database = source["database"];
+	        this.table = source["table"];
+	        this.rows = source["rows"];
+	        this.columns = this.convertValues(source["columns"], DBSyncedColumn);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AgentConfig {
 	    systemPrompt: string;
 	    mode: string;
@@ -22,6 +80,10 @@ export namespace agent {
 	    showThinking: boolean;
 	    enablePolish: boolean;
 	    enableChart: boolean;
+	    enableDBAnalysis: boolean;
+	    activeDBConn: string;
+	    dbSemantics: Record<string, string>;
+	    dbSchemas: Record<string, DBSyncedTable>;
 	    temperature: number;
 	    currentUserId: string;
 	    tools: ToolFlags;
@@ -42,6 +104,10 @@ export namespace agent {
 	        this.showThinking = source["showThinking"];
 	        this.enablePolish = source["enablePolish"];
 	        this.enableChart = source["enableChart"];
+	        this.enableDBAnalysis = source["enableDBAnalysis"];
+	        this.activeDBConn = source["activeDBConn"];
+	        this.dbSemantics = source["dbSemantics"];
+	        this.dbSchemas = this.convertValues(source["dbSchemas"], DBSyncedTable, true);
 	        this.temperature = source["temperature"];
 	        this.currentUserId = source["currentUserId"];
 	        this.tools = this.convertValues(source["tools"], ToolFlags);
@@ -354,6 +420,8 @@ export namespace agent {
 	        this.default = source["default"];
 	    }
 	}
+	
+	
 	
 	export class MCPTool {
 	    name: string;
@@ -1590,6 +1658,26 @@ export namespace model {
 
 export namespace plugins {
 	
+	export class DBColumn {
+	    name: string;
+	    type: string;
+	    nullable: string;
+	    default: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DBColumn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.nullable = source["nullable"];
+	        this.default = source["default"];
+	        this.comment = source["comment"];
+	    }
+	}
 	export class DBExecReq {
 	    database: string;
 	    sql: string;
@@ -1649,6 +1737,42 @@ export namespace plugins {
 	        this.columns = source["columns"];
 	        this.rows = source["rows"];
 	    }
+	}
+	export class DBSchema {
+	    database: string;
+	    table: string;
+	    rows: number;
+	    columns: DBColumn[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DBSchema(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.table = source["table"];
+	        this.rows = source["rows"];
+	        this.columns = this.convertValues(source["columns"], DBColumn);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class DBTable {
 	    name: string;
@@ -1963,6 +2087,7 @@ export namespace sniff {
 	    error: string;
 	    reqClipped?: boolean;
 	    respClipped?: boolean;
+	    respBodyTruncated?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TrafficRecord(source);
@@ -1995,6 +2120,7 @@ export namespace sniff {
 	        this.error = source["error"];
 	        this.reqClipped = source["reqClipped"];
 	        this.respClipped = source["respClipped"];
+	        this.respBodyTruncated = source["respBodyTruncated"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

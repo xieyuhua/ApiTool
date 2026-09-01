@@ -88,8 +88,8 @@
       show-icon
       :title="status.error" />
 
-    <!-- 连接/证书错误单独展示 -->
-    <div v-if="errorList.length" class="mitm-errors">
+    <!-- 连接/证书错误单独展示（可被「隐藏错误」开关屏蔽） -->
+    <div v-if="showErrors && errorList.length" class="mitm-errors">
       <el-alert v-for="(e, i) in errorList.slice(0, 3)" :key="i" type="error" :closable="false"
         :show-icon="false" class="err-item">
         <div class="err-head">
@@ -108,8 +108,8 @@
       </div>
     </div>
 
-    <!-- 解决引导 -->
-    <div v-if="currentGuide" class="mitm-guide" :class="'g-' + currentGuide.type">
+    <!-- 解决引导（可被「隐藏错误」开关屏蔽） -->
+    <div v-if="showErrors && currentGuide" class="mitm-guide" :class="'g-' + currentGuide.type">
       <div class="g-head">
         <span class="g-title">解决建议：{{ errLabel(currentGuide.type) }}</span>
         <el-button link size="small" type="primary" @click="copyText(currentGuide.solution)">复制方案</el-button>
@@ -159,6 +159,8 @@
               <div class="filter-row">
                 <el-checkbox v-model="filterOnlyHTTP" @change="applyFilter">仅抓取 HTTP/HTTPS</el-checkbox>
                 <el-checkbox v-model="autoDoc" border size="small" title="抓取时自动为每个请求生成文档草稿">自动生成文档</el-checkbox>
+                <el-switch v-model="showErrors" size="small" inline-prompt active-text="显示错误" inactive-text="隐藏错误"
+                  style="--el-switch-on-color:#f56c6c;margin-left:8px" title="关闭后隐藏解密失败/连接错误的提示列表、解决引导与弹窗提示（错误仍记录可在「解密失败日志」查看）" />
               </div>
             </div>
           </el-collapse-transition>
@@ -554,6 +556,7 @@ const detailTab = ref('overview')
 const liveFilter = ref('')
 const viewMode = ref('list') // list / group
 const trafficOpen = ref(true) // 实时流量板块是否展开（可折叠收起节省空间）
+const showErrors = ref(true) // 是否显示解密失败/连接错误提示（关闭则隐藏错误列表、解决引导与弹窗提示，仅保留顶部「解密失败日志」计数）
 // 分组模式下记录用户手动展开的节点 key（host 或目录），默认全部折叠
 const expandedKeys = ref(new Set())
 const onlyErr = ref(false) // 仅查看有解密失败记录的连接
@@ -1043,7 +1046,7 @@ onMounted(async () => {
     }
     // 错误 toast 节流：大量解密失败时避免瞬间弹出几十条全局提示卡死 UI（错误已入列表展示）
     const _n = Date.now()
-    if (_n - lastErrToastAt > 2000) {
+    if (showErrors.value && _n - lastErrToastAt > 2000) {
       lastErrToastAt = _n
       ElMessage.warning(text)
     }

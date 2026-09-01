@@ -12,10 +12,11 @@
         <el-button type="primary" size="small" @click="openAdd">新增连接</el-button>
       </el-empty>
       <div v-else class="pm-cards">
-        <div v-for="c in categoryConns" :key="c.id" class="pm-card" @click="selectConn(c)">
+        <div v-for="c in categoryConns" :key="c.id" class="pm-card" :class="{ 'pm-card-active': c.category === 'db' && activeConnId === c.id }" @click="selectConn(c)">
           <div class="pm-card-top">
             <span class="pm-card-ico">{{ catIcon(c.category) }}</span>
             <span class="pm-card-name" :title="c.name">{{ c.name }}</span>
+            <span v-if="c.category === 'db' && activeConnId === c.id" class="pm-card-badge">分析中</span>
           </div>
           <div class="pm-card-host">{{ c.host || '—' }}<template v-if="c.port">:{{ c.port }}</template></div>
           <div class="pm-card-meta">{{ cardMeta(c) }}</div>
@@ -118,6 +119,102 @@
         </el-dialog>
         <input ref="fileInputRef" type="file" multiple style="position:absolute;width:0;height:0;opacity:0" @change="onFilePicked" />
       </div>
+
+      <!-- 数据库连接：测试连接 + 启用分析 + 同步表结构 / 字段语义维护 -->
+      <div class="pm-body pm-db" v-else-if="selected.category === 'db'">
+        <div class="pm-line pm-wrap">
+          <el-button size="small" type="success" @click="dbTest">测试连接</el-button>
+          <span v-if="testResult" :class="['pm-test', testResult.ok ? 'ok' : 'err']">
+            {{ testResult.ok ? '✓ ' + (testResult.info || '连接成功') : '✗ ' + (testResult.error || '连接失败') }}
+          </span>
+          <span class="spacer" />
+          <el-switch
+            :model-value="agentCfg.activeDBConn === selected.id"
+            @change="setActiveConn"
+            active-text="启用此连接做数据分析（同时仅一个）"
+          />
+        </div>
+        <el-descriptions :column="2" border size="small" class="pm-meta">
+          <el-descriptions-item label="类型">{{ (selected.dbType || 'mysql').toUpperCase() }}</el-descriptions-item>
+          <el-descriptions-item label="主机">{{ selected.host }}<template v-if="selected.port">:{{ selected.port }}</template></el-descriptions-item>
+          <el-descriptions-item label="用户名">{{ selected.username || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="默认库/Schema">{{ selected.database || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="备注" :span="2">{{ selected.remark || '—' }}</el-descriptions-item>
+        </el-descriptions>
+        <div v-if="agentCfg.activeDBConn === selected.id" class="pm-active-banner">
+          ✓ 当前分析连接：Agent 执行 db_schema / db_query 时将使用此连接（同一时间仅一个）
+        </div>
+
+        <div class="pm-sub">同步表结构 / 字段语义维护</div>
+        <div class="db-op-bar">
+          <el-select v-model="selDatabase" size="small" placeholder="选择数据库 / Schema" style="width:240px" filterable @change="onDbDatabaseChange">
+            <el-option v-for="d in dbDatabases" :key="d" :label="d" :value="d" />
+          </el-select>
+          <el-button size="small" type="success" :loading="syncing" :disabled="!selTables.length" @click="syncTableSchema">同步选中表结构</el-button>
+        </div>
+        <div v-if="!selDatabase" class="pm-hint">请先选择一个数据库 / Schema，再勾选表同步结构、维护字段语义。数据将与「AI Agent → 数据连接」共享。</div>
+
+        <div v-if="selDatabase" class="db-cols-layout">
+          <div class="db-col">
+            <div class="form-subtitle">
+              待同步表（共 {{ dbTables.length }} 张）
+              <el-input v-model="tblFilter" size="small" placeholder="搜索表名" clearable class="tbl-search" />
+            </div>
+            <div v-if="dbTables.length" class="table-pick">
+              <el-checkbox-group v-model="selTables" class="tp-list">
+                <el-checkbox v-for="t in filteredTables" :key="t.name" :value="t.name" border size="small"
+                  :disabled="!!agentCfg.dbSchemas && !!agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]">
+                  {{ t.name }}<span class="tp-rows" v-if="t.rows"> ({{ t.rows }})</span>
+                  <span v-if="agentCfg.dbSchemas && agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]" class="tp-synced">已同步</span>
+                </el-checkbox>
+              </el-checkbox-group>
+              <div v-if="!filteredTables.length" class="empty-hint">没有匹配的表。</div>
+            </div>
+            <div v-else class="empty-hint">该库暂无表或尚未读取。</div>
+          </div>
+
+          <div class="db-col">
+            <div class="form-subtitle">
+              已同步表结构（{{ syncedTables.length }} 张）
+              <el-input v-model="syncedFilter" size="small" placeholder="搜索表名" clearable class="tbl-search" />
+            </div>
+            <div v-if="syncedTables.length" class="synced-list">
+              <div v-for="t in filteredSynced" :key="t.table" class="card sem-card">
+                <div class="card-head">
+                  <span class="expand-toggle" @click="toggleExpand(t.table)">{{ expandedTables.has(t.table) ? '▾' : '▸' }}</span>
+                  <span class="conn-name">{{ t.table }}</span>
+                  <span class="spacer" />
+                  <span class="tp-count">{{ (t.columns || []).length }} 字段</span>
+                  <el-button size="small" text type="danger" @click="removeSynced(t)">移除同步</el-button>
+                </div>
+                <div class="table-sem-row">
+                  <span class="sem-col sm">表语义</span>
+                  <el-input :model-value="tableSemValue(t.connId, t.database, t.table)"
+                    @update:model-value="setTableSemValue(t.connId, t.database, t.table, $event)"
+                    size="small" placeholder="维护此表的整体语义（如：订单主表，记录用户下单信息）" class="sem-input" />
+                </div>
+                <div v-if="expandedTables.has(t.table)">
+                  <div v-for="col in columnsOf(t)" :key="col.name" class="sem-row">
+                    <span class="sem-col">{{ col.name }}</span>
+                    <span class="sem-type">{{ col.type }}<template v-if="col.comment"> · {{ col.comment }}</template></span>
+                    <el-input :model-value="semValue(t.connId, t.database, t.table, col.name)"
+                      @update:model-value="setSemValue(t.connId, t.database, t.table, col.name, $event)"
+                      size="small" placeholder="维护此字段的中文语义（如：订单创建时间）" class="sem-input" />
+                  </div>
+                  <div v-if="!columnsOf(t).length" class="empty-hint">该表无字段信息。</div>
+                </div>
+              </div>
+              <div v-if="!filteredSynced.length" class="empty-hint">没有匹配的已同步表。</div>
+            </div>
+            <div v-else class="empty-hint">尚未同步任何表结构。在左侧勾选表后点「同步选中表结构」。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 兜底：未知分类 -->
+      <div class="pm-body" v-else>
+        <el-empty description="该连接类型暂不支持操作面板" />
+      </div>
     </div>
 
     <!-- 新增/编辑连接 -->
@@ -129,6 +226,7 @@
             <el-option label="XShell(SSH)" value="ssh" />
             <el-option label="FTP" value="ftp" />
             <el-option label="SFTP" value="sftp" />
+            <el-option label="数据库连接(MySQL/PG/Oracle)" value="db" />
           </el-select>
         </el-form-item>
         <el-form-item label="编码" v-if="form.category === 'ssh'">
@@ -138,8 +236,16 @@
             <el-option label="GB18030" value="gb18030" />
           </el-select>
         </el-form-item>
+        <el-form-item label="数据库类型" v-if="form.category === 'db'">
+          <el-select v-model="form.dbType" style="width:100%">
+            <el-option label="MySQL" value="mysql" />
+            <el-option label="PostgreSQL" value="postgres" />
+            <el-option label="Oracle" value="oracle" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主机"><el-input v-model="form.host" /></el-form-item>
         <el-form-item label="端口"><el-input v-model="form.port" /></el-form-item>
+        <el-form-item label="默认库/Schema" v-if="form.category === 'db'"><el-input v-model="form.database" placeholder="mysql: 库名；pg/oracle: schema" /></el-form-item>
         <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
@@ -166,6 +272,7 @@ import {
   PluginSFTPUploadB64, PluginSFTPRename, PluginSFTPDownload,
   PluginFTPList, PluginFTPRead, PluginFTPWrite, PluginFTPMkdir, PluginFTPDelete,
   PluginFTPUploadB64, PluginFTPRename, PluginFTPDownload,
+  PluginDBDatabases, PluginDBTables, PluginDBColumns,
 } from '../../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 // 标准终端引擎：完整支持 ANSI/VT100、真彩色、交替屏，能正确渲染 htop/vim/top 等全屏 TUI
@@ -173,14 +280,26 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../../store.js'
+import { AgentAPI } from '../agent/agentApi'
+
+// 当前激活用于数据分析的数据库连接 ID（用于卡片/详情展示徽标）
+const activeConnId = ref('')
+async function loadActiveConnId() {
+  try {
+    const d = await AgentAPI.load()
+    activeConnId.value = (d.config && d.config.activeDBConn) || ''
+  } catch (e) { activeConnId.value = '' }
+}
+loadActiveConnId()
 
 // 连接分类定义
 const categories = [
   { value: 'ssh', label: 'XShell(SSH)', ico: '💻' },
   { value: 'ftp', label: 'FTP', ico: '📁' },
   { value: 'sftp', label: 'SFTP', ico: '📂' },
+  { value: 'db', label: '数据库连接', ico: '🗄️' },
 ]
-const catIconMap = { ssh: '💻', ftp: '📁', sftp: '📂' }
+const catIconMap = { ssh: '💻', ftp: '📁', sftp: '📂', db: '🗄️' }
 
 // Props：当前选中的分类（由 Tools.vue 左侧导航传入）
 const props = defineProps({ category: { type: String, default: 'ssh' } })
@@ -194,7 +313,7 @@ const editingId = ref('')
 const testResult = ref(null)
 
 // 表单状态（新增/编辑连接）
-const form = reactive({ name: '', category: 'ssh', host: '', port: 0, username: '', password: '', remark: '', encoding: 'utf-8' })
+const form = reactive({ name: '', category: 'ssh', dbType: 'mysql', host: '', port: 0, username: '', password: '', database: '', remark: '', encoding: 'utf-8' })
 
 // SSH 实时终端相关状态
 const sshConnected = ref(false)   // 实时终端是否已连接
@@ -235,6 +354,7 @@ function cardMeta(c) {
     case 'ssh': return c.username ? '用户 ' + c.username : '远程终端'
     case 'sftp':
     case 'ftp': return c.username ? '用户 ' + c.username : '文件传输'
+    case 'db': return (c.dbType || 'mysql').toUpperCase() + (c.database ? ' · ' + c.database : '')
     default: return c.remark || ''
   }
 }
@@ -279,26 +399,44 @@ function resetOps() {
   closeSsh()
 }
 
-// 打开连接时按需加载数据：SSH 自动建立实时会话，文件类自动列目录
+// 打开连接时按需加载数据：SSH 自动建立实时会话，文件类自动列目录，DB 类加载分析配置
 watch(selected, (val) => {
   if (!val) return
   resetOps()
   if (val.category === 'ssh') openSsh()
   else if (val.category === 'sftp' || val.category === 'ftp') listRemote()
+  else if (val.category === 'db') {
+    selDatabase.value = ''
+    selTables.value = []
+    dbDatabases.value = []
+    dbTables.value = []
+    tblFilter.value = ''
+    syncedFilter.value = ''
+    expandedTables.value = new Set()
+    loadAgentCfg().then(() => { activeConnId.value = agentCfg.activeDBConn })
+    loadDbDatabases()
+  }
 })
+async function loadDbDatabases() {
+  try {
+    const dbs = await call(PluginDBDatabases, selected.value)
+    const list = Array.isArray(dbs) ? dbs : (dbs && dbs.databases) || []
+    dbDatabases.value = (list || []).map(d => (typeof d === 'string' ? d : d.name ?? d))
+  } catch (e) { dbDatabases.value = [] }
+}
 
 // ===================== 连接 CRUD =====================
 function blankForm() {
   Object.assign(form, {
-    name: '', category: props.category, host: '', port: 0,
-    username: '', password: '', remark: '', encoding: 'utf-8',
+    name: '', category: props.category, dbType: 'mysql', host: '', port: 0,
+    username: '', password: '', database: '', remark: '', encoding: 'utf-8',
   })
 }
 function openAdd() { editing.value = false; editingId.value = ''; testResult.value = null; blankForm(); showAdd.value = true }
 function editConn(c) {
   editing.value = true; editingId.value = c.id; testResult.value = null
-  Object.assign(form, { name: c.name, category: c.category, host: c.host, port: c.port,
-    username: c.username, password: c.password, remark: c.remark, encoding: c.encoding || 'utf-8' })
+  Object.assign(form, { name: c.name, category: c.category, dbType: c.dbType || 'mysql', host: c.host, port: c.port,
+    username: c.username, password: c.password, database: c.database || '', remark: c.remark, encoding: c.encoding || 'utf-8' })
   showAdd.value = true
 }
 function saveConn() {
@@ -306,9 +444,9 @@ function saveConn() {
   if (!form.host) { ElMessage.error('请填写主机'); return }
   const conn = {
     id: editing.value ? editingId.value : ('pl_' + Date.now()),
-    category: form.category, name: form.name, host: form.host,
+    category: form.category, dbType: form.dbType, name: form.name, host: form.host,
     port: Number(form.port) || 0, username: form.username, password: form.password,
-    remark: form.remark, encoding: form.encoding,
+    database: form.database, remark: form.remark, encoding: form.encoding,
     updatedAt: new Date().toISOString(),
   }
   if (editing.value) updatePluginConn(conn)
@@ -318,10 +456,155 @@ function saveConn() {
 }
 async function testConn() {
   const conn = {
-    id: editingId.value || 'test', category: form.category, name: form.name, host: form.host,
-    port: Number(form.port) || 0, username: form.username, password: form.password,
+    id: editingId.value || 'test', category: form.category, dbType: form.dbType, name: form.name, host: form.host,
+    port: Number(form.port) || 0, username: form.username, password: form.password, database: form.database,
   }
   testResult.value = await call(PluginTest, conn)
+}
+// 详情面板中测试连接（复用 testConn 的取参逻辑）
+async function dbTest() {
+  const c = selected.value
+  if (!c) return
+  testResult.value = await call(PluginTest, c)
+}
+
+// ===================== 数据库连接的「同步表结构 / 字段语义维护」 =====================
+// 与 AI Agent → 数据连接 共享同一份 agent 配置（activeDBConn / dbSchemas / dbSemantics）
+const agentCfg = reactive({ activeDBConn: '', dbSchemas: {}, dbSemantics: {} })
+const dbDatabases = ref([])
+const dbTables = ref([])
+const selDatabase = ref('')
+const selTables = ref([])
+const syncing = ref(false)
+const tblFilter = ref('')
+const syncedFilter = ref('')
+const expandedTables = ref(new Set())
+
+const filteredTables = computed(() => {
+  const q = tblFilter.value.trim().toLowerCase()
+  if (!q) return dbTables.value
+  return dbTables.value.filter(t => (t.name || '').toLowerCase().includes(q))
+})
+const syncedTables = computed(() => {
+  const prefix = (selected.value.id + '|' + selDatabase.value + '|').toLowerCase()
+  return Object.keys(agentCfg.dbSchemas || {})
+    .filter(k => k.startsWith(prefix))
+    .map(k => agentCfg.dbSchemas[k])
+    .sort((a, b) => a.table.localeCompare(b.table))
+})
+const filteredSynced = computed(() => {
+  const q = syncedFilter.value.trim().toLowerCase()
+  if (!q) return syncedTables.value
+  return syncedTables.value.filter(t => (t.table || '').toLowerCase().includes(q))
+})
+function dbKey(connId, database, table) {
+  return (connId + '|' + database + '|' + table).toLowerCase()
+}
+function semKey(connId, database, table, col) {
+  return (connId + '|' + database + '|' + table + '|' + col).toLowerCase()
+}
+function tableSemKey(connId, database, table) {
+  return (connId + '|' + database + '|' + table).toLowerCase()
+}
+function columnsOf(t) {
+  if (!t) return []
+  if (Array.isArray(t.columns)) return t.columns
+  const s = agentCfg.dbSchemas[dbKey(t.connId, t.database, t.table)]
+  return s ? (s.columns || []) : []
+}
+function semValue(connId, database, table, col) {
+  return (agentCfg.dbSemantics && agentCfg.dbSemantics[semKey(connId, database, table, col)]) || ''
+}
+function setSemValue(connId, database, table, col, v) {
+  if (!agentCfg.dbSemantics) agentCfg.dbSemantics = {}
+  const k = semKey(connId, database, table, col)
+  if (v && v.trim()) agentCfg.dbSemantics[k] = v.trim()
+  else delete agentCfg.dbSemantics[k]
+}
+function tableSemValue(connId, database, table) {
+  return (agentCfg.dbSemantics && agentCfg.dbSemantics[tableSemKey(connId, database, table)]) || ''
+}
+function setTableSemValue(connId, database, table, v) {
+  if (!agentCfg.dbSemantics) agentCfg.dbSemantics = {}
+  const k = tableSemKey(connId, database, table)
+  if (v && v.trim()) agentCfg.dbSemantics[k] = v.trim()
+  else delete agentCfg.dbSemantics[k]
+}
+function toggleExpand(table) {
+  const s = new Set(expandedTables.value)
+  if (s.has(table)) s.delete(table); else s.add(table)
+  expandedTables.value = s
+}
+async function loadAgentCfg() {
+  try {
+    const d = await AgentAPI.load()
+    const cfg = d.config || {}
+    agentCfg.activeDBConn = cfg.activeDBConn || ''
+    agentCfg.dbSchemas = cfg.dbSchemas || {}
+    agentCfg.dbSemantics = cfg.dbSemantics || {}
+  } catch (e) { /* ignore */ }
+}
+async function saveAgentCfg() {
+  try {
+    await AgentAPI.saveConfig({
+      activeDBConn: agentCfg.activeDBConn,
+      dbSchemas: agentCfg.dbSchemas,
+      dbSemantics: agentCfg.dbSemantics,
+    })
+  } catch (e) { ElMessage.error('保存失败：' + String(e)) }
+}
+// 启用此连接作为唯一分析连接（同时仅允许一个）
+async function setActiveConn(val) {
+  if (val) {
+    agentCfg.activeDBConn = selected.value.id
+    activeConnId.value = selected.value.id
+    ElMessage.success('已启用「' + selected.value.name + '」作为分析连接')
+  } else if (agentCfg.activeDBConn === selected.value.id) {
+    agentCfg.activeDBConn = ''
+    activeConnId.value = ''
+  }
+  await saveAgentCfg()
+}
+async function onDbDatabaseChange() {
+  selTables.value = []
+  dbTables.value = []
+  if (!selDatabase.value) return
+  const tabs = await call(PluginDBTables, selected.value, selDatabase.value)
+  const tabList = Array.isArray(tabs) ? tabs : (tabs && tabs.tables) || []
+  dbTables.value = (tabList || []).map(t => ({ name: t.name ?? t, rows: t.rows ?? 0 }))
+}
+async function syncTableSchema() {
+  if (!selTables.value.length) return
+  syncing.value = true
+  try {
+    const conn = selected.value
+    for (const t of selTables.value) {
+      const cols = await call(PluginDBColumns, conn, selDatabase.value, t)
+      const colList = Array.isArray(cols) ? cols : (cols && cols.columns) || []
+      agentCfg.dbSchemas[dbKey(conn.id, selDatabase.value, t)] = {
+        connId: conn.id, database: selDatabase.value, table: t, rows: 0,
+        columns: (colList || []).map(c => ({
+          name: c.name, type: c.type, nullable: c.nullable, default: c.default, comment: c.comment,
+        })),
+      }
+    }
+    await saveAgentCfg()
+    ElMessage.success('已同步 ' + selTables.value.length + ' 张表的结构')
+    selTables.value = []
+  } catch (e) {
+    ElMessage.error('同步表结构失败：' + String(e))
+  } finally {
+    syncing.value = false
+  }
+}
+function removeSynced(t) {
+  if (!agentCfg.dbSchemas) return
+  if (agentCfg.dbSemantics) {
+    const p = (t.connId + '|' + t.database + '|' + t.table + '|').toLowerCase()
+    Object.keys(agentCfg.dbSemantics).forEach(k => { if (k.startsWith(p)) delete agentCfg.dbSemantics[k] })
+  }
+  delete agentCfg.dbSchemas[dbKey(t.connId, t.database, t.table)]
+  saveAgentCfg()
 }
 
 // ===================== SSH 实时终端 =====================
@@ -653,4 +936,39 @@ function removeConn(id) {
 .pm-ssh-out { flex: 1; min-height: 0; overflow: auto; margin-top: 10px; }
 .pm-content { flex-shrink: 0; }
 .pm-content :deep(.el-textarea__inner) { height: 180px; resize: none; }
+
+/* 连接卡片：激活（分析中）徽标 */
+.pm-card-active { border-color: #67c23a; box-shadow: 0 0 0 2px rgba(103,194,58,.15); }
+.pm-card-badge { margin-left: 6px; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #e8f5e9; color: #2e7d32; }
+/* 详情：当前分析连接横幅 */
+.pm-active-banner { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #e8f5e9; color: #2e7d32; font-size: 12px; font-weight: 600; }
+
+/* 数据库连接管理（同步表结构 / 字段语义维护） */
+.db-op-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.db-cols-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+.db-col { min-width: 0; }
+.db-col .form-subtitle { margin-top: 0; }
+.tbl-search { width: 160px; float: right; }
+.synced-list { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow: auto; padding-right: 4px; }
+.expand-toggle { cursor: pointer; user-select: none; margin-right: 6px; color: #409eff; font-size: 12px; }
+.table-sem-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid #ebeef5; }
+.sem-col.sm { min-width: 48px; color: #888; font-size: 12px; }
+.empty-hint { color: #a9aeb8; font-size: 12px; padding: 10px 0; }
+.pm-test { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.pm-test.ok { color: #2e7d32; background: #e8f5e9; }
+.pm-test.err { color: #c62828; background: #ffebee; }
+.card { border: 1px solid #ebeef5; border-radius: 8px; background: #fff; }
+.card-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #f2f3f5; }
+.conn-name { font-weight: 600; }
+.spacer { flex: 1; }
+.tp-count { color: #909399; font-size: 12px; }
+.table-pick { max-height: 420px; overflow: auto; }
+.tp-list { display: flex; flex-direction: column; gap: 6px; }
+.tp-list :deep(.el-checkbox) { margin-right: 0; width: 100%; }
+.tp-synced { color: #2e7d32; font-size: 11px; margin-left: 4px; }
+.sem-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px; }
+.sem-col { min-width: 120px; color: #606266; font-size: 12px; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sem-type { min-width: 140px; color: #909399; font-size: 12px; }
+.sem-input { flex: 1; }
+@media (max-width: 860px) { .db-cols-layout { grid-template-columns: 1fr; } }
 </style>

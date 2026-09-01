@@ -49,6 +49,7 @@ type TrafficRecord struct {
 	Error       string            `json:"error"`
 	ReqClipped  bool              `json:"reqClipped,omitempty"`  // 实时推送时请求体过大被截断标记（会话内保存完整数据）
 	RespClipped bool              `json:"respClipped,omitempty"` // 实时推送时响应体过大被截断标记
+	RespBodyTruncated bool        `json:"respBodyTruncated,omitempty"` // 落盘时响应体超长被截断（内存中仍为完整数据）
 }
 
 // Session 一次抓包会话。
@@ -254,16 +255,35 @@ func (s *SessionStore) GetErrors(sessionID string) []ErrorInfo {
 	return sess.Errors
 }
 
+// maxSaveRespBody 落盘时单条响应体裁剪上限，避免大流量会话产生数十 MB 的
+// JSON 文件导致序列化/磁盘写入过慢。内存中仍保留完整数据供实时查看。
+const maxSaveRespBody = 4 * 1024 * 1024
+
 // Save 将会话落盘，落盘后从内存移除（转为磁盘懒加载），释放大体积会话内存。
+// 为避免超大响应体拖慢序列化，落盘副本会对超长 respBody 做截断标注。
 func (s *SessionStore) Save(sess *Session) error {
+	// 复制会话做裁剪，避免修改仍可能被读取的内存对象
+	snap := *sess
+	if len(sess.Records) > 0 {
+		recs := make([]TrafficRecord, len(sess.Records))
+		for i, rec := range sess.Records {
+			if len(rec.RespBody) > maxSaveRespBody {
+				rec.RespBody = rec.RespBody[:maxSaveRespBody]
+				rec.RespBodyTruncated = true
+			}
+			recs[i] = rec
+		}
+		snap.Records = recs
+	}
+	snap.StoppedAt = time.Now().Format(time.RFC3339)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess.StoppedAt = time.Now().Format(time.RFC3339)
-	b, err := json.MarshalIndent(sess, "", "  ")
+	b, err := json.Marshal(snap)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.pathOf(sess.ID), b, 0o644); err != nil {
+	if err := os.WriteFile(s.pathOf(snap.ID), b, 0o644); err != nil {
 		return err
 	}
 	delete(s.sessions, sess.ID)

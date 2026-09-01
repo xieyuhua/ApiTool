@@ -10,6 +10,7 @@ import { store, saveNow, reloadStore } from '../../store'
 import { FORMATS } from '../../cli'
 
 const info = reactive({ running: false, addr: '', port: '', url: '', token: '', count: 0 })
+const svcCollapsed = ref(false) // 捕获服务面板是否折叠（默认展开）
 const list = ref([])
 const selected = ref([]) // 选中的捕获记录 id
 const loading = ref(false)
@@ -184,46 +185,48 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
         扩展源码位于项目 <code>browser-extension/</code> 目录，按 README 加载后即可使用。
       </div>
 
-      <!-- 服务状态 -->
+      <!-- 服务状态（可折叠） -->
       <div class="card">
-        <div class="card-title">捕获服务</div>
-        <div class="svc-row">
-          <div class="svc-item">
-            <div class="svc-label">状态</div>
-            <el-tag :type="info.running ? 'success' : 'info'" effect="dark">
+        <div class="card-title svc-head" @click="svcCollapsed = !svcCollapsed">
+          <span class="svc-head-left">
+            <span class="svc-arrow">{{ svcCollapsed ? '▸' : '▾' }}</span>
+            捕获服务
+            <el-tag :type="info.running ? 'success' : 'info'" effect="dark" size="small">
               {{ info.running ? '运行中' : '已停止' }}
             </el-tag>
-          </div>
-          <div class="svc-item">
-            <div class="svc-label">捕获地址</div>
-            <div class="svc-val">
-              <code>{{ info.url || '—' }}</code>
-              <el-button v-if="info.running" size="small" text type="primary" @click="copyAddr">复制</el-button>
-            </div>
-          </div>
-          <div class="svc-item svc-token">
-            <div class="svc-label">鉴权 Token（填入浏览器扩展）</div>
-            <div class="svc-val">
-              <code class="token">{{ maskToken(info.token) }}</code>
-              <el-button size="small" text type="primary" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</el-button>
-              <el-button v-if="info.running" size="small" text type="primary" @click="copyToken">复制</el-button>
-            </div>
-          </div>
-          <div class="svc-item">
-            <div class="svc-label">已捕获</div>
-            <div class="svc-val"><b style="color:#165dff">{{ info.count }}</b> 条</div>
-          </div>
-        </div>
-        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
-          <el-button :type="info.running ? 'danger' : 'success'" :loading="loading" @click="toggleServer">
+            <span class="svc-summary">已捕获 <b style="color:#165dff">{{ info.count }}</b> 条</span>
+          </span>
+          <el-button :type="info.running ? 'danger' : 'success'" size="small" :loading="loading"
+            @click.stop="toggleServer">
             {{ info.running ? '停止服务' : '启动服务' }}
           </el-button>
-          <el-button @click="refresh">刷新列表</el-button>
         </div>
-        <div class="hint">
-          说明：捕获服务<b>不会随应用自动启动</b>，需在此手动点击「启动服务」；关闭应用或点击「停止服务」即可释放端口。<br />
-          提示：浏览器扩展需配置与上方一致的「捕获地址」和「Token」。扩展仅在命中所配置的监控网址（支持 * 通配）时才上报请求，
-          包括方法、URL、请求头、Query、请求体以及响应状态、响应头与响应体（用于自动生成请求/响应字段文档）。
+        <div v-show="!svcCollapsed" class="svc-body">
+          <div class="svc-row">
+            <div class="svc-item">
+              <div class="svc-label">捕获地址</div>
+              <div class="svc-val">
+                <code>{{ info.url || '—' }}</code>
+                <el-button v-if="info.running" size="small" text type="primary" @click="copyAddr">复制</el-button>
+              </div>
+            </div>
+            <div class="svc-item svc-token">
+              <div class="svc-label">鉴权 Token（填入浏览器扩展）</div>
+              <div class="svc-val">
+                <code class="token">{{ maskToken(info.token) }}</code>
+                <el-button size="small" text type="primary" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</el-button>
+                <el-button v-if="info.running" size="small" text type="primary" @click="copyToken">复制</el-button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
+            <el-button @click="refresh">刷新列表</el-button>
+          </div>
+          <div class="hint">
+            说明：捕获服务<b>不会随应用自动启动</b>，需在此手动点击「启动服务」；关闭应用或点击「停止服务」即可释放端口。<br />
+            提示：浏览器扩展需配置与上方一致的「捕获地址」和「Token」。扩展仅在命中所配置的监控网址（支持 * 通配）时才上报请求，
+            包括方法、URL、请求头、Query、请求体以及响应状态、响应头与响应体（用于自动生成请求/响应字段文档）。
+          </div>
         </div>
       </div>
 
@@ -329,6 +332,12 @@ onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
 <style scoped>
 .card { background:#fff; border:1px solid #e5e6eb; border-radius:10px; padding:16px 18px; margin-bottom:16px; }
 .card-title { font-weight:600; font-size:14px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.svc-head { cursor:pointer; user-select:none; transition:background .15s; border-radius:6px; padding:2px 4px; margin:-2px -4px 12px; }
+.svc-head:hover { background:#f2f3f5; }
+.svc-head-left { display:flex; align-items:center; gap:10px; }
+.svc-arrow { color:#86909c; font-size:12px; }
+.svc-summary { font-size:13px; color:#4e5969; font-weight:400; }
+.svc-body { margin-top:4px; }
 .svc-row { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
 .svc-item { display:flex; flex-direction:column; gap:6px; }
 .svc-label { font-size:12px; color:#86909c; }

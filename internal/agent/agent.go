@@ -105,6 +105,8 @@ func BuiltinToolMeta() []BuiltinToolDef {
 		{Name: "get_time", Icon: "⏰", Group: "常用工具", Default: "当用户需要知道当前日期/时间，或指定时区（如 Asia/Shanghai）的时间时使用。返回格式化的本地时间。"},
 		{Name: "calc", Icon: "🧮", Group: "常用工具", Default: "当用户需要计算一个算术表达式时使用，仅支持数字与 + - * / 和括号 ()。传入 expr，例如 \"1+2*3\"。返回计算结果。"},
 		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "当用户需要执行一条本机 shell 命令（如 git、npm、系统命令）并获取其输出时使用。传入 command 字符串。⚠️ 会真实执行命令，请仅在确定安全时使用。"},
+		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "读取已配置数据库连接中的表结构（库/表/字段名/类型/可空/默认值/注释），用于把数据库结构同步给大模型做数据分析。支持 MySQL、PostgreSQL、Oracle。tables 留空则返回该库全部表结构。需要先到「插件/数据库连接」配置连接并启用本工具。"},
+		{Name: "db_query", Icon: "🔎", Group: "数据库连接分析", Default: "在已配置的连接上执行只读 SELECT 查询并返回结果（限制行数），用于采样数据辅助分析。支持 MySQL、PostgreSQL、Oracle。禁止写操作。"},
 	}
 }
 
@@ -120,6 +122,24 @@ type ToolFlags struct {
 	Desc    map[string]string  `json:"desc"`    // 各工具的自定义描述（可编辑）
 }
 
+// DBSyncedColumn 同步的字段信息。
+type DBSyncedColumn struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable string `json:"nullable"`
+	Default  string `json:"default"`
+	Comment  string `json:"comment"` // 数据库自带注释
+}
+
+// DBSyncedTable 数据连接管理中同步的表结构快照。
+type DBSyncedTable struct {
+	ConnID   string           `json:"connId"`
+	Database string           `json:"database"`
+	Table    string           `json:"table"`
+	Rows     int              `json:"rows"` // 行数（估算）
+	Columns  []DBSyncedColumn `json:"columns"`
+}
+
 // AgentConfig Agent 运行配置。
 type AgentConfig struct {
 	SystemPrompt   string `json:"systemPrompt"`   // 自定义系统提示词
@@ -129,6 +149,12 @@ type AgentConfig struct {
 	ShowThinking   bool   `json:"showThinking"`   // 输出思考过程
 	EnablePolish   bool   `json:"enablePolish"`   // AI 润色
 	EnableChart    bool   `json:"enableChart"`    // 图表输出（mermaid）
+	EnableDBAnalysis bool `json:"enableDBAnalysis"` // 数据库连接分析（同步表结构 / 字段语义维护）
+	ActiveDBConn     string `json:"activeDBConn"`   // 当前激活用于数据库连接分析的连接 ID（同一时间仅允许一个）
+	// 数据连接管理中维护的字段语义：key = connId|database|table|column（全小写），value = 中文/维护语义
+	DBSemantics map[string]string `json:"dbSemantics"`
+	// 数据连接管理中同步的表结构快照：key = connId|database|table（全小写），便于离线查看与再编辑语义
+	DBSchemas map[string]DBSyncedTable `json:"dbSchemas"`
 	Temperature    float64 `json:"temperature"`
 	CurrentUserID  string `json:"currentUserId"`  // 当前登录用户
 	Tools          ToolFlags `json:"tools"`       // 内置工具开关

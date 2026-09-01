@@ -246,6 +246,10 @@ export function PluginConnect(arg1) {
   return window['go']['main']['App']['PluginConnect'](arg1);
 }
 
+export function PluginDBColumns(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginDBColumns'](arg1, arg2, arg3);
+}
+
 export function PluginDBDatabases(arg1) {
   return window['go']['main']['App']['PluginDBDatabases'](arg1);
 }
@@ -256,6 +260,10 @@ export function PluginDBExec(arg1, arg2) {
 
 export function PluginDBQuery(arg1, arg2) {
   return window['go']['main']['App']['PluginDBQuery'](arg1, arg2);
+}
+
+export function PluginDBSchema(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PluginDBSchema'](arg1, arg2, arg3);
 }
 
 export function PluginDBTables(arg1, arg2) {

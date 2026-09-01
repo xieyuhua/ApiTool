@@ -11,6 +11,7 @@ import (
 	"apitool/internal/model"
 	"github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+	_ "github.com/sijms/go-ora/v2"
 )
 
 // ===================== 数据库插件（MySQL / PostgreSQL 最小客户端） =====================
@@ -32,9 +33,10 @@ type DBExecReq struct {
 }
 
 type dbSession struct {
-	dbType string // mysql | postgres
+	dbType string // mysql | postgres | oracle
 	mysql  *mysqlSession
 	pg     *pgSession
+	ora    *oraSession
 }
 
 func (s *dbSession) Close() error {
@@ -43,6 +45,9 @@ func (s *dbSession) Close() error {
 	}
 	if s.pg != nil {
 		return s.pg.db.Close()
+	}
+	if s.ora != nil {
+		return s.ora.db.Close()
 	}
 	return nil
 }
@@ -53,9 +58,12 @@ func dbFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 		var dbType string
 		var db *sql.DB
 		var err error
-		if conn.DbType == "postgres" {
+		switch conn.DbType {
+		case "postgres":
 			dbType, db, err = openPostgres(dsn)
-		} else {
+		case "oracle":
+			dbType, db, err = openOracle(dsn)
+		default:
 			dbType, db, err = openMysql(conn, dsn)
 		}
 		if err != nil {
@@ -63,16 +71,21 @@ func dbFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 		}
 		db.SetConnMaxLifetime(connPoolTTL)
 		db.SetMaxOpenConns(2)
-		if dbType == "postgres" {
+		switch dbType {
+		case "postgres":
 			return &dbSession{dbType: "postgres", pg: &pgSession{db: db}}, func() { db.Close() }, nil
+		case "oracle":
+			return &dbSession{dbType: "oracle", ora: &oraSession{db: db}}, func() { db.Close() }, nil
+		default:
+			return &dbSession{dbType: "mysql", mysql: &mysqlSession{db: db}}, func() { db.Close() }, nil
 		}
-		return &dbSession{dbType: "mysql", mysql: &mysqlSession{db: db}}, func() { db.Close() }, nil
 	}
 }
 
-// buildDBDSN 根据连接信息构造 JDBC 风格的 DSN（database 为空时不指定库，用于连接测试）
+// buildDBDSN 根据连接信息构造 DSN（database 为空时不指定库，用于连接测试）
 func buildDBDSN(conn model.PluginConn, database string) string {
-	if conn.DbType == "postgres" {
+	switch conn.DbType {
+	case "postgres":
 		host := conn.Host
 		port := portOrDefault(conn.Port, 5432)
 		user := conn.Username
@@ -83,22 +96,30 @@ func buildDBDSN(conn model.PluginConn, database string) string {
 		}
 		return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable connect_timeout=10",
 			host, port, user, pass, dbname)
+	case "oracle":
+		port := portOrDefault(conn.Port, 1521)
+		// go-ora 使用 oracle://user:pass@host:port/service 形式（database 作为服务名/SID）
+		svc := database
+		if svc == "" {
+			svc = conn.Database
+		}
+		return fmt.Sprintf("oracle://%s:%s@%s:%d/%s", conn.Username, conn.Password, conn.Host, port, svc)
+	default: // mysql
+		port := portOrDefault(conn.Port, 3306)
+		cfg := mysql.NewConfig()
+		cfg.User = conn.Username
+		cfg.Passwd = conn.Password
+		cfg.Net = "tcp"
+		cfg.Addr = fmt.Sprintf("%s:%d", conn.Host, port)
+		cfg.DBName = database
+		cfg.Timeout = 10 * time.Second
+		cfg.ParseTime = true
+		if conn.UseTLS {
+			_ = mysql.RegisterTLSConfig("apitoolTLS", &tls.Config{InsecureSkipVerify: true})
+			cfg.TLSConfig = "apitoolTLS"
+		}
+		return cfg.FormatDSN()
 	}
-	// MySQL: 默认端口 3306
-	port := portOrDefault(conn.Port, 3306)
-	cfg := mysql.NewConfig()
-	cfg.User = conn.Username
-	cfg.Passwd = conn.Password
-	cfg.Net = "tcp"
-	cfg.Addr = fmt.Sprintf("%s:%d", conn.Host, port)
-	cfg.DBName = database
-	cfg.Timeout = 10 * time.Second
-	cfg.ParseTime = true
-	if conn.UseTLS {
-		_ = mysql.RegisterTLSConfig("apitoolTLS", &tls.Config{InsecureSkipVerify: true})
-		cfg.TLSConfig = "apitoolTLS"
-	}
-	return cfg.FormatDSN()
 }
 
 func openMysql(conn model.PluginConn, dsn string) (string, *sql.DB, error) {
@@ -125,13 +146,50 @@ func openPostgres(dsn string) (string, *sql.DB, error) {
 	return "postgres", db, nil
 }
 
+func openOracle(dsn string) (string, *sql.DB, error) {
+	db, err := sql.Open("oracle", dsn)
+	if err != nil {
+		return "", nil, err
+	}
+	if e := db.Ping(); e != nil {
+		db.Close()
+		return "", nil, e
+	}
+	return "oracle", db, nil
+}
+
 type mysqlSession struct{ db *sql.DB }
 type pgSession struct{ db *sql.DB }
+type oraSession struct{ db *sql.DB }
 
 func (m *mysqlSession) query(q string) (*DBRow, error) { return genericQuery(m.db, q) }
 func (m *mysqlSession) exec(q string) (int64, error)   { return genericExec(m.db, q) }
 func (p *pgSession) query(q string) (*DBRow, error)    { return genericQuery(p.db, q) }
 func (p *pgSession) exec(q string) (int64, error)      { return genericExec(p.db, q) }
+func (o *oraSession) query(q string) (*DBRow, error)    { return genericQuery(o.db, q) }
+func (o *oraSession) exec(q string) (int64, error)     { return genericExec(o.db, q) }
+
+// dbSession 转发：供 PluginDBSchema 等统一调用
+func (s *dbSession) query(q string) (*DBRow, error) {
+	switch s.dbType {
+	case "postgres":
+		return s.pg.query(q)
+	case "oracle":
+		return s.ora.query(q)
+	default:
+		return s.mysql.query(q)
+	}
+}
+func (s *dbSession) exec(q string) (int64, error) {
+	switch s.dbType {
+	case "postgres":
+		return s.pg.exec(q)
+	case "oracle":
+		return s.ora.exec(q)
+	default:
+		return s.mysql.exec(q)
+	}
+}
 
 func genericQuery(db *sql.DB, q string) (*DBRow, error) {
 	rows, err := db.Query(q)
@@ -193,9 +251,12 @@ func PluginDBTest(conn model.PluginConn) PluginOpResult {
 		s := v.(*dbSession)
 		var res *DBRow
 		var e error
-		if s.dbType == "postgres" {
+		switch s.dbType {
+		case "postgres":
 			res, e = s.pg.query("SELECT 1")
-		} else {
+		case "oracle":
+			res, e = s.ora.query("SELECT 1 FROM DUAL")
+		default:
 			res, e = s.mysql.query("SELECT 1")
 		}
 		if e != nil {
@@ -219,9 +280,13 @@ func PluginDBDatabases(conn model.PluginConn) (DBInfo, error) {
 		s := v.(*dbSession)
 		var res *DBRow
 		var e error
-		if s.dbType == "postgres" {
+		switch s.dbType {
+		case "postgres":
 			res, e = s.pg.query("SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY datname")
-		} else {
+		case "oracle":
+			// Oracle 无"数据库"概念，列出当前用户可访问的 schema（OWNER）
+			res, e = s.ora.query("SELECT DISTINCT OWNER FROM ALL_TABLES ORDER BY OWNER")
+		default:
 			res, e = s.mysql.query("SHOW DATABASES")
 		}
 		if e != nil {
@@ -243,18 +308,19 @@ func PluginDBTables(conn model.PluginConn, database string) ([]DBTable, error) {
 	var tables []DBTable
 	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
 		s := v.(*dbSession)
-		if s.dbType != "postgres" {
-			// MySQL 需要先 USE
-			if _, e := s.mysql.exec("USE " + quoteIdent(s.dbType, database)); e != nil {
-				return e
-			}
-		}
 		var res *DBRow
 		var e error
-		if s.dbType == "postgres" {
+		switch s.dbType {
+		case "postgres":
 			q := fmt.Sprintf("SELECT table_name, (SELECT reltuples::bigint FROM pg_class WHERE relname=table_name) FROM information_schema.tables WHERE table_schema='public' AND table_catalog='%s' ORDER BY table_name", escapeQuote(database))
 			res, e = s.pg.query(q)
-		} else {
+		case "oracle":
+			q := fmt.Sprintf("SELECT table_name, num_rows FROM user_tables ORDER BY table_name")
+			res, e = s.ora.query(q)
+		default: // mysql
+			if _, e2 := s.mysql.exec("USE " + quoteIdent(s.dbType, database)); e2 != nil {
+				return e2
+			}
 			res, e = s.mysql.query("SHOW TABLE STATUS")
 		}
 		if e != nil {
@@ -265,11 +331,16 @@ func PluginDBTables(conn model.PluginConn, database string) ([]DBTable, error) {
 			if len(r) >= 1 {
 				t.Name = r[0]
 			}
-			if s.dbType == "postgres" {
+			switch s.dbType {
+			case "postgres":
 				if len(r) >= 2 {
 					t.Rows, _ = strconv.ParseInt(r[1], 10, 64)
 				}
-			} else {
+			case "oracle":
+				if len(r) >= 2 && r[1] != "" {
+					t.Rows, _ = strconv.ParseInt(r[1], 10, 64)
+				}
+			default:
 				if len(r) >= 2 {
 					t.Engine = r[1]
 				}
@@ -301,15 +372,15 @@ func PluginDBQuery(conn model.PluginConn, req DBQueryReq) (*DBRow, error) {
 			}
 		}
 		var e error
-		dsnDB := s.mysql
-		if s.dbType == "postgres" {
-			// postgres 用 search_path 切换库（在 DSN 中已指定 database）
-			res, e2 := s.pg.query(q)
-			result = res
-			return e2
+		var res *DBRow
+		switch s.dbType {
+		case "postgres":
+			res, e = s.pg.query(q)
+		case "oracle":
+			res, e = s.ora.query(q)
+		default: // mysql
+			res, e = s.mysql.query(q)
 		}
-		_ = dsnDB
-		res, e := s.mysql.query(q)
 		result = res
 		return e
 	})
@@ -337,9 +408,9 @@ func PluginDBExec(conn model.PluginConn, req DBExecReq) (int64, error) {
 	return affected, err
 }
 
-// quoteIdent 为标识符（库名/表名）加反引号（MySQL）
+// quoteIdent 为标识符（库名/表名）加引号
 func quoteIdent(dbType, ident string) string {
-	if dbType == "postgres" {
+	if dbType == "postgres" || dbType == "oracle" {
 		return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 	}
 	return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
@@ -348,4 +419,109 @@ func quoteIdent(dbType, ident string) string {
 // escapeQuote 转义单引号（简单场景）
 func escapeQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+// PluginDBColumns 读取指定表的字段定义（名称/类型/可空/默认值/注释）。
+// database 指定库名；table 指定表名。
+func PluginDBColumns(conn model.PluginConn, database, table string) ([]DBColumn, error) {
+	var cols []DBColumn
+	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+		s := v.(*dbSession)
+		var q string
+		switch s.dbType {
+		case "postgres":
+			q = fmt.Sprintf(`SELECT column_name, data_type, is_nullable, column_default, '' FROM information_schema.columns WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position`, quoteStr(table))
+		case "oracle":
+			owner := strings.ToUpper(database)
+			if owner == "" {
+				owner = "USER"
+			} else {
+				owner = quoteStr(owner)
+			}
+			q = fmt.Sprintf(`SELECT c.COLUMN_NAME, c.DATA_TYPE, c.NULLABLE, c.DATA_DEFAULT, n.COMMENTS FROM ALL_TAB_COLUMNS c LEFT JOIN ALL_COL_COMMENTS n ON n.TABLE_NAME=c.TABLE_NAME AND n.COLUMN_NAME=c.COLUMN_NAME AND n.OWNER=c.OWNER WHERE c.TABLE_NAME=%s AND c.OWNER=%s ORDER BY c.COLUMN_ID`, quoteStr(strings.ToUpper(table)), owner)
+		default: // mysql
+			q = fmt.Sprintf("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ORDINAL_POSITION", quoteStr(database), quoteStr(table))
+		}
+		res, e := s.query(q)
+		if e != nil {
+			return e
+		}
+		for _, r := range res.Rows {
+			col := DBColumn{}
+			if len(r) > 0 {
+				col.Name = r[0]
+			}
+			if len(r) > 1 {
+				col.Type = r[1]
+			}
+			if len(r) > 2 {
+				col.Nullable = r[2]
+			}
+			if len(r) > 3 {
+				col.Default = r[3]
+			}
+			if len(r) > 4 {
+				col.Comment = strings.TrimSpace(r[4])
+			}
+			cols = append(cols, col)
+		}
+		return nil
+	})
+	return cols, err
+}
+
+// PluginDBSchema 读取一张或多张表的结构（含字段、类型、注释、行数），
+// 用于把数据库结构同步给大模型做数据分析。tables 为空时返回该库全部表的结构。
+func PluginDBSchema(conn model.PluginConn, database string, tables []string) ([]DBSchema, error) {
+	tables, err := resolveTables(conn, database, tables)
+	if err != nil {
+		return nil, err
+	}
+	var out []DBSchema
+	for _, t := range tables {
+		cols, e := PluginDBColumns(conn, database, t)
+		if e != nil {
+			return nil, fmt.Errorf("读取表 %s 结构失败: %w", t, e)
+		}
+		rows := int64(0)
+		if r, e2 := tableRowCount(conn, database, t); e2 == nil {
+			rows = r
+		}
+		out = append(out, DBSchema{Database: database, Table: t, Rows: rows, Columns: cols})
+	}
+	return out, nil
+}
+
+// resolveTables 根据传入的表清单决定实际要分析的表：为空则列出该库全部表。
+func resolveTables(conn model.PluginConn, database string, tables []string) ([]string, error) {
+	if len(tables) > 0 {
+		return tables, nil
+	}
+	ts, err := PluginDBTables(conn, database)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, t := range ts {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
+// tableRowCount 取表行数（用于结构描述中标注规模）
+func tableRowCount(conn model.PluginConn, database, table string) (int64, error) {
+	res, err := PluginDBQuery(conn, DBQueryReq{Database: database, SQL: "SELECT COUNT(*) FROM " + quoteIdent(conn.DbType, table), Limit: 0})
+	if err != nil {
+		return 0, err
+	}
+	if len(res.Rows) > 0 && len(res.Rows[0]) > 0 {
+		n, _ := strconv.ParseInt(strings.TrimSpace(res.Rows[0][0]), 10, 64)
+		return n, nil
+	}
+	return 0, nil
+}
+
+// quoteStr 为字符串字面量加单引号并转义
+func quoteStr(s string) string {
+	return "'" + escapeQuote(s) + "'"
 }

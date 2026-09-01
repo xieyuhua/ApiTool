@@ -1347,6 +1347,16 @@ func (a *App) PluginDBTables(conn model.PluginConn, database string) ([]plugins.
 	return plugins.PluginDBTables(conn, database)
 }
 
+// PluginDBColumns 列出表的字段（含类型/可空/默认/注释）。
+func (a *App) PluginDBColumns(conn model.PluginConn, database, table string) ([]plugins.DBColumn, error) {
+	return plugins.PluginDBColumns(conn, database, table)
+}
+
+// PluginDBSchema 批量读取表结构（表 + 字段）。
+func (a *App) PluginDBSchema(conn model.PluginConn, database string, tables []string) ([]plugins.DBSchema, error) {
+	return plugins.PluginDBSchema(conn, database, tables)
+}
+
 // PluginDBQuery 执行查询。
 func (a *App) PluginDBQuery(conn model.PluginConn, req plugins.DBQueryReq) (*plugins.DBRow, error) {
 	return plugins.PluginDBQuery(conn, req)
