@@ -4,7 +4,16 @@
     <div class="mitm-top">
       <div class="mitm-title">
         <h2>网络抓包 (MITM)</h2>
-        <span class="sub">轻量级流量解密 / API 文档自动生成（Fiddler / Charles 替代方案）</span>
+        <el-popover placement="bottom-start" :width="400" trigger="click" popper-class="intro-pop">
+          <template #reference>
+            <span class="sub-more" title="查看功能介绍">功能介绍 ▾</span>
+          </template>
+          <div class="intro-box">
+            <div class="intro-line"><b>轻量级流量解密</b>：内置 MITM 代理，解密 HTTP/HTTPS，并识别 WebSocket / SSE / gRPC / GraphQL。</div>
+            <div class="intro-line"><b>API 文档自动生成</b>：抓到的请求支持批量或一键生成接口文档，直接导入接口树。</div>
+            <div class="intro-tip">提示：未安装根证书时仅能抓取明文 HTTP，HTTPS 会被降级透传（不解密）。</div>
+          </div>
+        </el-popover>
       </div>
       <div class="mitm-actions">
         <template v-if="!status.running">
@@ -28,8 +37,8 @@
         <el-button @click="openImportCADialog">导入证书</el-button>
         <el-button @click="openSessions">抓包会话</el-button>
         <el-button @click="openErrors">解密失败日志<span v-if="errCount > 0" class="err-badge">{{ errCount }}</span></el-button>
-        <el-button type="warning" plain @click="openRewrites" title="把域名指向本地地址，便于测试（如 dev.test.com → 127.0.0.1:8200）">
-          域名重定向
+        <el-button type="warning" plain @click="openRewrites" title="把请求的域名改写为目标地址，并支持 Query 参数/请求头的自由替换（如 dev.test.com → 127.0.0.1:8200）">
+          请求改写
         </el-button>
       </div>
     </div>
@@ -114,34 +123,45 @@
     <div class="mitm-body">
       <!-- 左：流量列表 + 过滤 -->
       <div class="mitm-left">
-        <!-- 过滤条件 -->
-        <div class="filter-box">
-          <div class="filter-row">
-            <span class="fl">Host 过滤（逗号分隔，留空=全部）</span>
-            <el-input v-model="filterHosts" size="small" placeholder="example.com, api.test.cn" @change="applyFilter" />
+        <!-- 过滤条件（默认收起，点击标题栏展开，收起时显示当前条件摘要） -->
+        <div class="filter-box" :class="{ 'is-collapsed': !filterOpen }">
+          <div class="filter-head" @click="filterOpen = !filterOpen">
+            <span class="fh-caret">{{ filterOpen ? '▾' : '▸' }}</span>
+            <span class="fh-title">过滤条件</span>
+            <el-tag v-if="filterCount > 0" size="small" type="primary" effect="plain" class="fh-badge">{{ filterCount }}</el-tag>
+            <span v-if="!filterOpen" class="fh-summary" :title="filterSummary">{{ filterSummary }}</span>
+            <span v-if="!filterOpen" class="fh-hint">展开</span>
           </div>
-          <div class="filter-row">
-            <span class="fl">排除 Host</span>
-            <el-input v-model="filterExclude" size="small" placeholder="localhost, 127.0.0.1" @change="applyFilter" />
-          </div>
-          <div class="filter-row">
-            <span class="fl">协议勾选</span>
-            <el-checkbox-group v-model="filterProtocols" size="small" @change="applyFilter">
-              <el-checkbox-button value="http">HTTP</el-checkbox-button>
-              <el-checkbox-button value="https">HTTPS</el-checkbox-button>
-              <el-checkbox-button value="websocket">WebSocket</el-checkbox-button>
-              <el-checkbox-button value="sse">SSE</el-checkbox-button>
-              <el-checkbox-button value="grpc">gRPC</el-checkbox-button>
-              <el-checkbox-button value="graphql">GraphQL</el-checkbox-button>
-            </el-checkbox-group>
-            <el-tooltip content="勾选哪些协议就解析哪些；一个都不选则全部抓取解析" placement="top">
-              <span style="color:#86909c;margin-left:6px;cursor:help;font-size:13px">?</span>
-            </el-tooltip>
-          </div>
-          <div class="filter-row">
-            <el-checkbox v-model="filterOnlyHTTP" @change="applyFilter">仅抓取 HTTP/HTTPS</el-checkbox>
-            <el-checkbox v-model="autoDoc" border size="small" title="抓取时自动为每个请求生成文档草稿">自动生成文档</el-checkbox>
-          </div>
+          <el-collapse-transition>
+            <div class="filter-body" v-show="filterOpen">
+              <div class="filter-row">
+                <span class="fl">Host 过滤（逗号分隔，留空=全部）</span>
+                <el-input v-model="filterHosts" size="small" placeholder="example.com, api.test.cn" @change="applyFilter" />
+              </div>
+              <div class="filter-row">
+                <span class="fl">排除 Host</span>
+                <el-input v-model="filterExclude" size="small" placeholder="localhost, 127.0.0.1" @change="applyFilter" />
+              </div>
+              <div class="filter-row">
+                <span class="fl">协议勾选</span>
+                <el-checkbox-group v-model="filterProtocols" size="small" @change="applyFilter">
+                  <el-checkbox-button value="http">HTTP</el-checkbox-button>
+                  <el-checkbox-button value="https">HTTPS</el-checkbox-button>
+                  <el-checkbox-button value="websocket">WebSocket</el-checkbox-button>
+                  <el-checkbox-button value="sse">SSE</el-checkbox-button>
+                  <el-checkbox-button value="grpc">gRPC</el-checkbox-button>
+                  <el-checkbox-button value="graphql">GraphQL</el-checkbox-button>
+                </el-checkbox-group>
+                <el-tooltip content="勾选哪些协议就解析哪些；一个都不选则全部抓取解析" placement="top">
+                  <span style="color:#86909c;margin-left:6px;cursor:help;font-size:13px">?</span>
+                </el-tooltip>
+              </div>
+              <div class="filter-row">
+                <el-checkbox v-model="filterOnlyHTTP" @change="applyFilter">仅抓取 HTTP/HTTPS</el-checkbox>
+                <el-checkbox v-model="autoDoc" border size="small" title="抓取时自动为每个请求生成文档草稿">自动生成文档</el-checkbox>
+              </div>
+            </div>
+          </el-collapse-transition>
         </div>
 
         <!-- 实时流量 -->
@@ -392,12 +412,15 @@
       </div>
     </el-dialog>
 
-    <!-- 域名重定向（Host Rewrite） -->
-    <el-dialog v-model="rewritesDialog" title="域名重定向（Host Rewrite）" width="720px" append-to-body>
+    <!-- 请求改写（域名重定向 + 参数替换） -->
+    <el-dialog v-model="rewritesDialog" title="请求改写（域名重定向 + 参数替换）" width="760px" append-to-body>
       <p class="rw-tip">
-        将请求的域名改写为本地地址，便于测试。例如
+        将请求的域名改写为目标地址，便于测试。例如
         <code>dev.test.com → 127.0.0.1:8200</code>（未写端口时 HTTPS 自动补 :443、HTTP 补 :80；
         目标端口非 443 时默认按 HTTP 转发，本地联调服务通常为明文 HTTP）。
+        <b>To</b> 也支持直接填域名，并可带路径与查询串，如
+        <code>api.test.com/v2/api?v=2</code>（命中后整体替换路径与参数）。
+        点击「参数」可对该请求做 <b>Query 参数 / 请求头</b> 的自由替换、新增与删除。
         配置保存后立即对后续抓到的请求生效，HTTPS 仍按原域名签发证书。
       </p>
       <el-table :data="rewrites" size="small" empty-text="暂无配置，点击下方「添加一行」" max-height="360">
@@ -406,32 +429,33 @@
             <el-switch v-model="row.enabled" size="small" />
           </template>
         </el-table-column>
-        <el-table-column label="原域名 (From)" min-width="190">
+        <el-table-column label="原域名 (From)" min-width="170">
           <template #default="{ row }">
             <el-input v-model="row.from" size="small" placeholder="dev.test.com" clearable />
           </template>
         </el-table-column>
-        <el-table-column label="改写为 (To)" min-width="170">
+        <el-table-column label="改写为 (To)" min-width="190">
           <template #default="{ row }">
-            <el-input v-model="row.to" size="small" placeholder="127.0.0.1:8200" clearable />
+            <el-input v-model="row.to" size="small" placeholder="127.0.0.1:8200 或 api.test.com/v2/api?v=2" clearable />
           </template>
         </el-table-column>
         <el-table-column label="协议" width="100" align="center">
           <template #default="{ row }">
-            <el-select v-model="row.scheme" size="small" style="width: 88px">
-              <el-option label="自动" value="" />
+            <el-select v-model="row.scheme" size="small" style="width: 88px" placeholder="自动">
+              <el-option label="自动" value="auto" />
               <el-option label="HTTP" value="http" />
               <el-option label="HTTPS" value="https" />
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="120">
+        <el-table-column label="备注" min-width="100">
           <template #default="{ row }">
             <el-input v-model="row.desc" size="small" placeholder="可选" clearable />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="66" align="center">
-          <template #default="{ $index }">
+        <el-table-column label="操作" width="132" align="center">
+          <template #default="{ row, $index }">
+            <el-button link type="primary" size="small" @click="openRepl(row)">{{ replLabel(row) }}</el-button>
             <el-button link type="danger" size="small" @click="removeRewrite($index)">删除</el-button>
           </template>
         </el-table-column>
@@ -442,11 +466,63 @@
         <el-button size="small" type="primary" :loading="savingRewrites" @click="saveRewrites">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 参数替换（Query 参数 / 请求头的替换、新增、删除） -->
+    <el-dialog v-model="replDialog" :title="`参数替换 — ${replTitle}`" width="760px" append-to-body>
+      <p class="rw-tip">
+        对命中该改写规则的请求替换参数：<b>Query 参数</b>作用于 URL 查询串（<code>?a=1</code>），
+        <b>请求头</b>作用于 HTTP Header（如 <code>Authorization</code>、<code>Host</code>）。
+        <b>替换</b>会覆盖同名参数的值（不存在则新增），<b>删除</b>会移除该参数。多个替换项按从上到下顺序执行。
+      </p>
+      <el-table :data="replList" size="small" empty-text="暂无替换项，点击下方「添加一行」" max-height="320">
+        <el-table-column label="启用" width="60" align="center">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="116" align="center">
+          <template #default="{ row }">
+            <el-select v-model="row.type" size="small">
+              <el-option label="Query 参数" value="query" />
+              <el-option label="请求头" value="header" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="108" align="center">
+          <template #default="{ row }">
+            <el-select v-model="row.action" size="small">
+              <el-option label="替换/新增" value="set" />
+              <el-option label="删除" value="del" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="参数名 (Key)" min-width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.key" size="small" placeholder="如 token / Authorization" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="替换为 (Value)" min-width="150">
+          <template #default="{ row }">
+            <el-input v-model="row.value" size="small" :disabled="row.action === 'del'"
+                      :placeholder="row.action === 'del' ? '删除时无需填写' : '新值'" clearable />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="66" align="center">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" @click="removeRepl($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button size="small" @click="replDialog = false">完成</el-button>
+        <el-button size="small" @click="addRepl">添加一行</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   SniffStatus, SniffStart, SniffStop, SniffSetFilter, SniffListSessions,
@@ -651,6 +727,29 @@ const filterExclude = ref('localhost, 127.0.0.1')
 const filterOnlyHTTP = ref(false)
 const filterProtocols = ref([]) // http/https/websocket/sse/grpc/graphql，空=全部解析
 const autoDoc = ref(false)
+const filterOpen = ref(false) // 过滤条件面板默认收起，避免挤压流量列表
+
+// filterCount 当前生效的过滤条件数量（展示在收起状态的角标上）
+const filterCount = computed(() => {
+  let n = 0
+  if (filterHosts.value.trim()) n++
+  if (filterExclude.value.split(',').map(x => x.trim()).filter(Boolean).length) n++
+  if (filterProtocols.value.length) n++
+  if (filterOnlyHTTP.value) n++
+  return n
+})
+
+// filterSummary 收起时的一行摘要，保证折叠后仍能看清当前过滤配置
+const filterSummary = computed(() => {
+  const parts = []
+  const host = filterHosts.value.trim()
+  if (host) parts.push('Host: ' + host)
+  const ex = filterExclude.value.split(',').map(x => x.trim()).filter(Boolean)
+  if (ex.length) parts.push('排除: ' + ex.join(', '))
+  if (filterProtocols.value.length) parts.push('协议: ' + filterProtocols.value.join(' / '))
+  if (filterOnlyHTTP.value) parts.push('仅 HTTP(S)')
+  return parts.length ? parts.join(' · ') : '未设置（抓取全部流量）'
+})
 
 // 导入接口树
 const importDialog = ref(false)
@@ -776,15 +875,21 @@ async function openErrors() {
 }
 function errTypeText(type) { return ERR_LABELS[type] || '错误' }
 
-// ---- 域名重定向（Host Rewrite） ----
+// ---- 请求改写（域名重定向 + 参数替换） ----
 const rewritesDialog = ref(false)
 const rewrites = ref([])
 const savingRewrites = ref(false)
 
+// ---- 参数替换子弹窗（Query 参数 / 请求头的替换、新增、删除） ----
+const replDialog = ref(false)
+const replList = ref([])
+const replTitle = ref('')
+let replRow = null // 当前正在编辑替换项的规则对象（引用）
+
 function newRewrite() {
   return {
     id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-    from: '', to: '', enabled: true, desc: '', scheme: '',
+    from: '', to: '', enabled: true, desc: '', scheme: 'auto', replacements: [],
   }
 }
 
@@ -796,15 +901,58 @@ function removeRewrite(i) {
   rewrites.value.splice(i, 1)
 }
 
+// replLabel 操作列「参数」按钮文案，带已有替换项数量。
+function replLabel(row) {
+  const n = (row.replacements || []).length
+  return n ? `参数(${n})` : '参数'
+}
+
+function openRepl(row) {
+  replRow = row
+  replTitle.value = `${row.from || '未命名'} → ${row.to || '未填写'}`
+  replList.value = (row.replacements || []).map(x => ({
+    type: x.type === 'header' ? 'header' : 'query',
+    action: x.action === 'del' ? 'del' : 'set',
+    key: x.key || '', value: x.value || '', enabled: x.enabled !== false,
+  }))
+  replDialog.value = true
+}
+
+function addRepl() {
+  replList.value.push({ type: 'query', action: 'set', key: '', value: '', enabled: true })
+}
+
+function removeRepl(i) {
+  replList.value.splice(i, 1)
+}
+
+// 关闭子弹窗时把替换项写回所属规则（丢弃未填参数名的空行）。
+// 采用引用写入，因此无需额外保存动作，随主弹窗「保存」一起提交。
+watch(replDialog, v => {
+  if (v || !replRow) return
+  replRow.replacements = replList.value
+    .filter(x => (x.key || '').trim())
+    .map(x => ({
+      type: x.type, action: x.action,
+      key: x.key.trim(), value: x.value || '', enabled: !!x.enabled,
+    }))
+  replRow = null
+})
+
 async function openRewrites() {
   try {
     const list = await SniffGetRewrites()
     rewrites.value = (list || []).map(r => ({
       id: r.id, from: r.from || '', to: r.to || '', enabled: r.enabled !== false, desc: r.desc || '',
-      scheme: r.scheme || '',
+      scheme: r.scheme || 'auto',
+      replacements: (r.replacements || []).map(x => ({
+        type: x.type === 'header' ? 'header' : 'query',
+        action: x.action === 'del' ? 'del' : 'set',
+        key: x.key || '', value: x.value || '', enabled: x.enabled !== false,
+      })),
     }))
   } catch (e) {
-    ElMessage.error('加载重定向配置失败：' + String(e))
+    ElMessage.error('加载改写配置失败：' + String(e))
     rewrites.value = []
   }
   rewritesDialog.value = true
@@ -820,9 +968,12 @@ async function saveRewrites() {
   try {
     await SniffSetRewrites(list.map(r => ({
       id: r.id, from: r.from.trim(), to: r.to.trim(), enabled: !!r.enabled, desc: (r.desc || '').trim(),
-      scheme: r.scheme || '',
+      scheme: r.scheme || 'auto',
+      replacements: (r.replacements || []).map(x => ({
+        type: x.type, action: x.action, key: x.key, value: x.value || '', enabled: !!x.enabled,
+      })),
     })))
-    ElMessage.success('已保存，重定向配置即时生效')
+    ElMessage.success('已保存，改写配置即时生效')
     rewritesDialog.value = false
   } catch (e) {
     ElMessage.error('保存失败：' + String(e))
@@ -1297,10 +1448,36 @@ async function copyProxyAddr() {
 .mitm-left { flex: 0 0 42%; width: 42%; min-width: 40%; max-width: 62%; display: flex; flex-direction: column; gap: 10px; min-height: 0; contain: layout style; }
 .mitm-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid var(--mp-border); padding-left: 14px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: layout style; }
 .mitm-right .detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+/* 标题右侧「功能介绍」下拉入口：默认只占一小块，点击才展开说明，不挤压操作区 */
+.mitm-title .sub-more {
+  font-size: 12px; color: var(--mp-sub); cursor: pointer; user-select: none; white-space: nowrap;
+  padding: 2px 6px; border-radius: 6px; transition: background .15s, color .15s;
+}
+.mitm-title .sub-more:hover { background: #f2f3f5; color: #165dff; }
+.intro-box .intro-line { font-size: 13px; line-height: 1.9; color: #4e5969; }
+.intro-box .intro-line b { color: #1d2129; }
+.intro-box .intro-tip { margin-top: 8px; font-size: 12px; color: #86909c; line-height: 1.7; }
+
+/* 过滤条件：默认收起为一行标题 + 条件摘要，点击展开完整表单 */
 .filter-box {
-  border: 1px solid var(--mp-border); border-radius: var(--mp-radius); padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--mp-border); border-radius: var(--mp-radius); padding: 12px;
   background: #fff; box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
 }
+.filter-box.is-collapsed { padding: 8px 12px; }
+.filter-head {
+  display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 600; color: var(--mp-text); min-width: 0;
+}
+.filter-head:hover .fh-title { color: #165dff; }
+.filter-head .fh-caret { color: var(--mp-sub); font-size: 11px; width: 10px; flex-shrink: 0; }
+.filter-head .fh-title { flex-shrink: 0; transition: color .15s; }
+.filter-head .fh-badge { flex-shrink: 0; padding: 0 5px; height: 18px; line-height: 16px; }
+.filter-head .fh-summary {
+  flex: 1; min-width: 0; font-weight: 400; font-size: 12px; color: var(--mp-sub);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.filter-head .fh-hint { flex-shrink: 0; font-weight: 400; font-size: 12px; color: #165dff; }
+.filter-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .filter-row .fl { font-size: 12px; color: var(--mp-sub); white-space: nowrap; flex-shrink: 0; }
 .traffic-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; color: var(--mp-text); }
@@ -1437,9 +1614,10 @@ async function copyProxyAddr() {
 /* 空状态图标 */
 .empty-ico { font-size: 26px; margin-bottom: 6px; opacity: .7; }
 
-/* 域名重定向弹窗 */
+/* 请求改写（域名重定向 + 参数替换）弹窗 */
 .rw-tip { color: #4e5969; font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
 .rw-tip code { background: #f2f3f5; border-radius: 5px; padding: 1px 6px; font-size: 12px; color: #165dff; }
+.rw-tip b { color: #1d2129; }
 
 /* 细滚动条（年轻化） */
 .traffic-list::-webkit-scrollbar, .code::-webkit-scrollbar, .detail-tabs .el-tabs__content::-webkit-scrollbar,

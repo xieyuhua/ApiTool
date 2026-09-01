@@ -165,6 +165,11 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 		}
 		onDelta(streamDelta{Text: s, Thinking: thinking})
 	}
+
+	// 正文流经 bodyFilter 过滤掉工具调用区段后再推送给前端
+	bf := &bodyFilter{emit: func(s string) { emit(s, false) }}
+	emitBody := bf.Write
+
 	processChunk := func(chunk string) {
 		full.WriteString(chunk)
 		pending.WriteString(chunk)
@@ -180,7 +185,11 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 			idx := strings.Index(buf, marker)
 			if idx >= 0 {
 				// 输出标记之前的内容
-				emit(buf[:idx], inThinking)
+				if inThinking {
+					emit(buf[:idx], true)
+				} else {
+					emitBody(buf[:idx])
+				}
 				buf = buf[idx+len(marker):]
 				inThinking = !inThinking
 				continue
@@ -188,10 +197,18 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 			// 没有完整标记：检查是否有可能是被截断的标记前缀，若有则留到下次
 			keep := partialTailLen(buf, marker)
 			if keep > 0 {
-				emit(buf[:len(buf)-keep], inThinking)
+				if inThinking {
+					emit(buf[:len(buf)-keep], true)
+				} else {
+					emitBody(buf[:len(buf)-keep])
+				}
 				pending.WriteString(buf[len(buf)-keep:])
 			} else {
-				emit(buf, inThinking)
+				if inThinking {
+					emit(buf, true)
+				} else {
+					emitBody(buf)
+				}
 			}
 			break
 		}
@@ -242,10 +259,18 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 			processChunk(c)
 		}
 	}
-	// 收尾：把 pending 剩余内容输出
+	// 收尾：把 pending 剩余内容输出（工具调用区段的屏蔽状态同样生效）
 	if pending.Len() > 0 {
-		emit(pending.String(), inThinking)
+		rest := pending.String()
+		pending.Reset()
+		if inThinking {
+			emit(rest, true)
+		} else {
+			emitBody(rest)
+		}
 	}
+	// 补发过滤器中残留的正文（未闭合的 ```json 等），避免丢失内容
+	bf.Flush()
 	if err := scanner.Err(); err != nil {
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式读取中断: " + tag, Detail: err.Error()})
 		if full.Len() == 0 {
@@ -325,6 +350,151 @@ var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*"([^"]*)
 var toolCallParamRe = regexp.MustCompile(`(?s)<parameter\s+name\s*=\s*"([^"]*)"\s*>(.*?)</parameter>`)
 // 外层可能包 <function_calls> ... </function_calls>
 var funcCallsRe = regexp.MustCompile(`(?s)<function_calls>(.*?)</function_calls>`)
+
+// toolCallMarkers 流式输出中可能出现的「工具调用起始标记」。
+// hit=true 表示命中即确认为工具调用（标签形式，最终必被 stripTags 剥除）；
+// hit=false 表示还需进一步判定（```json 代码块也可能是普通代码，不能误伤）。
+var toolCallMarkers = []struct {
+	tag string
+	hit bool
+}{
+	{"<tool_call", true},
+	{"<function_calls", true},
+	{"<function", true},
+	{"```json", false},
+}
+
+// toolJSONProbeRe 用于判定 ```json 代码块内是否为工具调用。
+var toolJSONProbeRe = regexp.MustCompile(`"action"\s*:\s*"tool"`)
+
+// toolCallPartialTail 返回 s 末尾可能是某个工具调用起始标记前缀的字符数。
+// 流式分片可能把 "<tool_call" 切成 "<tool_" + "call>"，这里把不完整的尾巴
+// 留给下一个分片再判定，避免把半个标记当成正文推送出去。
+func toolCallPartialTail(s string) int {
+	best := 0
+	for _, m := range toolCallMarkers {
+		maxK := len(m.tag) - 1
+		if maxK > len(s) {
+			maxK = len(s)
+		}
+		for k := maxK; k > 0; k-- {
+			if strings.HasSuffix(s, m.tag[:k]) {
+				if k > best {
+					best = k
+				}
+				break
+			}
+		}
+	}
+	return best
+}
+
+// fenceBufMax ```json 块缓冲上限：超过仍无法判定为工具调用时按普通内容补发，
+// 避免异常输出把正文一直憋住不显示。
+const fenceBufMax = 4096
+
+// bodyFilter 流式正文过滤器。
+// 模型输出工具调用时，工具调用本身不应作为正文实时展示——它最终会被 stripTags 剥除，
+// 若实时推送，用户会先看到一坨 JSON，下一轮 loop-start 又被清空，产生「回答了两次」的错觉。
+// 该过滤器只影响推送给前端的增量，不影响返回给上层的完整文本（完整文本仍需用于解析工具调用）。
+type bodyFilter struct {
+	suppressed bool          // 已确认进入工具调用区段：本轮剩余内容全部丢弃
+	inFence    bool          // 正在缓冲 ```json 块以判定是否为工具调用
+	fenceBuf   strings.Builder
+	pending    strings.Builder // 跨分片暂存（不完整的工具调用标记前缀）
+	emit       func(string)    // 推送已确认的正文
+}
+
+// Write 接收一段正文增量，过滤掉工具调用区段后推送剩余部分。
+func (f *bodyFilter) Write(s string) {
+	if s == "" {
+		return
+	}
+	// 拼接上一分片留下的不完整标记尾巴
+	if f.pending.Len() > 0 {
+		s = f.pending.String() + s
+		f.pending.Reset()
+	}
+	for len(s) > 0 {
+		if f.suppressed {
+			return // 已进入工具调用区段，本轮剩余内容全部丢弃
+		}
+		if f.inFence {
+			// 在 ```json 块内：等块结束（或已能判定）再决定是工具调用还是普通代码
+			endIdx := strings.Index(s, "```")
+			if endIdx >= 0 {
+				f.fenceBuf.WriteString(s[:endIdx])
+				s = s[endIdx+3:]
+				f.inFence = false
+				body := f.fenceBuf.String()
+				f.fenceBuf.Reset()
+				if toolJSONProbeRe.MatchString(body) {
+					f.suppressed = true // 确认是工具调用，丢弃
+					return
+				}
+				// 普通代码块：连同围栏标记一并补发，保证 markdown 结构完整
+				f.emit("```json" + body + "```")
+				continue
+			}
+			f.fenceBuf.WriteString(s)
+			body := f.fenceBuf.String()
+			if toolJSONProbeRe.MatchString(body) {
+				f.fenceBuf.Reset()
+				f.suppressed = true
+				return
+			}
+			if f.fenceBuf.Len() > fenceBufMax {
+				// 超长仍无法判定：按普通内容补发，避免吞掉正文
+				f.fenceBuf.Reset()
+				f.inFence = false
+				f.emit("```json" + body)
+			}
+			return
+		}
+		// 查找最近的工具调用起始标记
+		cut, cutTag, cutHit := -1, "", false
+		for _, m := range toolCallMarkers {
+			if i := strings.Index(s, m.tag); i >= 0 && (cut < 0 || i < cut) {
+				cut, cutTag, cutHit = i, m.tag, m.hit
+			}
+		}
+		if cut >= 0 {
+			f.emit(s[:cut]) // 标记之前的正文正常推送
+			s = s[cut+len(cutTag):]
+			if cutHit {
+				f.suppressed = true // 标签形式：确认是工具调用
+				return
+			}
+			f.inFence = true // ```json：进入缓冲判定
+			f.fenceBuf.Reset()
+			continue
+		}
+		// 可能是被截断的标记前缀，留给下一个分片判定
+		if keep := toolCallPartialTail(s); keep > 0 {
+			f.emit(s[:len(s)-keep])
+			f.pending.WriteString(s[len(s)-keep:])
+			return
+		}
+		f.emit(s)
+		return
+	}
+}
+
+// Flush 流结束时输出残留：未闭合的 ```json 缓冲按普通内容补发，避免丢失正文。
+func (f *bodyFilter) Flush() {
+	if f.suppressed {
+		return
+	}
+	if f.pending.Len() > 0 {
+		f.emit(f.pending.String())
+		f.pending.Reset()
+	}
+	if f.inFence && f.fenceBuf.Len() > 0 {
+		f.emit("```json" + f.fenceBuf.String())
+		f.fenceBuf.Reset()
+		f.inFence = false
+	}
+}
 
 type toolAction struct {
 	Action    string                 `json:"action"`
@@ -636,9 +806,9 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		polishSys := "你是文字润色助手，请在不改变原意与技术细节的前提下，使下面内容表达更清晰、专业、结构更好。若含代码/表格/图表请保留。直接输出润色后的正文。"
 		// 通知前端进入润色，重置正文流
 		m.b.Emit("agent:polish-start", nil)
-		polished, err := m.llmCallStream(args, []ai.ChatMessage{{Role: "system", Content: polishSys}, {Role: "user", Content: result.Content}}, 0.4, "polish", func(dc streamDelta) {
-			m.b.Emit("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
-		}, func(u TokenUsage) {
+		// 润色阶段不推送流式增量（onDelta=nil）：否则润色后的全文会被重新「打字」一遍，
+		// 用户会看到同一篇回答输出两次。改为只通知前端进入润色状态，完成后一次性替换。
+		polished, err := m.llmCallStream(args, []ai.ChatMessage{{Role: "system", Content: polishSys}, {Role: "user", Content: result.Content}}, 0.4, "polish", nil, func(u TokenUsage) {
 			addUsage(u)
 		})
 		if err == nil && strings.TrimSpace(polished) != "" {

@@ -289,9 +289,29 @@ func (p *proxy) Requestheaders(f *mitm.Flow) {
 	}
 	// 改写目标地址与转发协议：目标端口非 443 时默认按 HTTP 转发（本地联调服务通常为明文 HTTP），
 	// 避免 "server gave HTTP response to HTTPS client"；HTTPS 证书仍按原域名签发不受影响。
-	to, scheme := applyRewriteTarget(r.To, f.Request.URL.Scheme, r.Scheme)
+	// To 支持带路径/查询串（如 api.test.com/v2/api?v=2）：分离出主机目标与路径/查询串分别处理。
+	target, pathQuery := splitRewriteTarget(r.To)
+	to, scheme := applyRewriteTarget(target, f.Request.URL.Scheme, r.Scheme)
 	f.Request.URL.Host = to
 	f.Request.URL.Scheme = scheme
+	// 命中带路径/查询串的目标地址时整体替换原路径与查询参数
+	if pathQuery != "" {
+		if strings.HasPrefix(pathQuery, "/") {
+			if i := strings.IndexByte(pathQuery, '?'); i >= 0 {
+				f.Request.URL.Path = pathQuery[:i]
+				f.Request.URL.RawQuery = pathQuery[i+1:]
+			} else {
+				f.Request.URL.Path = pathQuery
+				f.Request.URL.RawQuery = ""
+			}
+			// 清掉原始编码路径，否则 URL.String() 可能仍沿用旧的转义形式
+			f.Request.URL.RawPath = ""
+		} else if strings.HasPrefix(pathQuery, "?") {
+			f.Request.URL.RawQuery = pathQuery[1:]
+		}
+	}
+	// 应用参数替换列表：Query 参数 / Header 的替换、新增、删除
+	applyReplacements(f.Request.URL, f.Request.Header, r.Replacements)
 }
 
 // Request 在请求发出前调用。命中证书下载路由时直接构造响应短路，不转发上游，

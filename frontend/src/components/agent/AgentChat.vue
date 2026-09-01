@@ -30,6 +30,7 @@ const bodyRef = ref(null)
 
 // 实时运行态（当前轮次的临时展示）
 const live = reactive({ thinking: '', content: '', steps: [] })
+const polishing = ref(false) // 是否处于「回答润色」阶段（此时不重打正文，只显示状态）
 
 const currentUserName = computed(() => {
   const u = users.value.find(x => x.id === config.currentUserId)
@@ -79,8 +80,12 @@ function scheduleScroll() {
 function bindEvents() {
   // 新一轮流式开始：清空当前正文流（思考区在思考事件里单独维护）
   offFns.push(EventsOn('agent:loop-start', () => { live.content = ''; scheduleScroll() }))
-  // 润色开始：正文将被重写，重置正文流
-  offFns.push(EventsOn('agent:polish-start', () => { live.content = ''; scheduleScroll() }))
+  // 润色开始：后端不再重推正文（避免同一篇回答打两次字），这里只切换到润色态提示
+  offFns.push(EventsOn('agent:polish-start', () => {
+    live.content = ''
+    polishing.value = true
+    scheduleScroll()
+  }))
   // 流式增量：打字机效果
   offFns.push(EventsOn('agent:delta', (d) => {
     if (!d) return
@@ -106,6 +111,7 @@ async function send() {
   input.value = ''
   running.value = true
   live.thinking = ''; live.content = ''; live.steps = []
+  polishing.value = false
   // 本地立即回显用户消息
   messages.value.push({ id: 'u_' + Date.now(), role: 'user', content: text, time: nowStr() })
   await scrollBottom()
@@ -140,6 +146,7 @@ async function send() {
   } finally {
     running.value = false
     live.thinking = ''; live.content = ''; live.steps = []
+    polishing.value = false
   }
 }
 
@@ -336,8 +343,11 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
           <div v-if="live.steps.length" class="steps-cards">
             <ToolCard v-for="(s, i) in live.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
           </div>
-          <!-- 流式正文（打字机） -->
-          <div v-if="live.content" class="md-body streaming" v-html="md(live.content)"></div>
+          <!-- 流式正文（打字机）；润色阶段不再重打全文，只显示状态 -->
+          <div v-if="polishing" class="running-tip polish-tip">
+            <span class="dot"></span> ✨ 正在润色回答…
+          </div>
+          <div v-else-if="live.content" class="md-body streaming" v-html="md(live.content)"></div>
           <div v-else class="running-tip"><span class="dot"></span> Agent 运行中…</div>
         </div>
       </div>
@@ -409,7 +419,9 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
 @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
 
 .running-tip { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.polish-tip { color: #8b5cf6; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: pulse 1s infinite; }
+.polish-tip .dot { background: #8b5cf6; }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 
 .agent-input { padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); }
