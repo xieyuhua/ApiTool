@@ -613,15 +613,23 @@ func parseToolAction(text string) (*toolAction, bool) {
 
 // normalizeToolTags 规范化工具调用标签：某些模型/中间件会把标签写成
 // <｜｜DSML｜｜tool_call> / <｜｜DSML｜｜function> / <｜｜DSML｜｜parameter ...>
-// 这类带前缀的形式。这里把标签名前可能插入的「｜｜DSML｜｜」前缀剥掉，
-// 统一还原为标准 <tool_call>/<function>/<parameter> 标签，保证可被解析与剥离。
-var dsmlTagMidRe = regexp.MustCompile(`(?s)<\s*｜｜DSML｜｜\s*([a-zA-Z_/]+)`)
+// 这类带前缀的形式，且常伴随畸形闭合（如 </｜｜DSML｜｜invoke> 代替 </tool_call>，
+// 或 <function>名</parameter> 这种错误闭合）。这里统一还原为标准
+// <tool_call><function>名</function><parameter name="k">v</parameter></tool_call>，
+// 保证后续解析与正文剥离都能正常工作。
+var dsmlStripRe = regexp.MustCompile(`｜｜DSML｜｜`)
+// 修复畸形：<function ...>内容</parameter>  ->  <function ...>内容</function>
+var dsmlFuncCloseRe = regexp.MustCompile(`(?s)<function\b([^>]*)>([\s\S]*?)</parameter>`)
+// 把畸形的 </invoke> 闭合标签还原为标准 </tool_call>
+var dsmlInvokeCloseRe = regexp.MustCompile(`(?s)</invoke>`)
 
 func normalizeToolTags(text string) string {
 	if !strings.Contains(text, "DSML") {
 		return text
 	}
-	text = dsmlTagMidRe.ReplaceAllString(text, "<$1")
+	text = dsmlStripRe.ReplaceAllString(text, "")                                       // 移除所有 ｜｜DSML｜｜ 前缀
+	text = dsmlFuncCloseRe.ReplaceAllString(text, "<function$1>$2</function>")           // 修复 <function>..</parameter> 畸形
+	text = dsmlInvokeCloseRe.ReplaceAllString(text, "</tool_call>")                      // </invoke> -> </tool_call>
 	return text
 }
 func stripTags(text string) string {
