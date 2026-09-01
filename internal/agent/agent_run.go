@@ -410,6 +410,8 @@ func (f *bodyFilter) Write(s string) {
 	if s == "" {
 		return
 	}
+	// 规范化模型可能输出的 ｜｜DSML｜｜ 前缀标签，使其能被后续标记判定与剥离识别
+	s = normalizeToolTags(s)
 	// 拼接上一分片留下的不完整标记尾巴
 	if f.pending.Len() > 0 {
 		s = f.pending.String() + s
@@ -576,6 +578,7 @@ func applyArg(args map[string]interface{}, pname, pval string) {
 //  2. 裸 JSON（含 "action":"tool"）
 //  3. <tool_call><function>name</function><parameter name="x">v</parameter></tool_call> 标签（OpenAI 风格）
 func parseToolAction(text string) (*toolAction, bool) {
+	text = normalizeToolTags(text)
 	// 仅当文本确实包含工具调用标签时才走标签解析，避免普通文本误判
 	if strings.Contains(text, "<tool_call") || strings.Contains(text, "<function") {
 		if act, ok := parseToolFromToolCall(text); ok {
@@ -605,7 +608,21 @@ func parseToolAction(text string) (*toolAction, bool) {
 	return nil, false
 }
 
+// normalizeToolTags 规范化工具调用标签：某些模型/中间件会把标签写成
+// <｜｜DSML｜｜tool_call> / <｜｜DSML｜｜function> / <｜｜DSML｜｜parameter ...>
+// 这类带前缀的形式。这里把标签名前可能插入的「｜｜DSML｜｜」前缀剥掉，
+// 统一还原为标准 <tool_call>/<function>/<parameter> 标签，保证可被解析与剥离。
+var dsmlTagMidRe = regexp.MustCompile(`(?s)<\s*｜｜DSML｜｜\s*([a-zA-Z_/]+)`)
+
+func normalizeToolTags(text string) string {
+	if !strings.Contains(text, "DSML") {
+		return text
+	}
+	text = dsmlTagMidRe.ReplaceAllString(text, "<$1")
+	return text
+}
 func stripTags(text string) string {
+	text = normalizeToolTags(text)
 	text = thinkingRe.ReplaceAllString(text, "")
 	text = planRe.ReplaceAllString(text, "")
 	text = toolJSONRe.ReplaceAllString(text, "")
@@ -733,6 +750,20 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		// 是否有工具调用
 		act, has := parseToolAction(out)
 		if !has {
+			// 模型输出看似包含工具调用标记却未能解析（如标签被改写/截断/格式异常）时，
+			// 给出诊断步骤，便于在前端直接看到「为什么没执行工具」，而不是默默当成正文。
+			if strings.Contains(out, "<tool_call") || strings.Contains(out, "<function") || strings.Contains(out, "｜｜DSML｜｜") {
+				diag := strings.TrimSpace(out)
+				if len(diag) > 600 {
+					diag = diag[:600] + " …(已截断)"
+				}
+				result.Steps = append(result.Steps, AgentStep{
+					Type:   "tool-failed",
+					Name:   "工具调用未解析",
+					Output: "检测到工具调用标记但未能解析为可执行的工具动作。原始片段：\n" + diag + "\n常见原因：标签被截断/转义、参数未闭合、或使用了不被识别的格式（需 <tool_call><function>名</function><parameter name=\"k\">v</parameter></tool_call>）。",
+				})
+				m.b.Emit("agent:step", result.Steps[len(result.Steps)-1])
+			}
 			// 无工具调用 = 最终答案
 			result.Content = stripTags(out)
 			result.Thinking = strings.TrimSpace(thinkingAll.String())
@@ -775,7 +806,12 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 			messages = append(messages, ai.ChatMessage{Role: "user", Content: "工具执行出错：" + terr.Error() + "。请调整或直接回答。"})
 			continue
 		}
-		step.Output = util.Truncate(toolOut, cfg.MaxToolOutput)
+		// 数据库结构/查询结果需要完整呈现给用户核对，不做截断；其余工具仍按上限截断
+		if act.Tool == "db_schema" || act.Tool == "db_query" {
+			step.Output = toolOut
+		} else {
+			step.Output = util.Truncate(toolOut, cfg.MaxToolOutput)
+		}
 		result.Steps = append(result.Steps, step)
 		m.b.Emit("agent:step", step)
 		// 把工具结果回灌给模型

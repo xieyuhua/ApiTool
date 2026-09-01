@@ -233,7 +233,7 @@ func PluginTest(conn model.PluginConn) PluginOpResult {
 		return PluginOpResult{Ok: true, Info: "FTP 连接成功"}
 	case "db":
 		var n int
-		err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+		err := withConn(connKey(conn)+"|", dbFactory(conn, ""), func(v interface{}) error {
 			s := v.(*dbSession)
 			var res *DBRow
 			var e error

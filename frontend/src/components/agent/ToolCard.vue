@@ -1,11 +1,11 @@
 <template>
-  <div class="tool-card" :class="{ err: step.error, open: expanded }">
+  <div class="tool-card" :class="{ err: step.error || step.type === 'tool-failed', open: expanded }">
     <div class="tc-head" @click="toggle" :title="hasDetail ? '点击查看执行参数' : ''">
       <span class="tc-ic">{{ icon }}</span>
       <span class="tc-name">{{ step.name }}</span>
       <span v-if="step.server && step.server !== 'builtin'" class="tc-server">@{{ step.server }}</span>
       <span v-else-if="step.server === 'builtin'" class="tc-server builtin">内置</span>
-      <span v-if="step.error" class="tc-badge err">失败</span>
+      <span v-if="step.error || step.type === 'tool-failed'" class="tc-badge err">失败</span>
       <span v-else class="tc-badge ok">成功</span>
       <span v-if="hasDetail" class="tc-toggle">{{ expanded ? '▾' : '▸' }}</span>
     </div>
@@ -20,7 +20,7 @@
         <div class="tc-sec-title" :class="{ err: step.error }">
           {{ step.error ? '⚠️ 错误信息' : '📤 返回结果' }}
         </div>
-        <pre class="tc-pre" :class="{ err: step.error }">{{ step.error || step.output }}</pre>
+        <pre class="tc-pre" :class="{ err: step.error || step.type === 'tool-failed' }">{{ step.error || step.output }}</pre>
       </div>
     </div>
   </div>
@@ -31,10 +31,10 @@ import { ref, computed } from 'vue'
 
 const props = defineProps({ step: { type: Object, required: true } })
 
-const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋' }
+const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'tool-failed': '⚠️' }
 const icon = iconMap[props.step.type] || '🔧'
 
-const expanded = ref(false)
+const expanded = ref(true)
 const hasDetail = computed(() => !!(props.step.input || props.step.output || props.step.error))
 
 function toggle() {

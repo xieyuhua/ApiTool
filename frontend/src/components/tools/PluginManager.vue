@@ -194,18 +194,31 @@
                       <el-input :model-value="tableSemValue(row.connId, row.database, row.table)"
                         @update:model-value="setTableSemValue(row.connId, row.database, row.table, $event)"
                         size="small" placeholder="维护此表的整体语义（如：订单主表，记录用户下单信息）" />
+                      <el-button size="small" :loading="genLoading === ('T|' + row.table)"
+                        @click="genSemantic(row.connId, row.database, row.table, '', '', tableSemValue(row.connId, row.database, row.table))">AI 生成</el-button>
+                      <el-button size="small" type="primary" plain :loading="genAllLoading === row.table"
+                        @click="genSemanticAll(row.connId, row.database, row.table, row.columns)">AI 生成全部</el-button>
                     </div>
                     <el-table :data="row.columns || []" size="small" border class="col-table">
                       <el-table-column prop="name" label="字段名" min-width="140" />
                       <el-table-column prop="type" label="类型" min-width="110" />
                       <el-table-column prop="comment" label="库注释" min-width="130" show-overflow-tooltip />
-                      <el-table-column label="中文语义（维护）" min-width="220">
+                      <el-table-column label="中文语义（维护）" min-width="300">
                         <template #default="{ row: c }">
-                          <el-input :model-value="semValue(row.connId, row.database, row.table, c.name)"
-                            @update:model-value="setSemValue(row.connId, row.database, row.table, c.name, $event)"
-                            size="small" placeholder="如：订单创建时间" />
+                          <div class="sem-edit">
+                            <el-input :model-value="semValue(row.connId, row.database, row.table, c.name)"
+                              @update:model-value="setSemValue(row.connId, row.database, row.table, c.name, $event)"
+                              size="small" placeholder="如：订单创建时间" />
+                            <el-button size="small" :loading="genLoading === ('C|' + row.table + '|' + c.name)"
+                              @click="genSemantic(row.connId, row.database, row.table, c.name, c.type, semValue(row.connId, row.database, row.table, c.name))">AI 生成</el-button>
+                          </div>
                         </template>
                        </el-table-column>
+                      <el-table-column label="操作" width="80" align="center" fixed="right">
+                        <template #default="{ row: c }">
+                          <el-button size="small" text type="danger" @click="removeField(row, c)">删除</el-button>
+                        </template>
+                      </el-table-column>
                     </el-table>
                   </template>
                 </el-table-column>
@@ -300,7 +313,7 @@ import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn } from '../../store.js'
+import { pluginConnections, addPluginConn, updatePluginConn, removePluginConn, callAI } from '../../store.js'
 import { AgentAPI } from '../agent/agentApi'
 
 // 当前激活用于数据分析的数据库连接 ID（用于卡片/详情展示徽标）
@@ -571,6 +584,99 @@ function setTableSemValue(connId, database, table, v) {
   if (v && v.trim()) agentCfg.dbSemantics[k] = v.trim()
   else delete agentCfg.dbSemantics[k]
   debouncedSave()
+}
+// AI 一键生成语义：根据表/字段名、类型、已有注释，让模型生成简洁中文业务描述
+const genLoading = ref('') // 正在生成的 key（表级或 表|列），用于按钮 loading
+const genAllLoading = ref('') // 正在批量生成整张表语义的表名
+// 删除单个字段：从已同步表结构中移除该列，并清除其语义
+function removeField(t, col) {
+  if (!t || !col) return
+  const k = dbKey(t.connId, t.database, t.table)
+  const s = agentCfg.dbSchemas[k]
+  if (!s || !Array.isArray(s.columns)) return
+  const idx = s.columns.findIndex(c => c.name === col.name)
+  if (idx < 0) return
+  s.columns.splice(idx, 1)
+  if (agentCfg.dbSemantics) delete agentCfg.dbSemantics[semKey(t.connId, t.database, t.table, col.name)]
+  saveAgentCfg()
+  ElMessage.success('已删除字段「' + col.name + '」')
+}
+// 批量 AI 生成：一次生成整张表的表语义 + 所有字段语义
+async function genSemanticAll(connId, database, table, columns) {
+  if (genAllLoading.value) return
+  genAllLoading.value = table
+  try {
+    const dbType = (selected.value && selected.value.dbType) || '未知'
+    const colList = Array.isArray(columns) ? columns : []
+    const colLines = colList.map((c, i) =>
+      (i + 1) + '. 字段名=' + c.name + '，类型=' + (c.type || '未知') + '，库注释=' + (c.comment && c.comment.trim() ? c.comment.trim() : '无')
+    ).join('\n')
+    const sys = '你是一名资深数据架构师与业务分析师。请为给定的数据库表生成语义说明。必须只返回一个 JSON 对象（不要任何解释、不要 markdown 代码块），结构为：{"tableSem":"整张表的业务含义（一句话，不超过40字）","fields":{"字段名":"该字段的中文业务描述（一句话，不超过30字）"}}。字段名必须与输入完全一致。'
+    const user = [
+      '数据库类型：' + dbType,
+      '库名：' + database,
+      '表名：' + table,
+      '字段列表（共 ' + colList.length + ' 个）：',
+      colLines || '（无字段）',
+    ].join('\n')
+    const out = await callAI([
+      { role: 'system', content: sys },
+      { role: 'user', content: user },
+    ], { maxTokens: 1500 })
+    const text = (out || '').trim()
+    if (!text) { ElMessage.warning('AI 未返回结果'); return }
+    // 兼容模型可能包裹 ```json ... ``` 的情况
+    let jsonStr = text
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    if (fence) jsonStr = fence[1].trim()
+    let parsed
+    try { parsed = JSON.parse(jsonStr) } catch (e) { ElMessage.error('AI 返回格式无法解析，请重试'); return }
+    let n = 0
+    if (parsed && parsed.tableSem && parsed.tableSem.trim()) {
+      setTableSemValue(connId, database, table, parsed.tableSem.trim()); n++
+    }
+    if (parsed && parsed.fields && typeof parsed.fields === 'object') {
+      for (const c of colList) {
+        const v = parsed.fields[c.name]
+        if (v && v.trim()) { setSemValue(connId, database, table, c.name, v.trim()); n++ }
+      }
+    }
+    if (n > 0) ElMessage.success('已批量生成 ' + n + ' 条语义')
+    else ElMessage.warning('未解析到可写入的语义')
+  } catch (e) {
+    ElMessage.error('批量生成失败：' + String(e))
+  } finally {
+    genAllLoading.value = ''
+  }
+}
+async function genSemantic(connId, database, table, column, type, existing) {
+  const isTable = !column
+  const gkey = isTable ? ('T|' + table) : ('C|' + table + '|' + column)
+  if (genLoading.value) return
+  genLoading.value = gkey
+  try {
+    const sys = '你是一名资深数据架构师与业务分析师。请根据给定的数据库表/字段信息，用简洁准确的中文描述其业务含义（一句话，不超过40字），不要包含表名或字段名本身，不要解释，直接输出描述文本。'
+    const user = [
+      '数据库类型：' + (selected.value && selected.value.dbType ? selected.value.dbType : '未知'),
+      '库名：' + database,
+      '表名：' + table,
+      isTable ? '范围：整张表的业务含义' : ('字段名：' + column + '\n字段类型：' + (type || '未知')),
+      '已有注释：' + (existing && existing.trim() ? existing.trim() : '（无）'),
+    ].join('\n')
+    const out = await callAI([
+      { role: 'system', content: sys },
+      { role: 'user', content: user },
+    ], { maxTokens: 200 })
+    const text = (out || '').trim()
+    if (!text) { ElMessage.warning('AI 未返回结果'); return }
+    if (isTable) setTableSemValue(connId, database, table, text)
+    else setSemValue(connId, database, table, column, text)
+    ElMessage.success('已生成语义')
+  } catch (e) {
+    ElMessage.error('生成失败：' + String(e))
+  } finally {
+    genLoading.value = ''
+  }
 }
 function toggleExpand(table) {
   const s = new Set(expandedTables.value)
@@ -1000,6 +1106,8 @@ function removeConn(id) {
 .db-mgr-title { font-weight: 600; font-size: 14px; }
 .db-mgr-tools { display: flex; align-items: center; gap: 8px; }
 .db-autosave { font-size: 12px; color: #67c23a; background: #f0f9eb; border: 1px solid #e1f3d8; border-radius: 4px; padding: 1px 8px; white-space: nowrap; }
+.sem-edit { display: flex; align-items: center; gap: 6px; }
+.sem-edit .el-input { flex: 1; }
 .db-mgr-body { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
 .db-pick { border: 1px solid #ebeef5; border-radius: 8px; padding: 10px; background: #fafbfc; }
 .db-pick-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: 600; font-size: 13px; color: #1d2129; }

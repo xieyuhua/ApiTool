@@ -41,7 +41,7 @@ apitool/
 | `store` | **存储门面**：SQLite/MySQL/JSON 三后端切换、旧 JSON 自动导入、读写加锁 | `model`, `store/db` |
 | `store/db` | DB 抽象、`schema` DDL、SQLite 与 MySQL 实现、往返测试 | — |
 | `bus` | 事件总线，把后端事件转发给前端（解耦后端与 UI 刷新） | `model` |
-| `agent` | AI Agent 编排：多会话、MCP（stdio/http）、内置工具、Token 统计 | `ai`, `bus`, `store`, `model` |
+| `agent` | AI Agent 编排：多会话、MCP（stdio/http）、内置工具（文件/系统/db_schema/db_query 等）、Token 统计；`db_schema`/`db_query` 复用 `plugins` 连接池并叠加 `agent.json` 中维护的表/字段语义 | `ai`, `bus`, `store`, `model`, `plugins` |
 | `ai` | AI 底层调用（`Chat`/`ChatRaw`/字段描述生成），以 `Host` 接口解耦宿主 | `model` |
 | `testing` | 测试引擎：用例生成、执行、报告导出 | `model`, `httpx`, `store` |
 | `tool` | 通用工具（Hash/HMAC/对称加解密），由 App 嵌入提升给 Wails 前端 | `crypto` |

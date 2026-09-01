@@ -222,7 +222,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 			sb.WriteString(fmt.Sprintf("> 表语义：%s\n\n", tsem))
 		}
 		if len(s.Columns) == 0 {
-			sb.WriteString("_（无字段信息）_\n")
+			sb.WriteString("_（未读取到字段：请确认表名 '" + s.Table + "' 在库 '" + database + "' 中是否存在、库名/表名大小写是否匹配、当前账号是否有该表的 SELECT 权限）_\n")
 		} else {
 			sb.WriteString("| 字段 | 类型 | 可空 | 默认值 | 注释/语义 |\n")
 			sb.WriteString("| --- | --- | --- | --- | --- |\n")

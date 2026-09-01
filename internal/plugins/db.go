@@ -52,9 +52,9 @@ func (s *dbSession) Close() error {
 	return nil
 }
 
-func dbFactory(conn model.PluginConn) func() (interface{}, func(), error) {
+func dbFactory(conn model.PluginConn, database string) func() (interface{}, func(), error) {
 	return func() (interface{}, func(), error) {
-		dsn := buildDBDSN(conn, "")
+		dsn := buildDBDSN(conn, database)
 		var dbType string
 		var db *sql.DB
 		var err error
@@ -247,7 +247,7 @@ func cellToString(v interface{}) string {
 
 // PluginDBTest 连接测试（不指定数据库）
 func PluginDBTest(conn model.PluginConn) PluginOpResult {
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|", dbFactory(conn, ""), func(v interface{}) error {
 		s := v.(*dbSession)
 		var res *DBRow
 		var e error
@@ -276,7 +276,7 @@ func PluginDBTest(conn model.PluginConn) PluginOpResult {
 // PluginDBDatabases 列出所有数据库
 func PluginDBDatabases(conn model.PluginConn) (DBInfo, error) {
 	var info DBInfo
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|", dbFactory(conn, ""), func(v interface{}) error {
 		s := v.(*dbSession)
 		var res *DBRow
 		var e error
@@ -306,7 +306,7 @@ func PluginDBDatabases(conn model.PluginConn) (DBInfo, error) {
 // PluginDBTables 列出某库的表
 func PluginDBTables(conn model.PluginConn, database string) ([]DBTable, error) {
 	var tables []DBTable
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|"+database, dbFactory(conn, database), func(v interface{}) error {
 		s := v.(*dbSession)
 		var res *DBRow
 		var e error
@@ -358,7 +358,7 @@ func PluginDBTables(conn model.PluginConn, database string) ([]DBTable, error) {
 // PluginDBQuery 执行查询（SELECT）
 func PluginDBQuery(conn model.PluginConn, req DBQueryReq) (*DBRow, error) {
 	var result *DBRow
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|"+req.Database, dbFactory(conn, req.Database), func(v interface{}) error {
 		s := v.(*dbSession)
 		q := req.SQL
 		if req.Limit > 0 && s.dbType != "postgres" {
@@ -390,7 +390,7 @@ func PluginDBQuery(conn model.PluginConn, req DBQueryReq) (*DBRow, error) {
 // PluginDBExec 执行 DML/DDL（INSERT/UPDATE/DELETE/CREATE...）
 func PluginDBExec(conn model.PluginConn, req DBExecReq) (int64, error) {
 	var affected int64
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|"+req.Database, dbFactory(conn, req.Database), func(v interface{}) error {
 		s := v.(*dbSession)
 		if s.dbType != "postgres" && req.Database != "" {
 			if _, e := s.mysql.exec("USE " + quoteIdent(s.dbType, req.Database)); e != nil {
@@ -425,7 +425,7 @@ func escapeQuote(s string) string {
 // database 指定库名；table 指定表名。
 func PluginDBColumns(conn model.PluginConn, database, table string) ([]DBColumn, error) {
 	var cols []DBColumn
-	err := withConn(connKey(conn), dbFactory(conn), func(v interface{}) error {
+	err := withConn(connKey(conn)+"|"+database, dbFactory(conn, database), func(v interface{}) error {
 		s := v.(*dbSession)
 		var q string
 		switch s.dbType {
@@ -440,7 +440,7 @@ func PluginDBColumns(conn model.PluginConn, database, table string) ([]DBColumn,
 			}
 			q = fmt.Sprintf(`SELECT c.COLUMN_NAME, c.DATA_TYPE, c.NULLABLE, c.DATA_DEFAULT, n.COMMENTS FROM ALL_TAB_COLUMNS c LEFT JOIN ALL_COL_COMMENTS n ON n.TABLE_NAME=c.TABLE_NAME AND n.COLUMN_NAME=c.COLUMN_NAME AND n.OWNER=c.OWNER WHERE c.TABLE_NAME=%s AND c.OWNER=%s ORDER BY c.COLUMN_ID`, quoteStr(strings.ToUpper(table)), owner)
 		default: // mysql
-			q = fmt.Sprintf("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ORDINAL_POSITION", quoteStr(database), quoteStr(table))
+			q = fmt.Sprintf("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=%s ORDER BY ORDINAL_POSITION", quoteStr(table))
 		}
 		res, e := s.query(q)
 		if e != nil {
@@ -510,7 +510,7 @@ func resolveTables(conn model.PluginConn, database string, tables []string) ([]s
 
 // tableRowCount 取表行数（用于结构描述中标注规模）
 func tableRowCount(conn model.PluginConn, database, table string) (int64, error) {
-	res, err := PluginDBQuery(conn, DBQueryReq{Database: database, SQL: "SELECT COUNT(*) FROM " + quoteIdent(conn.DbType, table), Limit: 0})
+	res, err := PluginDBQuery(conn, DBQueryReq{Database: database, SQL: "SELECT COUNT(*) FROM " + quoteIdent(conn.DbType, database) + "." + quoteIdent(conn.DbType, table), Limit: 0})
 	if err != nil {
 		return 0, err
 	}
