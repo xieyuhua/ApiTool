@@ -145,70 +145,91 @@
           ✓ 当前分析连接：Agent 执行 db_schema / db_query 时将使用此连接（同一时间仅一个）
         </div>
 
-        <div class="pm-sub">同步表结构 / 字段语义维护</div>
-        <div class="db-op-bar">
-          <el-select v-model="selDatabase" size="small" placeholder="选择数据库 / Schema" style="width:240px" filterable @change="onDbDatabaseChange">
-            <el-option v-for="d in dbDatabases" :key="d" :label="d" :value="d" />
-          </el-select>
-          <el-button size="small" type="success" :loading="syncing" :disabled="!selTables.length" @click="syncTableSchema">同步选中表结构</el-button>
-        </div>
-        <div v-if="!selDatabase" class="pm-hint">请先选择一个数据库 / Schema，再勾选表同步结构、维护字段语义。数据将与「AI Agent → 数据连接」共享。</div>
-
-        <div v-if="selDatabase" class="db-cols-layout">
-          <div class="db-col">
-            <div class="form-subtitle">
-              待同步表（共 {{ dbTables.length }} 张）
-              <el-input v-model="tblFilter" size="small" placeholder="搜索表名" clearable class="tbl-search" />
-            </div>
-            <div v-if="dbTables.length" class="table-pick">
-              <el-checkbox-group v-model="selTables" class="tp-list">
-                <el-checkbox v-for="t in filteredTables" :key="t.name" :value="t.name" border size="small"
-                  :disabled="!!agentCfg.dbSchemas && !!agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]">
-                  {{ t.name }}<span class="tp-rows" v-if="t.rows"> ({{ t.rows }})</span>
-                  <span v-if="agentCfg.dbSchemas && agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]" class="tp-synced">已同步</span>
-                </el-checkbox>
-              </el-checkbox-group>
-              <div v-if="!filteredTables.length" class="empty-hint">没有匹配的表。</div>
-            </div>
-            <div v-else class="empty-hint">该库暂无表或尚未读取。</div>
-          </div>
-
-          <div class="db-col">
-            <div class="form-subtitle">
-              已同步表结构（{{ syncedTables.length }} 张）
-              <el-input v-model="syncedFilter" size="small" placeholder="搜索表名" clearable class="tbl-search" />
-            </div>
-            <div v-if="syncedTables.length" class="synced-list">
-              <div v-for="t in filteredSynced" :key="t.table" class="card sem-card">
-                <div class="card-head">
-                  <span class="expand-toggle" @click="toggleExpand(t.table)">{{ expandedTables.has(t.table) ? '▾' : '▸' }}</span>
-                  <span class="conn-name">{{ t.table }}</span>
-                  <span class="spacer" />
-                  <span class="tp-count">{{ (t.columns || []).length }} 字段</span>
-                  <el-button size="small" text type="danger" @click="removeSynced(t)">移除同步</el-button>
-                </div>
-                <div class="table-sem-row">
-                  <span class="sem-col sm">表语义</span>
-                  <el-input :model-value="tableSemValue(t.connId, t.database, t.table)"
-                    @update:model-value="setTableSemValue(t.connId, t.database, t.table, $event)"
-                    size="small" placeholder="维护此表的整体语义（如：订单主表，记录用户下单信息）" class="sem-input" />
-                </div>
-                <div v-if="expandedTables.has(t.table)">
-                  <div v-for="col in columnsOf(t)" :key="col.name" class="sem-row">
-                    <span class="sem-col">{{ col.name }}</span>
-                    <span class="sem-type">{{ col.type }}<template v-if="col.comment"> · {{ col.comment }}</template></span>
-                    <el-input :model-value="semValue(t.connId, t.database, t.table, col.name)"
-                      @update:model-value="setSemValue(t.connId, t.database, t.table, col.name, $event)"
-                      size="small" placeholder="维护此字段的中文语义（如：订单创建时间）" class="sem-input" />
-                  </div>
-                  <div v-if="!columnsOf(t).length" class="empty-hint">该表无字段信息。</div>
-                </div>
+        <el-card class="db-mgr-card" shadow="never">
+          <template #header>
+            <div class="db-mgr-head">
+              <span class="db-mgr-title">表结构同步 / 字段语义维护</span>
+              <div class="db-mgr-tools">
+                <span class="db-autosave">修改后自动保存</span>
+                <el-select v-model="selDatabase" size="small" placeholder="选择数据库 / Schema" style="width:220px" filterable @change="onDbDatabaseChange">
+                  <el-option v-for="d in dbDatabases" :key="d" :label="d" :value="d" />
+                </el-select>
+                <el-button size="small" type="success" :loading="syncing" :disabled="!selTables.length" @click="syncTableSchema">同步选中表结构</el-button>
               </div>
-              <div v-if="!filteredSynced.length" class="empty-hint">没有匹配的已同步表。</div>
             </div>
-            <div v-else class="empty-hint">尚未同步任何表结构。在左侧勾选表后点「同步选中表结构」。</div>
+          </template>
+
+          <div v-if="!selDatabase" class="pm-hint pm-block">请先在右上角选择一个数据库 / Schema，再勾选表同步结构、维护字段语义。数据将与「AI Agent → 数据连接」共享。</div>
+
+          <div v-else class="db-mgr-body">
+            <!-- 左侧：待同步表 -->
+            <div class="db-pick">
+              <div class="db-pick-bar">
+                <span>待同步表（{{ dbTables.length }}）</span>
+                <el-input v-model="tblFilter" size="small" placeholder="搜索表名" clearable style="width:150px" />
+              </div>
+              <div class="table-pick">
+                <el-checkbox-group v-model="selTables" class="tp-list">
+                  <el-checkbox v-for="t in filteredTables" :key="t.name" :value="t.name" border size="small"
+                    :disabled="!!agentCfg.dbSchemas && !!agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]">
+                    {{ t.name }}<span class="tp-rows" v-if="t.rows"> ({{ t.rows }})</span>
+                    <span v-if="agentCfg.dbSchemas && agentCfg.dbSchemas[dbKey(selected.id, selDatabase, t.name)]" class="tp-synced">已同步</span>
+                  </el-checkbox>
+                </el-checkbox-group>
+                <div v-if="!filteredTables.length" class="empty-hint">没有匹配的表。</div>
+              </div>
+            </div>
+
+            <!-- 右侧：已同步表结构（表格化，展开看字段） -->
+            <div class="db-synced">
+              <div class="db-pick-bar">
+                <span>已同步表结构（{{ syncedTables.length }}）</span>
+                <el-input v-model="syncedFilter" size="small" placeholder="搜索表名" clearable style="width:150px" />
+              </div>
+              <el-table v-if="syncedTables.length" :data="filteredSynced" size="small" border class="synced-table" max-height="460" row-key="table">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div class="table-sem-inline">
+                      <span class="sem-col sm">表语义</span>
+                      <el-input :model-value="tableSemValue(row.connId, row.database, row.table)"
+                        @update:model-value="setTableSemValue(row.connId, row.database, row.table, $event)"
+                        size="small" placeholder="维护此表的整体语义（如：订单主表，记录用户下单信息）" />
+                    </div>
+                    <el-table :data="row.columns || []" size="small" border class="col-table">
+                      <el-table-column prop="name" label="字段名" min-width="140" />
+                      <el-table-column prop="type" label="类型" min-width="110" />
+                      <el-table-column prop="comment" label="库注释" min-width="130" show-overflow-tooltip />
+                      <el-table-column label="中文语义（维护）" min-width="220">
+                        <template #default="{ row: c }">
+                          <el-input :model-value="semValue(row.connId, row.database, row.table, c.name)"
+                            @update:model-value="setSemValue(row.connId, row.database, row.table, c.name, $event)"
+                            size="small" placeholder="如：订单创建时间" />
+                        </template>
+                       </el-table-column>
+                    </el-table>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="table" label="表名" min-width="180" />
+                <el-table-column label="字段数" width="90" align="center">
+                  <template #default="{ row }">{{ (row.columns || []).length }}</template>
+                </el-table-column>
+                <el-table-column label="表语义" min-width="200" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span v-if="tableSemValue(row.connId, row.database, row.table)">{{ tableSemValue(row.connId, row.database, row.table) }}</span>
+                    <span v-else class="muted">未维护</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100" align="center" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="danger" @click="removeSynced(row)">移除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div v-else class="empty-hint">尚未同步任何表结构。在左侧勾选表后点「同步选中表结构」。</div>
+              <div v-if="syncedTables.length && !filteredSynced.length" class="empty-hint">没有匹配的已同步表。</div>
+            </div>
           </div>
-        </div>
+        </el-card>
       </div>
 
       <!-- 兜底：未知分类 -->
@@ -406,23 +427,42 @@ watch(selected, (val) => {
   if (val.category === 'ssh') openSsh()
   else if (val.category === 'sftp' || val.category === 'ftp') listRemote()
   else if (val.category === 'db') {
-    selDatabase.value = ''
-    selTables.value = []
-    dbDatabases.value = []
-    dbTables.value = []
-    tblFilter.value = ''
-    syncedFilter.value = ''
-    expandedTables.value = new Set()
-    loadAgentCfg().then(() => { activeConnId.value = agentCfg.activeDBConn })
-    loadDbDatabases()
+    openDbConn(val)
   }
 })
+
+async function openDbConn(val) {
+  selTables.value = []
+  dbDatabases.value = []
+  dbTables.value = []
+  tblFilter.value = ''
+  syncedFilter.value = ''
+  expandedTables.value = new Set()
+  await loadAgentCfg()
+  activeConnId.value = agentCfg.activeDBConn
+  await loadDbDatabases()
+  // 恢复上次在该连接中选中的库（若仍存在）
+  const lastDB = (agentCfg.dbLastDB && agentCfg.dbLastDB[val.id]) || ''
+  if (lastDB && dbDatabases.value.includes(lastDB)) {
+    selDatabase.value = lastDB
+    await loadDbTables(val, lastDB)
+  } else {
+    selDatabase.value = ''
+  }
+}
 async function loadDbDatabases() {
   try {
     const dbs = await call(PluginDBDatabases, selected.value)
     const list = Array.isArray(dbs) ? dbs : (dbs && dbs.databases) || []
     dbDatabases.value = (list || []).map(d => (typeof d === 'string' ? d : d.name ?? d))
   } catch (e) { dbDatabases.value = [] }
+}
+async function loadDbTables(conn, database) {
+  dbTables.value = []
+  if (!database) return
+  const tabs = await call(PluginDBTables, conn, database)
+  const tabList = Array.isArray(tabs) ? tabs : (tabs && tabs.tables) || []
+  dbTables.value = (tabList || []).map(t => ({ name: t.name ?? t, rows: t.rows ?? 0 }))
 }
 
 // ===================== 连接 CRUD =====================
@@ -520,6 +560,7 @@ function setSemValue(connId, database, table, col, v) {
   const k = semKey(connId, database, table, col)
   if (v && v.trim()) agentCfg.dbSemantics[k] = v.trim()
   else delete agentCfg.dbSemantics[k]
+  debouncedSave()
 }
 function tableSemValue(connId, database, table) {
   return (agentCfg.dbSemantics && agentCfg.dbSemantics[tableSemKey(connId, database, table)]) || ''
@@ -529,6 +570,7 @@ function setTableSemValue(connId, database, table, v) {
   const k = tableSemKey(connId, database, table)
   if (v && v.trim()) agentCfg.dbSemantics[k] = v.trim()
   else delete agentCfg.dbSemantics[k]
+  debouncedSave()
 }
 function toggleExpand(table) {
   const s = new Set(expandedTables.value)
@@ -542,6 +584,7 @@ async function loadAgentCfg() {
     agentCfg.activeDBConn = cfg.activeDBConn || ''
     agentCfg.dbSchemas = cfg.dbSchemas || {}
     agentCfg.dbSemantics = cfg.dbSemantics || {}
+    agentCfg.dbLastDB = cfg.dbLastDB || {}
   } catch (e) { /* ignore */ }
 }
 async function saveAgentCfg() {
@@ -550,8 +593,15 @@ async function saveAgentCfg() {
       activeDBConn: agentCfg.activeDBConn,
       dbSchemas: agentCfg.dbSchemas,
       dbSemantics: agentCfg.dbSemantics,
+      dbLastDB: agentCfg.dbLastDB,
     })
   } catch (e) { ElMessage.error('保存失败：' + String(e)) }
+}
+// 输入语义时防抖落盘，避免每次按键都写磁盘
+let _saveTimer = null
+function debouncedSave() {
+  if (_saveTimer) clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => { _saveTimer = null; saveAgentCfg() }, 300)
 }
 // 启用此连接作为唯一分析连接（同时仅允许一个）
 async function setActiveConn(val) {
@@ -567,11 +617,12 @@ async function setActiveConn(val) {
 }
 async function onDbDatabaseChange() {
   selTables.value = []
-  dbTables.value = []
   if (!selDatabase.value) return
-  const tabs = await call(PluginDBTables, selected.value, selDatabase.value)
-  const tabList = Array.isArray(tabs) ? tabs : (tabs && tabs.tables) || []
-  dbTables.value = (tabList || []).map(t => ({ name: t.name ?? t, rows: t.rows ?? 0 }))
+  // 记住该连接上次选中的库，再次打开时自动恢复
+  if (!agentCfg.dbLastDB) agentCfg.dbLastDB = {}
+  agentCfg.dbLastDB[selected.value.id] = selDatabase.value
+  await saveAgentCfg()
+  await loadDbTables(selected.value, selDatabase.value)
 }
 async function syncTableSchema() {
   if (!selTables.value.length) return
@@ -943,32 +994,29 @@ function removeConn(id) {
 /* 详情：当前分析连接横幅 */
 .pm-active-banner { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #e8f5e9; color: #2e7d32; font-size: 12px; font-weight: 600; }
 
-/* 数据库连接管理（同步表结构 / 字段语义维护） */
-.db-op-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.db-cols-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
-.db-col { min-width: 0; }
-.db-col .form-subtitle { margin-top: 0; }
-.tbl-search { width: 160px; float: right; }
-.synced-list { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow: auto; padding-right: 4px; }
-.expand-toggle { cursor: pointer; user-select: none; margin-right: 6px; color: #409eff; font-size: 12px; }
-.table-sem-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid #ebeef5; }
-.sem-col.sm { min-width: 48px; color: #888; font-size: 12px; }
-.empty-hint { color: #a9aeb8; font-size: 12px; padding: 10px 0; }
-.pm-test { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
-.pm-test.ok { color: #2e7d32; background: #e8f5e9; }
-.pm-test.err { color: #c62828; background: #ffebee; }
-.card { border: 1px solid #ebeef5; border-radius: 8px; background: #fff; }
-.card-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #f2f3f5; }
-.conn-name { font-weight: 600; }
-.spacer { flex: 1; }
-.tp-count { color: #909399; font-size: 12px; }
-.table-pick { max-height: 420px; overflow: auto; }
+/* 数据库连接管理（同步表结构 / 字段语义维护）—— 后台系统风格 */
+.db-mgr-card { margin-top: 10px; border-radius: 8px; }
+.db-mgr-head { display: flex; align-items: center; justify-content: space-between; }
+.db-mgr-title { font-weight: 600; font-size: 14px; }
+.db-mgr-tools { display: flex; align-items: center; gap: 8px; }
+.db-autosave { font-size: 12px; color: #67c23a; background: #f0f9eb; border: 1px solid #e1f3d8; border-radius: 4px; padding: 1px 8px; white-space: nowrap; }
+.db-mgr-body { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+.db-pick { border: 1px solid #ebeef5; border-radius: 8px; padding: 10px; background: #fafbfc; }
+.db-pick-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: 600; font-size: 13px; color: #1d2129; }
+.db-synced { min-width: 0; }
+.table-pick { max-height: 460px; overflow: auto; }
 .tp-list { display: flex; flex-direction: column; gap: 6px; }
 .tp-list :deep(.el-checkbox) { margin-right: 0; width: 100%; }
 .tp-synced { color: #2e7d32; font-size: 11px; margin-left: 4px; }
-.sem-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px; }
-.sem-col { min-width: 120px; color: #606266; font-size: 12px; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sem-type { min-width: 140px; color: #909399; font-size: 12px; }
-.sem-input { flex: 1; }
-@media (max-width: 860px) { .db-cols-layout { grid-template-columns: 1fr; } }
+.synced-table { background: #fff; }
+.col-table { margin: 8px 12px 12px; }
+.table-sem-inline { display: flex; align-items: center; gap: 10px; padding: 8px 12px 4px; }
+.sem-col.sm { min-width: 52px; color: #888; font-size: 12px; }
+.muted { color: #c0c4cc; }
+.pm-hint.pm-block { margin: 4px 0; }
+.pm-test { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.pm-test.ok { color: #2e7d32; background: #e8f5e9; }
+.pm-test.err { color: #c62828; background: #ffebee; }
+.empty-hint { color: #a9aeb8; font-size: 12px; padding: 10px 0; }
+@media (max-width: 860px) { .db-mgr-body { grid-template-columns: 1fr; } }
 </style>

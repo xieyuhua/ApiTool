@@ -84,6 +84,7 @@ export namespace agent {
 	    activeDBConn: string;
 	    dbSemantics: Record<string, string>;
 	    dbSchemas: Record<string, DBSyncedTable>;
+	    dbLastDB: Record<string, string>;
 	    temperature: number;
 	    currentUserId: string;
 	    tools: ToolFlags;
@@ -108,6 +109,7 @@ export namespace agent {
 	        this.activeDBConn = source["activeDBConn"];
 	        this.dbSemantics = source["dbSemantics"];
 	        this.dbSchemas = this.convertValues(source["dbSchemas"], DBSyncedTable, true);
+	        this.dbLastDB = source["dbLastDB"];
 	        this.temperature = source["temperature"];
 	        this.currentUserId = source["currentUserId"];
 	        this.tools = this.convertValues(source["tools"], ToolFlags);

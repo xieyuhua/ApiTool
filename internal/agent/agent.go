@@ -105,8 +105,8 @@ func BuiltinToolMeta() []BuiltinToolDef {
 		{Name: "get_time", Icon: "⏰", Group: "常用工具", Default: "当用户需要知道当前日期/时间，或指定时区（如 Asia/Shanghai）的时间时使用。返回格式化的本地时间。"},
 		{Name: "calc", Icon: "🧮", Group: "常用工具", Default: "当用户需要计算一个算术表达式时使用，仅支持数字与 + - * / 和括号 ()。传入 expr，例如 \"1+2*3\"。返回计算结果。"},
 		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "当用户需要执行一条本机 shell 命令（如 git、npm、系统命令）并获取其输出时使用。传入 command 字符串。⚠️ 会真实执行命令，请仅在确定安全时使用。"},
-		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "读取已配置数据库连接中的表结构（库/表/字段名/类型/可空/默认值/注释），用于把数据库结构同步给大模型做数据分析。支持 MySQL、PostgreSQL、Oracle。tables 留空则返回该库全部表结构。需要先到「插件/数据库连接」配置连接并启用本工具。"},
-		{Name: "db_query", Icon: "🔎", Group: "数据库连接分析", Default: "在已配置的连接上执行只读 SELECT 查询并返回结果（限制行数），用于采样数据辅助分析。支持 MySQL、PostgreSQL、Oracle。禁止写操作。"},
+		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "读取已配置数据库连接中的表结构（库/表/字段名/类型/可空/默认值/注释），把数据库结构同步给大模型做数据分析。支持 MySQL、PostgreSQL、Oracle。返回的字段注释会叠加用户在「插件/数据库连接」中维护的表级与字段级语义（比数据库自带注释更准）。connId 与 database 为必填；tables 留空则返回该库全部表（数据量大时建议只指定需要的表）。connId 可省略，省略时自动使用当前激活的分析连接。"},
+		{Name: "db_query", Icon: "🔎", Group: "数据库连接分析", Default: "在已配置的连接上执行只读 SELECT 查询并返回结果（限制行数），用于采样数据、核对数值或验证假设。支持 MySQL、PostgreSQL、Oracle。必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；connId 可省略（省略时用当前激活连接），但 database 与 sql 必填。结果过大时请补充 WHERE/LIMIT 条件。"},
 	}
 }
 
@@ -155,6 +155,8 @@ type AgentConfig struct {
 	DBSemantics map[string]string `json:"dbSemantics"`
 	// 数据连接管理中同步的表结构快照：key = connId|database|table（全小写），便于离线查看与再编辑语义
 	DBSchemas map[string]DBSyncedTable `json:"dbSchemas"`
+	// 每个数据库连接（connId）上次在「插件 / 数据库连接」中选中的 database，再次打开时自动恢复选中
+	DBLastDB map[string]string `json:"dbLastDB"`
 	Temperature    float64 `json:"temperature"`
 	CurrentUserID  string `json:"currentUserId"`  // 当前登录用户
 	Tools          ToolFlags `json:"tools"`       // 内置工具开关
@@ -235,7 +237,7 @@ func (m *Manager) agentFilePath() string {
 func defaultAgentData() AgentData {
 	return AgentData{
 		Config: AgentConfig{
-			SystemPrompt: "你是一个专业的 API 测试与开发智能助手，可以调用工具帮助用户完成任务。回答使用简体中文。",
+			SystemPrompt: "你是一个专业的 API 测试与数据库分析智能助手。\n\n工作原则：\n1. 优先用工具获取真实信息，不要臆测。需要数据库结构时使用 db_schema，需要采样数据时使用 db_query（仅只读 SELECT，禁止写操作）。\n2. 当 db_schema 返回的字段注释包含用户维护的「语义」时，应优先采用这些语义理解业务含义，而非仅凭字段名猜测。\n3. 涉及具体数据库连接时，如未显式指定 connId，请使用当前已激活的分析连接；若连接未配置或报错，明确提示用户去「插件 / 数据库连接」配置。\n4. 回答使用简体中文，结论需简洁、可验证；给出 SQL 或命令前先说明用途。",
 			Mode:         "react",
 			MaxLoops:     6,
 			ContextLimit: 20,

@@ -192,7 +192,7 @@ function call(fn, ...args) {
       <el-tab-pane label="运行配置" name="config">
         <div class="form-block">
           <label>自定义系统提示词</label>
-          <el-input v-model="local.config.systemPrompt" type="textarea" :rows="4" placeholder="设定 Agent 的角色与行为" />
+          <el-input v-model="local.config.systemPrompt" type="textarea" :rows="6" placeholder="设定 Agent 的角色与行为，例如：你是一个 API 测试与数据库分析助手，优先用工具获取真实信息，数据库查询仅用只读 SELECT，并优先采用用户维护的字段语义理解业务含义。回答使用简体中文。" />
         </div>
         <div class="form-row">
           <div class="form-col">

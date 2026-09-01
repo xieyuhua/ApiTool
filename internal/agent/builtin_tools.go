@@ -77,15 +77,15 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 			"command": map[string]interface{}{"type": "string", "description": "要执行的 shell 命令字符串，例如 \"ls -la\" 或 \"git status\""},
 		}, []string{"command"}},
 		"db_schema": {map[string]interface{}{
-			"connId": map[string]interface{}{"type": "string", "description": "数据库连接 ID（在 Agent「数据连接」管理中配置的 ID，如 mysql-1 / pg-1 / ora-1）"},
+			"connId": map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接（如 mysql-1 / pg-1 / ora-1）。可省略，省略时自动使用当前激活的分析连接"},
 			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）"},
-			"tables":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "要同步的表名列表；留空则同步该库全部表"},
+			"tables":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "要同步的表名列表；留空则同步该库全部表。建议仅在需要某几张表时才指定，以减少返回长度"},
 		}, []string{"connId", "database"}},
 		"db_query": {map[string]interface{}{
-			"connId":  map[string]interface{}{"type": "string", "description": "数据库连接 ID"},
-			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名"},
-			"sql":      map[string]interface{}{"type": "string", "description": "要执行的 SELECT 语句（禁止写操作）"},
-			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200"},
+			"connId":  map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接。可省略，省略时自动使用当前激活的分析连接"},
+			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）"},
+			"sql":      map[string]interface{}{"type": "string", "description": "要执行的只读查询语句，必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；尽量使用明确的列名与 LIMIT，避免 SELECT * 与全表扫描"},
+			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200；如结果过大请适当调小或补充 WHERE 条件"},
 		}, []string{"connId", "database", "sql"}},
 	}
 	var out []MCPTool
@@ -152,10 +152,10 @@ func findDBConn(m *Manager, connID string) (model.PluginConn, error) {
 			return c, nil
 		}
 	}
-	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（请先在「数据连接」管理中配置）", connID)
+	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（请先在「插件 / 数据库连接」中配置）", connID)
 }
 
-// dbSemantic 读取用户在「数据连接」管理中维护的字段/表语义。
+// dbSemantic 读取用户在「插件 / 数据库连接」中维护的字段/表语义。
 // key = connId|database|table|column（全小写）；column 为空时查表级语义（key 不含 column 段）。
 func dbSemantic(m *Manager, connID, database, table, column string) string {
 	if m == nil {
@@ -217,7 +217,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 			sb.WriteString(fmt.Sprintf("（约 %d 行）", s.Rows))
 		}
 		sb.WriteString("\n")
-		// 叠加用户在「数据连接」管理中维护的表级语义
+		// 叠加用户在「插件 / 数据库连接」中维护的表级语义
 		if tsem := dbSemantic(m, connID, database, s.Table, ""); tsem != "" {
 			sb.WriteString(fmt.Sprintf("> 表语义：%s\n\n", tsem))
 		}
@@ -231,7 +231,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 				if cmt == "" {
 					cmt = "—"
 				}
-				// 叠加用户在「数据连接」管理中维护的字段语义（优先于数据库自带注释）
+				// 叠加用户在「插件 / 数据库连接」中维护的字段语义（优先于数据库自带注释）
 				if sem := dbSemantic(m, connID, database, s.Table, c.Name); sem != "" {
 					if cmt == "" || cmt == "—" {
 						cmt = sem
