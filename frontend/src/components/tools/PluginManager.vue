@@ -194,8 +194,6 @@
                       <el-input :model-value="tableSemValue(row.connId, row.database, row.table)"
                         @update:model-value="setTableSemValue(row.connId, row.database, row.table, $event)"
                         size="small" placeholder="维护此表的整体语义（如：订单主表，记录用户下单信息）" />
-                      <el-button size="small" :loading="genLoading === ('T|' + row.table)"
-                        @click="genSemantic(row.connId, row.database, row.table, '', '', tableSemValue(row.connId, row.database, row.table))">AI 生成</el-button>
                       <el-button size="small" type="primary" plain :loading="genAllLoading === row.table"
                         @click="genSemanticAll(row.connId, row.database, row.table, row.columns)">AI 生成全部</el-button>
                     </div>
@@ -209,8 +207,6 @@
                             <el-input :model-value="semValue(row.connId, row.database, row.table, c.name)"
                               @update:model-value="setSemValue(row.connId, row.database, row.table, c.name, $event)"
                               size="small" placeholder="如：订单创建时间" />
-                            <el-button size="small" :loading="genLoading === ('C|' + row.table + '|' + c.name)"
-                              @click="genSemantic(row.connId, row.database, row.table, c.name, c.type, semValue(row.connId, row.database, row.table, c.name))">AI 生成</el-button>
                           </div>
                         </template>
                        </el-table-column>
@@ -586,7 +582,6 @@ function setTableSemValue(connId, database, table, v) {
   debouncedSave()
 }
 // AI 一键生成语义：根据表/字段名、类型、已有注释，让模型生成简洁中文业务描述
-const genLoading = ref('') // 正在生成的 key（表级或 表|列），用于按钮 loading
 const genAllLoading = ref('') // 正在批量生成整张表语义的表名
 // 删除单个字段：从已同步表结构中移除该列，并清除其语义
 function removeField(t, col) {
@@ -647,35 +642,6 @@ async function genSemanticAll(connId, database, table, columns) {
     ElMessage.error('批量生成失败：' + String(e))
   } finally {
     genAllLoading.value = ''
-  }
-}
-async function genSemantic(connId, database, table, column, type, existing) {
-  const isTable = !column
-  const gkey = isTable ? ('T|' + table) : ('C|' + table + '|' + column)
-  if (genLoading.value) return
-  genLoading.value = gkey
-  try {
-    const sys = '你是一名资深数据架构师与业务分析师。请根据给定的数据库表/字段信息，用简洁准确的中文描述其业务含义（一句话，不超过40字），不要包含表名或字段名本身，不要解释，直接输出描述文本。'
-    const user = [
-      '数据库类型：' + (selected.value && selected.value.dbType ? selected.value.dbType : '未知'),
-      '库名：' + database,
-      '表名：' + table,
-      isTable ? '范围：整张表的业务含义' : ('字段名：' + column + '\n字段类型：' + (type || '未知')),
-      '已有注释：' + (existing && existing.trim() ? existing.trim() : '（无）'),
-    ].join('\n')
-    const out = await callAI([
-      { role: 'system', content: sys },
-      { role: 'user', content: user },
-    ], { maxTokens: 200 })
-    const text = (out || '').trim()
-    if (!text) { ElMessage.warning('AI 未返回结果'); return }
-    if (isTable) setTableSemValue(connId, database, table, text)
-    else setSemValue(connId, database, table, column, text)
-    ElMessage.success('已生成语义')
-  } catch (e) {
-    ElMessage.error('生成失败：' + String(e))
-  } finally {
-    genLoading.value = ''
   }
 }
 function toggleExpand(table) {

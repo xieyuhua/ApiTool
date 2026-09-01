@@ -301,12 +301,15 @@ func partialTailLen(buf, marker string) int {
 func buildToolsPrompt(tools []MCPTool, skills []AgentSkill, mode string) string {
 	var sb strings.Builder
 	if len(skills) > 0 {
-		sb.WriteString("\n\n## 可用技能(Skill)\n遇到匹配场景时，请在思考中说明将使用哪个技能，并遵循其指引：\n")
+		sb.WriteString("\n\n## 可用技能(Skill)\n遇到匹配场景时，请在思考中说明将使用哪个技能，并严格遵循其指引作答（可叠加多个相关技能）：\n")
 		for _, s := range skills {
 			if !s.Enabled {
 				continue
 			}
 			sb.WriteString(fmt.Sprintf("- [%s] %s\n", s.Name, s.Description))
+			if strings.TrimSpace(s.Prompt) != "" {
+				sb.WriteString(fmt.Sprintf("  技能指引：\n%s\n", s.Prompt))
+			}
 		}
 	}
 	if len(tools) > 0 {

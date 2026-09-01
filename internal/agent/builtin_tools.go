@@ -180,7 +180,14 @@ func dbSemantic(m *Manager, connID, database, table, column string) string {
 	return ""
 }
 
-// builtinDBSchema 读取表结构（含字段、类型、注释、行数），整理为便于大模型理解的文本
+// dbSchemaKey 重建「插件 / 数据库连接」同步表结构在 DBSchemas 中的 key
+// （与前端 dbKey(connId, database, table) 保持一致：connId|database|table 全小写）。
+func dbSchemaKey(connID, database, table string) string {
+	return strings.ToLower(fmt.Sprintf("%s|%s|%s", connID, database, table))
+}
+
+// builtinDBSchema 返回用户在「插件 / 数据库连接」中同步配置的表结构（而非实时查库）。
+// 这样大模型只能基于你提供的表与字段来生成 SQL，避免引用未同步/不存在的表或字段。
 func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
 	database, _ := args["database"].(string)
@@ -190,28 +197,48 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	if connID == "" || database == "" {
 		return "", fmt.Errorf("缺少 connId 或 database 参数（可在「插件 / 数据库连接」中启用一个连接作为分析连接）")
 	}
-	conn, err := findDBConn(m, connID)
-	if err != nil {
-		return "", err
+	cfg := m.LoadAgentData().Config
+	if len(cfg.DBSchemas) == 0 {
+		return "尚未同步任何表结构。请在「插件 / 数据库连接」中打开该连接、选择数据库并执行「同步表结构」后，再使用本工具。", nil
 	}
-	var tables []string
+	// 解析要返回的表（仅在你同步配置的表范围内筛选）
+	var want []string
 	if t, ok := args["tables"].([]interface{}); ok {
 		for _, x := range t {
 			if s, ok := x.(string); ok && s != "" {
-				tables = append(tables, s)
+				want = append(want, s)
 			}
 		}
 	}
-	schemas, err := plugins.PluginDBSchema(conn, database, tables)
-	if err != nil {
-		return "", err
+	type selT struct {
+		key   string
+		table DBSyncedTable
 	}
-	if len(schemas) == 0 {
-		return fmt.Sprintf("库 %s 中没有表或未能读取到表结构。", database), nil
+	var picked []selT
+	if len(want) == 0 {
+		// 未指定表：返回该连接该库下所有已同步的表
+		for k, v := range cfg.DBSchemas {
+			if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
+				picked = append(picked, selT{key: k, table: v})
+			}
+		}
+	} else {
+		for _, name := range want {
+			k := dbSchemaKey(connID, database, name)
+			if v, ok := cfg.DBSchemas[k]; ok {
+				picked = append(picked, selT{key: k, table: v})
+			}
+		}
+	}
+	if len(picked) == 0 {
+		return fmt.Sprintf("未找到已同步的表（库 %s）。你当前仅可向模型提供已同步的表结构，请先在「插件 / 数据库连接」同步需要分析的表（如 %s）。",
+			database, exampleSyncedTables(cfg, connID, database)), nil
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# 数据库结构：%s（库 %s，共 %d 张表）\n\n", conn.DbType, database, len(schemas)))
-	for _, s := range schemas {
+	sb.WriteString(fmt.Sprintf("# 已同步的数据库结构（库 %s，共 %d 张表）\n", database, len(picked)))
+	sb.WriteString("> 以下仅是你已在「插件 / 数据库连接」中同步配置的表与字段。请**严格只基于下列表名与字段名**编写 SQL，不要臆测或使用未列出的表/字段。\n\n")
+	for _, p := range picked {
+		s := p.table
 		sb.WriteString(fmt.Sprintf("## 表 `%s`", s.Table))
 		if s.Rows > 0 {
 			sb.WriteString(fmt.Sprintf("（约 %d 行）", s.Rows))
@@ -222,7 +249,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 			sb.WriteString(fmt.Sprintf("> 表语义：%s\n\n", tsem))
 		}
 		if len(s.Columns) == 0 {
-			sb.WriteString("_（未读取到字段：请确认表名 '" + s.Table + "' 在库 '" + database + "' 中是否存在、库名/表名大小写是否匹配、当前账号是否有该表的 SELECT 权限）_\n")
+			sb.WriteString("_（该表已同步但未包含字段，请在连接管理中重新同步）_\n")
 		} else {
 			sb.WriteString("| 字段 | 类型 | 可空 | 默认值 | 注释/语义 |\n")
 			sb.WriteString("| --- | --- | --- | --- | --- |\n")
@@ -247,6 +274,61 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	return sb.String(), nil
 }
 
+// exampleSyncedTables 取该连接该库下已同步的若干表名，用于错误提示中给出示例
+func exampleSyncedTables(cfg AgentConfig, connID, database string) string {
+	var names []string
+	for _, v := range cfg.DBSchemas {
+		if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
+			names = append(names, v.Table)
+		}
+		if len(names) >= 3 {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return "可在连接管理中同步"
+	}
+	return "已同步的有：" + strings.Join(names, "、")
+}
+
+// syncedTableSet 返回该连接该库下已同步表名（小写）的集合，用于 db_query 校验
+func syncedTableSet(cfg AgentConfig, connID, database string) map[string]bool {
+	set := map[string]bool{}
+	for _, v := range cfg.DBSchemas {
+		if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
+			set[strings.ToLower(v.Table)] = true
+		}
+	}
+	return set
+}
+
+// sqlTableRe 提取 SQL 中 FROM/JOIN 之后的表名 token（到空白、逗号、括号为止）
+var sqlTableRe = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([^\s,()]+)`)
+
+// validateSyncedTables 校验 SQL 引用的表是否全部落在已同步集合内。
+// 允许 information_schema / pg_catalog 等系统视图（部分诊断需要）；
+// 派生表 (SELECT ...) 因紧跟左括号，正则不会捕获，故不会误判。
+func validateSyncedTables(sql string, synced map[string]bool) error {
+	allowed := map[string]bool{"information_schema": true, "pg_catalog": true, "pg_toast": true}
+	var bad []string
+	for _, mt := range sqlTableRe.FindAllStringSubmatch(sql, -1) {
+		tok := strings.TrimSpace(mt[1])
+		tok = strings.Trim(tok, "`\"[]") // 去除可能的反引号/双引号/方括号
+		if i := strings.LastIndex(tok, "."); i >= 0 {
+			tok = tok[i+1:] // 去掉 schema. 前缀
+		}
+		tokLow := strings.ToLower(tok)
+		if tokLow == "" || allowed[tokLow] || synced[tokLow] {
+			continue
+		}
+		bad = append(bad, tok)
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("SQL 引用了未同步的表：%s。本工具只允许查询你在「插件/数据库连接」中已同步配置的表，请仅使用 db_schema 返回的表名来编写 SQL", strings.Join(bad, "、"))
+	}
+	return nil
+}
+
 // builtinDBQuery 在连接上执行只读 SELECT 并返回结果（限制行数）
 func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
@@ -261,6 +343,12 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 	upper := strings.ToUpper(strings.TrimSpace(sql))
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
 		return "", fmt.Errorf("仅允许 SELECT / WITH 查询，禁止写操作")
+	}
+	// 校验：SQL 只能引用你已同步配置的表，禁止臆测/越权访问未同步表
+	cfg := m.LoadAgentData().Config
+	synced := syncedTableSet(cfg, connID, database)
+	if err := validateSyncedTables(sql, synced); err != nil {
+		return "", err
 	}
 	conn, err := findDBConn(m, connID)
 	if err != nil {

@@ -105,7 +105,7 @@ func BuiltinToolMeta() []BuiltinToolDef {
 		{Name: "get_time", Icon: "⏰", Group: "常用工具", Default: "当用户需要知道当前日期/时间，或指定时区（如 Asia/Shanghai）的时间时使用。返回格式化的本地时间。"},
 		{Name: "calc", Icon: "🧮", Group: "常用工具", Default: "当用户需要计算一个算术表达式时使用，仅支持数字与 + - * / 和括号 ()。传入 expr，例如 \"1+2*3\"。返回计算结果。"},
 		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "当用户需要执行一条本机 shell 命令（如 git、npm、系统命令）并获取其输出时使用。传入 command 字符串。⚠️ 会真实执行命令，请仅在确定安全时使用。"},
-		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "读取已配置数据库连接中的表结构（库/表/字段名/类型/可空/默认值/注释），把数据库结构同步给大模型做数据分析。支持 MySQL、PostgreSQL、Oracle。返回的字段注释会叠加用户在「插件/数据库连接」中维护的表级与字段级语义（比数据库自带注释更准）。connId 与 database 为必填；tables 留空则返回该库全部表（数据量大时建议只指定需要的表）。connId 可省略，省略时自动使用当前激活的分析连接。"},
+		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "返回用户在「插件/数据库连接」中已同步配置的表结构（库/表/字段名/类型/可空/默认值/注释），把数据库结构交给大模型用于生成 SQL 与数据分析。注意：本工具只返回你已同步的表，不会实时读取数据库全部表；大模型应严格只基于返回的这些表与字段编写 SQL，不得臆测或使用未列出的表/字段。返回的字段注释会叠加用户维护的表级与字段级语义。connId 与 database 为必填；tables 留空则返回该库下所有已同步的表。connId 可省略，省略时自动使用当前激活的分析连接。"},
 		{Name: "db_query", Icon: "🔎", Group: "数据库连接分析", Default: "在已配置的连接上执行只读 SELECT 查询并返回结果（限制行数），用于采样数据、核对数值或验证假设。支持 MySQL、PostgreSQL、Oracle。必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；connId 可省略（省略时用当前激活连接），但 database 与 sql 必填。结果过大时请补充 WHERE/LIMIT 条件。"},
 	}
 }
@@ -237,7 +237,7 @@ func (m *Manager) agentFilePath() string {
 func defaultAgentData() AgentData {
 	return AgentData{
 		Config: AgentConfig{
-			SystemPrompt: "你是一个通用智能助手，会严格按照用户给定的角色与任务要求行事（例如数据分析师、运维工程师、客服、开发等），若用户未明确指定角色，则以「贴心、专业、严谨」的通用助手身份回答。\n\n通用准则：\n1. 优先用工具获取真实信息，不要臆测；信息不足时向用户确认，而非编造。\n2. 涉及数据库时：需要结构用 db_schema，需要采样数据用 db_query（仅只读 SELECT，禁止写操作）；当返回结果包含用户维护的「语义」时，优先采用这些语义理解业务含义。\n3. 未显式指定数据库连接时，使用当前已激活的连接；连接未配置或报错时，明确提示用户去「插件 / 数据库连接」配置。\n4. 回答使用简体中文，结论简洁、可验证；执行任何操作或给出 SQL/命令前先说明用途与风险。",
+			SystemPrompt: "你是一个通用智能助手，会严格按照用户给定的角色与任务要求行事（例如数据分析师、运维工程师、客服、开发等），若用户未明确指定角色，则以「贴心、专业、严谨」的通用助手身份回答。\n\n通用准则：\n1. 优先用工具获取真实信息，不要臆测；信息不足时向用户确认，而非编造。\n2. 涉及数据库时：需要结构用 db_schema，需要采样数据用 db_query（仅只读 SELECT，禁止写操作）；当返回结果包含用户维护的「语义」时，优先采用这些语义理解业务含义。\n3. 未显式指定数据库连接时，使用当前已激活的连接；连接未配置或报错时，明确提示用户去「插件 / 数据库连接」配置。\n4. 回答使用简体中文，结论简洁、可验证；执行任何操作或给出 SQL/命令前先说明用途与风险。\n\n【数据分析请求强制流程】当用户要求「分析 / 统计 / 查询 / 看板 / 报表」任何与具体数据相关的任务时，必须且只能基于工具返回的真实数据作答，严禁凭空编造数字或结论。标准流程：\n第 1 步：先用 db_schema 了解相关表的结构、字段含义与可用时间字段；\n第 2 步：用 db_query 编写并执行只读 SQL 取得所需数据（如「最近一周销售」需按时间范围过滤、按维度聚合）；\n第 3 步：基于返回数据做统计与解读，必要时给出趋势/对比/异常说明；\n若已加载了相关的技能（Skill），优先按该技能定义的分析模板执行。每一步都应让用户看到你正在调用哪个工具。",
 			Mode:         "react",
 			MaxLoops:     6,
 			ContextLimit: 20,
@@ -250,7 +250,7 @@ func defaultAgentData() AgentData {
 			MaxFileRead:   200000,
 			MaxTokens:     8000,
 		},
-		Skills:  []AgentSkill{},
+		Skills:  defaultSkills(),
 		Servers: []MCPServer{},
 		Users:   []AgentUser{},
 		Sessions: []AgentSession{
@@ -308,6 +308,8 @@ func (m *Manager) readAgentData() AgentData {
 	}
 	// 内置工具开关迁移与兜底
 	data.Config.Tools = migrateToolFlags(data.Config.Tools)
+	// 合并预置的数据分析模板技能（不覆盖用户已有的同 ID 技能）
+	data.Skills = mergeDefaultSkills(data.Skills)
 	for i := range data.Sessions {
 		if data.Sessions[i].Messages == nil {
 			data.Sessions[i].Messages = []AgentMsg{}
@@ -334,6 +336,65 @@ func defaultToolFlags() ToolFlags {
 		desc[t.Name] = t.Default
 	}
 	return ToolFlags{Enabled: enabled, Desc: desc}
+}
+
+// defaultSkills 预置的数据分析模板技能。用户可在前端「技能」中编辑、新增或关闭，
+// 启动时通过 mergeDefaultSkills 合并，不会覆盖用户已有配置。
+func defaultSkills() []AgentSkill {
+	now := time.Now().Format(time.RFC3339)
+	return []AgentSkill{
+		{
+			ID:          "skill_sales_analysis",
+			Name:        "销售数据分析",
+			Description: "当用户要求分析销售额、销量、订单、营收、客单价、最近一周/月/季度销售等与销售业绩相关的话题时使用。",
+			Prompt:      "你是销售数据分析专家。分析销售相关问题时遵循：\n1. 先用 db_schema 找到订单/销售/商品相关表，确认金额、数量、时间、状态等字段。\n2. 用 db_query 执行只读 SQL，按时间(最近一周/月/季度)、品类、地区、渠道等维度聚合，计算销售额、销量、订单数、客单价、环比/同比。\n3. 识别Top商品、异常波动、退货/退款影响。\n4. 给出结论与可执行建议，并用表格或趋势描述呈现关键指标。",
+			Enabled:     true,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          "skill_user_retention",
+			Name:        "用户留存分析",
+			Description: "当用户要求分析新增用户、活跃用户、留存率、流失率、复购、用户生命周期等与用户行为相关的话题时使用。",
+			Prompt:      "你是用户增长分析专家。分析用户留存/活跃相关问题时遵循：\n1. 用 db_schema 定位用户表、注册表、登录/行为表、订单表。\n2. 用 db_query 计算：日/周/月新增、活跃(DAU/WAU/MAU)、次日/7日/30日留存、复购率、流失率。\n3. 按渠道、注册月份做同期群(Cohort)对比。\n4. 输出留存曲线结论与提升建议。",
+			Enabled:     true,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          "skill_traffic_conversion",
+			Name:        "流量转化分析",
+			Description: "当用户要求分析访问量、转化率、漏斗、加购、下单转化、渠道效果等与流量和转化相关的话题时使用。",
+			Prompt:      "你是流量与转化分析专家。分析转化相关问题时遵循：\n1. 用 db_schema 定位曝光/点击/访问、加购、下单等各漏斗环节表。\n2. 用 db_query 计算各环节量级与转化率，构建漏斗(曝光→点击→加购→下单→支付)。\n3. 拆解各渠道/落地页的转化差异，定位流失最大环节。\n4. 输出漏斗图结论与优化建议。",
+			Enabled:     true,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          "skill_anomaly_diagnosis",
+			Name:        "指标异常诊断",
+			Description: "当用户要求排查某指标突增/突降、数据异常、波动原因、对比上期差异时使用。",
+			Prompt:      "你是指标异常诊断专家。分析异常波动时遵循：\n1. 用 db_schema 确认指标所属表与维度字段。\n2. 用 db_query 拉取异常期与对照期(环比/同比)的分维度数据。\n3. 通过下钻(地区/渠道/品类/新老用户)定位主要贡献因子。\n4. 给出根因结论与验证 SQL。",
+			Enabled:     true,
+			UpdatedAt:   now,
+		},
+	}
+}
+
+// mergeDefaultSkills 将预置技能与用户已有技能合并：用户已存在同 ID 的技能以用户的为准，
+// 用户未配置过的预置技能追加进列表，保证升级后模板技能自动出现且不覆盖用户修改。
+func mergeDefaultSkills(user []AgentSkill) []AgentSkill {
+	have := map[string]bool{}
+	for _, s := range user {
+		if s.ID != "" {
+			have[s.ID] = true
+		}
+	}
+	merged := make([]AgentSkill, 0, len(user)+len(defaultSkills()))
+	merged = append(merged, user...)
+	for _, s := range defaultSkills() {
+		if !have[s.ID] {
+			merged = append(merged, s)
+		}
+	}
+	return merged
 }
 
 // migrateToolFlags 将旧版分组开关（fileOp/webSearch/sysInfo/common）迁移为各工具独立开关。
