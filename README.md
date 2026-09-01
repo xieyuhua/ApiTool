@@ -414,7 +414,14 @@ args:    -y @modelcontextprotocol/server-filesystem D:\task\data
 
 ### 14.1 工作原理
 
-- 启动后，ApiTool 在本机监听一个端口（默认 `127.0.0.1:8888`），作为 HTTP/HTTPS 代理。
+- 启动后，ApiTool 在本机监听一个端口（默认 `127.0.0.1:8888`），作为 **HTTP/HTTPS 代理**。
+- **该端口是「混合代理」端口**：同一端口同时接受 HTTP/HTTPS 代理与 **SOCKS5 代理** 两种接入方式，
+  代理客户端（浏览器、命令行工具、App）可任选其一把流量指向本端口：
+  - **HTTP/HTTPS 代理**：直接填 `http://<地址>` 或 `https://<地址>`（或开启系统代理自动接管）。
+  - **SOCKS5 代理**：填 `socks5://<地址>`（仅支持 CONNECT 命令、无认证）。
+    SOCKS5 流量会被自动转换为 HTTP 代理请求交给内部解密引擎，因此**同样能解密 HTTPS、记录明文 HTTP、生效请求改写**；
+    非 HTTP/TLS 的纯 TCP 流量（如 SSH）则保持透传以保证连通性。
+  区分方式：Accept 后读取首字节，SOCKS5 固定为版本号 `0x05`，HTTP 请求行以方法名开头，两者不会混淆。
 - **解密 HTTPS 需要信任根证书**：HTTPS 流量经代理时会被 ApiTool 用内置 CA 动态重签，
   只有把该 CA 安装并信任到系统/浏览器，才能看到明文的请求与响应（否则 HTTPS 连接会被降级透传、不可解密）。
 - 开启「切换系统代理」后，ApiTool 会改写系统的 `Internet Settings → Proxy`，

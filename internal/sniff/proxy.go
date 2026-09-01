@@ -1,7 +1,10 @@
 package sniff
 
 import (
+	"errors"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +31,12 @@ type proxy struct {
 	emit      func([]TrafficRecord) // 批量推送实时记录
 	errEmit   func(ErrorInfo)
 	sessionID string // 当前活动会话 ID（manager.Start 设置）
+
+	// addr 对外监听地址（用户配置，端口 0 时为系统分配后的实际地址）。
+	// 内部 go-mitmproxy 监听在回环随机端口，由 hybrid 转发流量过去，
+	// 从而在同一端口上同时支持 HTTP 代理与 SOCKS5。
+	addr   string
+	hybrid *hybridListener
 
 	mu        sync.Mutex
 	reqBodies map[string][]byte // 预留：按连接关联请求体暂存
@@ -118,8 +127,9 @@ func (p *proxy) flushEmit() {
 // 若端口被占用 net.Listen 会立刻返回错误，因此在短时间内即可捕获启动失败。
 const startTimeout = 500 * time.Millisecond
 
-// Start 启动代理监听。内部放入 goroutine 运行阻塞的 Serve，避免阻塞调用方；
-// 通过 channel 捕获启动阶段的立即错误（如端口占用）并返回。
+// Start 启动代理监听：先启动内部 go-mitmproxy（回环随机端口），
+// 再在对外地址上启动混合监听器（同时支持 HTTP 与 SOCKS5）。
+// 内部 Serve 放入 goroutine 运行阻塞，通过 channel 捕获启动阶段的立即错误（如端口占用）。
 func (p *proxy) Start() error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -127,15 +137,26 @@ func (p *proxy) Start() error {
 	}()
 	select {
 	case err := <-errCh:
-		// Serve 立即返回：监听失败或 server 已关闭
+		// Serve 立即返回：内部监听失败或 server 已关闭
 		if err != nil {
 			return err
 		}
-		return nil
 	case <-time.After(startTimeout):
-		// 进入阻塞 Serve，说明监听成功
-		return nil
+		// 进入阻塞 Serve，说明内部监听成功
 	}
+
+	// 对外启动混合监听器；端口填 0 时这里能拿到系统实际分配的端口
+	ln, err := startHybridListener(p.addr, p.p.Opts.Addr)
+	if err != nil {
+		_ = p.p.Close()
+		return err
+	}
+	p.hybrid = ln
+	// 回显真实监听地址（端口 0 时替换成实际端口，便于展示与拼接证书 URL）
+	if la := ln.Addr(); la != nil {
+		p.addr = la.String()
+	}
+	return nil
 }
 
 // Stop 关闭代理并停止推送协程（避免泄漏）。置 stopped 以忽略停止后
@@ -156,11 +177,16 @@ func (p *proxy) Stop() error {
 	if len(rest) > 0 && p.emit != nil {
 		p.emit(rest)
 	}
+	if p.hybrid != nil {
+		p.hybrid.Close()
+		p.hybrid = nil
+	}
 	return p.p.Close()
 }
 
 // newProxy 创建并配置一个 go-mitmproxy 实例。
-// addr 为监听地址（如 "127.0.0.1:8888"）。
+// addr 为对外监听地址（如 "127.0.0.1:8888"）；go-mitmproxy 本身监听在
+// 回环随机端口，由混合监听器统一对外提供 HTTP 与 SOCKS5 接入。
 func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filter, emit func([]TrafficRecord), errEmit func(ErrorInfo)) (*proxy, error) {
 	p := &proxy{
 		ca:        caBundle,
@@ -169,10 +195,25 @@ func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filte
 		emit:      emit,
 		errEmit:   errEmit,
 		reqBodies: make(map[string][]byte),
+		addr:      addr,
+	}
+
+	// 内部端口选一个空闲的回环端口（重试以规避获取后被占用的竞态）
+	var innerAddr string
+	for i := 0; i < 5; i++ {
+		port, err := pickFreePort()
+		if err != nil {
+			continue
+		}
+		innerAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+		break
+	}
+	if innerAddr == "" {
+		return nil, errors.New("无法分配内部代理端口")
 	}
 
 	opts := &mitm.Options{
-		Addr:              addr,
+		Addr:              innerAddr,
 		StreamLargeBodies: 64 * 1024 * 1024, // 超过该阈值才流式透传（避免大响应体被丢弃/无法查看）
 		SslInsecure:       true,
 		NewCaFunc: func() (cert.CA, error) {
@@ -190,9 +231,9 @@ func newProxy(addr string, caBundle *caBundle, store *SessionStore, filter Filte
 	return p, nil
 }
 
-// Addr 返回代理实际监听的地址。
+// Addr 返回对外实际监听的地址（端口填 0 时为系统分配的实际地址）。
 func (p *proxy) Addr() string {
-	return p.p.Opts.Addr
+	return p.addr
 }
 
 // SetFilter 更新过滤条件。
@@ -316,12 +357,18 @@ func (p *proxy) Requestheaders(f *mitm.Flow) {
 
 // Request 在请求发出前调用。命中证书下载路由时直接构造响应短路，不转发上游，
 // 方便手机/浏览器通过代理地址下载并安装根证书。
+// 注意：仅当 Host 指向代理自身（端口一致且为本机地址）时才短路，
+// 避免把访问任意外部站点根路径（如 http://example.com/）误判为证书下载页。
 func (p *proxy) Request(f *mitm.Flow) {
 	if p.isStopped() || f == nil || f.Request == nil || f.Request.URL == nil {
 		return
 	}
 	path := f.Request.URL.Path
 	if !certDownloadPaths[path] {
+		return
+	}
+	if !p.isProxySelfHost(f.Request.URL.Host) {
+		// Host 不是代理自身：这是普通站点请求，正常转发，不要短路证书页
 		return
 	}
 	if path == "/" {
@@ -341,6 +388,30 @@ func (p *proxy) Request(f *mitm.Flow) {
 		Header:     http.Header{"Content-Type": []string{"application/x-x509-ca-cert"}},
 		Body:       pem,
 	}
+}
+
+// isProxySelfHost 判断请求 Host 是否指向本代理自身（用于证书下载页短路）。
+// 仅当端口与代理监听端口一致、且主机为本机地址（127.0.0.1 / localhost / 监听 IP / 任意本机 IP）时返回 true。
+func (p *proxy) isProxySelfHost(host string) bool {
+	ph, pport, err := net.SplitHostPort(p.Addr())
+	if err != nil {
+		return false
+	}
+	h, portStr, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host // 无端口时仅按主机名判断
+	}
+	if portStr != "" && portStr != pport {
+		return false // 端口不同：一定不是访问代理自身
+	}
+	switch h {
+	case "127.0.0.1", "localhost", "::1", "0.0.0.0", ph:
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return true // 任意 IP 形式（含局域网 IP）均视为本机
+	}
+	return false
 }
 
 // ---- go-mitmproxy Addon 接口实现（嵌入 BaseAddon）----

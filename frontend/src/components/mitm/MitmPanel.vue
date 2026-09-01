@@ -18,7 +18,7 @@
       <div class="mitm-actions">
         <template v-if="!status.running">
           <el-input v-model="proxyAddr" size="small" style="width: 190px"
-            placeholder="监听地址 如 127.0.0.1:8888" title="代理监听地址，0 表示随机端口" />
+            placeholder="监听地址 如 127.0.0.1:8888" title="混合代理监听地址，同一端口同时支持 HTTP/HTTPS 代理与 SOCKS5 代理；0 表示随机端口" />
           <el-switch v-model="sysProxy" size="small" active-text="切换系统代理" @change="setSysProxy" />
           <el-button type="success" @click="startSniff" :loading="starting">开始抓包</el-button>
         </template>
@@ -164,13 +164,14 @@
           </el-collapse-transition>
         </div>
 
-        <!-- 实时流量 -->
-        <div class="traffic-head">
-          <span>实时流量（{{ filteredRecords.length }} / {{ liveRecords.length }}）
+        <!-- 实时流量（标题栏可折叠收起，避免大列表占用主界面空间） -->
+        <div class="traffic-head" @click="trafficOpen = !trafficOpen">
+          <span class="th-caret">{{ trafficOpen ? '▾' : '▸' }}</span>
+          <span class="th-title">实时流量（{{ filteredRecords.length }} / {{ liveRecords.length }}）
             <em v-if="filteredRecords.length > MAX_RENDER" class="render-limit">仅显示最新 {{ MAX_RENDER }} 条</em>
           </span>
-          <div class="th-actions">
-            <el-input v-model="liveFilter" size="small" placeholder="模糊过滤 host/url/方法" clearable style="width:120px" />
+          <div class="th-actions" @click.stop>
+            <el-input v-model="liveFilter" size="small" placeholder="搜索 host/url/方法" clearable style="width:120px" />
             <el-radio-group v-model="viewMode" size="small">
               <el-radio-button value="list">平铺</el-radio-button>
               <el-radio-button value="group">分组</el-radio-button>
@@ -188,49 +189,51 @@
             <el-button link type="primary" size="small" @click="clearLive">清空</el-button>
           </div>
         </div>
-        <div class="traffic-list">
-          <div v-if="!filteredRecords.length" class="empty">
-            <div class="empty-ico">🛰️</div>
-            {{ liveRecords.length ? '没有匹配的流量（可调整过滤条件）' : '暂无流量，开始抓包后系统流量将实时显示在这里' }}
-          </div>
-
-          <!-- 平铺模式 -->
-          <template v-if="viewMode === 'list'">
-            <div
-              v-for="r in listRecords"
-              :key="r.id"
-              class="traffic-item"
-              :class="{ active: selected && selected.id === r.id, checked: selectedIdSet.has(r.id) }"
-              @click="selectRecord(r)"
-              @contextmenu.prevent="openCtxMenu(r, $event)">
-              <el-checkbox size="small" :model-value="selectedIdSet.has(r.id)" @click.stop
-                @change="(v) => toggleSelect(r.id, v)" />
-              <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
-              <span class="method" v-if="r.method" :class="'m-' + r.method.toUpperCase()">{{ r.method }}</span>
-              <span class="url" :title="r.url">{{ r.url || r.host }}</span>
-              <span class="status" v-if="r.statusCode" :class="'s-' + String(r.statusCode)[0]">{{ r.statusCode }}</span>
+        <el-collapse-transition>
+          <div class="traffic-list" v-show="trafficOpen">
+            <div v-if="!filteredRecords.length" class="empty">
+              <div class="empty-ico">🛰️</div>
+              {{ liveRecords.length ? '没有匹配的流量（可调整过滤条件）' : '暂无流量，开始抓包后系统流量将实时显示在这里' }}
             </div>
-          </template>
 
-          <!-- 分组模式：Charles 风格分层树（host → 目录 → 请求），默认折叠 -->
-          <template v-else>
-            <div v-if="!groupedRecords.length" class="empty"><div class="empty-ico">🛰️</div>暂无流量</div>
-            <GroupTreeNode
-              v-for="g in groupedRecords"
-              :key="g.key"
-              :node="g"
-              :expanded="expandedKeys.has(g.key)"
-              :expanded-set="expandedKeys"
-              :selected="selected"
-              :selected-set="selectedIdSet"
-              @toggle="toggleGroup"
-              @select-node="onGroupSelectNode"
-              @select-rec="selectRecord"
-              @select-rec-toggle="onSelectRecToggle"
-              @ctx-menu="openCtxMenu"
-            />
-          </template>
-        </div>
+            <!-- 平铺模式 -->
+            <template v-if="viewMode === 'list'">
+              <div
+                v-for="r in listRecords"
+                :key="r.id"
+                class="traffic-item"
+                :class="{ active: selected && selected.id === r.id, checked: selectedIdSet.has(r.id) }"
+                @click="selectRecord(r)"
+                @contextmenu.prevent="openCtxMenu(r, $event)">
+                <el-checkbox size="small" :model-value="selectedIdSet.has(r.id)" @click.stop
+                  @change="(v) => toggleSelect(r.id, v)" />
+                <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
+                <span class="method" v-if="r.method" :class="'m-' + r.method.toUpperCase()">{{ r.method }}</span>
+                <span class="url" :title="r.url">{{ r.url || r.host }}</span>
+                <span class="status" v-if="r.statusCode" :class="'s-' + String(r.statusCode)[0]">{{ r.statusCode }}</span>
+              </div>
+            </template>
+
+            <!-- 分组模式：Charles 风格分层树（host → 目录 → 请求），默认折叠，可逐个展开 -->
+            <template v-else>
+              <div v-if="!groupedRecords.length" class="empty"><div class="empty-ico">🛰️</div>暂无流量</div>
+              <GroupTreeNode
+                v-for="g in groupedRecords"
+                :key="g.key"
+                :node="g"
+                :expanded="expandedKeys.has(g.key)"
+                :expanded-set="expandedKeys"
+                :selected="selected"
+                :selected-set="selectedIdSet"
+                @toggle="toggleGroup"
+                @select-node="onGroupSelectNode"
+                @select-rec="selectRecord"
+                @select-rec-toggle="onSelectRecToggle"
+                @ctx-menu="openCtxMenu"
+              />
+            </template>
+          </div>
+        </el-collapse-transition>
       </div>
 
       <!-- 右：详情 -->
@@ -550,6 +553,7 @@ const selectedIds = ref([])
 const detailTab = ref('overview')
 const liveFilter = ref('')
 const viewMode = ref('list') // list / group
+const trafficOpen = ref(true) // 实时流量板块是否展开（可折叠收起节省空间）
 // 分组模式下记录用户手动展开的节点 key（host 或目录），默认全部折叠
 const expandedKeys = ref(new Set())
 const onlyErr = ref(false) // 仅查看有解密失败记录的连接
@@ -1594,6 +1598,10 @@ async function copyProxyAddr() {
 .mitm-errors .err-foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #86909c; padding: 0 4px; }
 .grp-item { padding-left: 22px; }
 .traffic-head .th-actions .el-radio-group { margin-right: 4px; }
+.traffic-head { cursor: pointer; user-select: none; }
+.traffic-head .th-caret { display: inline-block; width: 14px; color: var(--mp-primary); font-size: 12px; }
+.traffic-head .th-title { font-weight: 600; color: var(--mp-text); }
+.traffic-head .th-actions { cursor: default; }
 .mitm-guide { margin: 6px 0; padding: 10px 12px; border-radius: var(--mp-radius); font-size: 13px; line-height: 1.7; }
 .mitm-guide.g-pinning { background: #fef0f0; border: 1px solid #fbc4c4; }
 .mitm-guide.g-untrusted { background: #fdf6ec; border: 1px solid #f3d19e; }
