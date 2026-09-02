@@ -78,12 +78,12 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 		}, []string{"command"}},
 		"db_schema": {map[string]interface{}{
 			"connId": map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接（如 mysql-1 / pg-1 / ora-1）。可省略，省略时自动使用当前激活的分析连接"},
-			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）"},
+			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）。可省略，省略时自动使用当前激活连接 / 第一个 db 连接对应的默认库或已同步库"},
 			"tables":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "要同步的表名列表；留空则同步该库全部表。建议仅在需要某几张表时才指定，以减少返回长度"},
 		}, []string{"connId", "database"}},
 		"db_query": {map[string]interface{}{
 			"connId":  map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接。可省略，省略时自动使用当前激活的分析连接"},
-			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）"},
+			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）。可省略，省略时自动补全"},
 			"sql":      map[string]interface{}{"type": "string", "description": "要执行的只读查询语句，必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；尽量使用明确的列名与 LIMIT，避免 SELECT * 与全表扫描"},
 			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200；如结果过大请适当调小或补充 WHERE 条件"},
 		}, []string{"connId", "database", "sql"}},
@@ -155,6 +155,39 @@ func findDBConn(m *Manager, connID string) (model.PluginConn, error) {
 	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（请先在「插件 / 数据库连接」中配置）", connID)
 }
 
+// resolveActiveDBConn 解析用于数据库分析的 connId / database。
+// 优先使用用户显式激活的分析连接；否则自动选用第一个 db 类型插件连接；
+// database 缺失时依次取该连接自带的 database、或已同步表结构中该连接对应的第一个 database。
+// 这样即使未手动"启用分析连接"，只要配置过数据库连接即可直接使用工具，避免无意义报错。
+func resolveActiveDBConn(m *Manager) (connID, database string) {
+	cfg := m.LoadAgentData().Config
+	if cfg.ActiveDBConn != "" {
+		connID = cfg.ActiveDBConn
+	} else {
+		for _, c := range m.host.Store().GetData().Plugins.Connections {
+			if c.Category == "db" {
+				connID = c.ID
+				break
+			}
+		}
+	}
+	if connID == "" {
+		return "", ""
+	}
+	if c, err := findDBConn(m, connID); err == nil {
+		database = c.Database
+	}
+	if database == "" {
+		for _, v := range cfg.DBSchemas {
+			if strings.EqualFold(v.ConnID, connID) && v.Database != "" {
+				database = v.Database
+				break
+			}
+		}
+	}
+	return connID, database
+}
+
 // dbSemantic 读取用户在「插件 / 数据库连接」中维护的字段/表语义。
 // key = connId|database|table|column（全小写）；column 为空时查表级语义（key 不含 column 段）。
 func dbSemantic(m *Manager, connID, database, table, column string) string {
@@ -191,11 +224,22 @@ func dbSchemaKey(connID, database, table string) string {
 func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
 	database, _ := args["database"].(string)
-	if connID == "" {
-		connID = m.LoadAgentData().Config.ActiveDBConn // 未指定则使用当前激活的连接
+	if connID == "" || database == "" {
+		// 未显式指定时自动解析：优先激活连接，否则第一个 db 连接，并自动补全 database
+		ac, ad := resolveActiveDBConn(m)
+		if connID == "" {
+			connID = ac
+		}
+		if database == "" {
+			database = ad
+		}
 	}
 	if connID == "" || database == "" {
-		return "", fmt.Errorf("缺少 connId 或 database 参数（可在「插件 / 数据库连接」中启用一个连接作为分析连接）")
+		return "", fmt.Errorf("缺少 connId 或 database 参数（当前未配置任何数据库连接，请先在「插件 / 数据库连接」中添加一个 db 类型连接并同步表结构）")
+	}
+	// 校验连接是否存在（明确给出但不存在的 connId 直接报错，避免误导）
+	if _, cerr := findDBConn(m, connID); cerr != nil {
+		return "", cerr
 	}
 	cfg := m.LoadAgentData().Config
 	if len(cfg.DBSchemas) == 0 {
@@ -334,11 +378,18 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
 	database, _ := args["database"].(string)
 	sql, _ := args["sql"].(string)
-	if connID == "" {
-		connID = m.LoadAgentData().Config.ActiveDBConn
+	if connID == "" || database == "" {
+		// 未显式指定时自动解析：优先激活连接，否则第一个 db 连接，并自动补全 database
+		ac, ad := resolveActiveDBConn(m)
+		if connID == "" {
+			connID = ac
+		}
+		if database == "" {
+			database = ad
+		}
 	}
 	if connID == "" || database == "" || sql == "" {
-		return "", fmt.Errorf("缺少 connId / database / sql 参数（可在「插件 / 数据库连接」中启用一个连接作为分析连接）")
+		return "", fmt.Errorf("缺少 connId / database / sql 参数（当前未配置任何数据库连接，请先在「插件 / 数据库连接」中添加一个 db 类型连接并同步表结构）")
 	}
 	upper := strings.ToUpper(strings.TrimSpace(sql))
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {

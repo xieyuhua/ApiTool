@@ -276,7 +276,7 @@ func BuildDoc(s *store.Store, scope, projectID, dirID, format string) (string, e
 	}
 	switch format {
 	case "openapi":
-		return doc.BuildOpenAPI(title, apis, proj.Common)
+		return doc.BuildOpenAPI(title, dirs, apis, realDir, proj.Common)
 	case "markdown":
 		return doc.BuildMarkdown(title, realDir, dirs, apis, proj.Common), nil
 	default:

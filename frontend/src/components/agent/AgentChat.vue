@@ -325,16 +325,16 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
       <div v-for="m in messages" :key="m.id" class="msg" :class="'role-' + m.role">
         <div class="avatar">{{ m.role === 'user' ? '🧑' : '🤖' }}</div>
         <div class="bubble">
-          <!-- 思考过程 -->
-          <div v-if="m.role === 'assistant' && m.thinking && config.showThinking" class="think-box">
+          <!-- 思考过程（含工具 / skill 调用） -->
+          <div v-if="m.role === 'assistant' && ((m.thinking && config.showThinking) || (m.steps && m.steps.filter(x => x.type !== 'thought').length))" class="think-box">
             <div class="think-head" @click="showThinkMap[m.id] = !showThinkMap[m.id]">
               💭 思考过程 <span class="toggle">{{ showThinkMap[m.id] ? '收起' : '展开' }}</span>
             </div>
             <pre v-show="showThinkMap[m.id]" class="think-content">{{ m.thinking }}</pre>
-          </div>
-          <!-- 使用的 skill / tool：卡片方式详细展示 -->
-          <div v-if="m.role === 'assistant' && m.steps && m.steps.length" class="steps-cards">
-            <ToolCard v-for="(s, i) in m.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+            <!-- 使用的 skill / tool：作为思考过程的一部分展示 -->
+            <div v-show="showThinkMap[m.id]" v-if="m.steps && m.steps.length" class="steps-cards">
+              <ToolCard v-for="(s, i) in m.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+            </div>
           </div>
           <!-- 正文（markdown + 图表） -->
           <div class="md-body" v-html="md(m.content)"></div>
@@ -346,12 +346,12 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
       <div v-if="running" class="msg role-assistant">
         <div class="avatar">🤖</div>
         <div class="bubble">
-          <div v-if="live.thinking && config.showThinking" class="think-box">
+          <div v-if="live.thinking && config.showThinking || live.steps.length" class="think-box">
             <div class="think-head">💭 思考中…</div>
-            <pre class="think-content">{{ live.thinking }}</pre>
-          </div>
-          <div v-if="live.steps.length" class="steps-cards">
-            <ToolCard v-for="(s, i) in live.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+            <pre v-if="live.thinking && config.showThinking" class="think-content">{{ live.thinking }}</pre>
+            <div v-if="live.steps.length" class="steps-cards">
+              <ToolCard v-for="(s, i) in live.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+            </div>
           </div>
           <!-- 流式正文（打字机）；润色阶段不再重打全文，只显示状态 -->
           <div v-if="polishing" class="running-tip polish-tip">
@@ -414,7 +414,7 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
 .step { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
 .step.err { border-color: #ef4444; color: #ef4444; }
 .step-detail-btn { color: var(--primary); cursor: pointer; margin-left: 2px; }
-.steps-cards { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.steps-cards { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 4px 0 8px; }
 .pop pre { white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; background: var(--surface-2); padding: 6px; border-radius: 4px; font-size: 12px; }
 .pop .err { color: #ef4444; }
 

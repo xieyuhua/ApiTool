@@ -69,8 +69,9 @@ function toggle() {
 }
 .tool-card.err { border-color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
 .tool-card.open { background: var(--surface); }
-/* 运行中的工具单独占一整行 */
-.tool-card.running { width: 100%; flex-basis: 100%; border-color: var(--primary); background: var(--el-color-primary-light-9); }
+/* 展开详情或运行中的工具单独占一整行，避免与其他工具并排 */
+.tool-card.open, .tool-card.running { width: 100%; flex-basis: 100%; margin-right: 0; }
+.tool-card.running { border-color: var(--primary); background: var(--el-color-primary-light-9); }
 .tc-head { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; cursor: default; }
 .tc-head[title] { cursor: pointer; }
 .tc-ic { font-size: 13px; }

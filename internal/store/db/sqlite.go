@@ -56,3 +56,37 @@ func (s *SQLiteDB) Write(data model.AppData) error {
 func (s *SQLiteDB) Close() error {
 	return s.db.Close()
 }
+
+// UpdateAgent 仅更新 meta.agent 单列，避免全量重写整个库。
+func (s *SQLiteDB) UpdateAgent(raw string) error {
+	return updateAgent(s.db, raw)
+}
+
+// ReadAgent 读取 meta.agent 单列。
+func (s *SQLiteDB) ReadAgent() (string, error) {
+	return readAgent(s.db)
+}
+
+// ReadSkills 读取全部技能（独立表）。
+func (s *SQLiteDB) ReadSkills() ([]AgentSkill, error) {
+	return readSkills(s.db)
+}
+
+// SaveSkills 覆盖保存技能列表（独立表）。
+func (s *SQLiteDB) SaveSkills(skills []AgentSkill) error {
+	return withTx(s.db, func(tx *sql.Tx) error {
+		return saveSkills(tx, skills)
+	})
+}
+
+// ReadDBAnalysis 读取数据库连接分析数据（独立表）。
+func (s *SQLiteDB) ReadDBAnalysis() (*DBAnalysisSnapshot, error) {
+	return readDBAnalysis(s.db)
+}
+
+// SaveDBAnalysis 覆盖保存数据库连接分析数据（独立表）。
+func (s *SQLiteDB) SaveDBAnalysis(snap *DBAnalysisSnapshot) error {
+	return withTx(s.db, func(tx *sql.Tx) error {
+		return saveDBAnalysis(tx, snap)
+	})
+}

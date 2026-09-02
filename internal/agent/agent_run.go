@@ -696,6 +696,31 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	if userCtx != nil {
 		sysPrompt += fmt.Sprintf("\n\n## 当前登录用户\n%s（调用工具时会自动携带其身份用于权限校验）", toJSON(userCtx))
 	}
+	// 数据库连接分析：注入可用连接信息，避免模型瞎填 connId / database 参数
+	if cfg.EnableDBAnalysis {
+		var connLines []string
+		active := cfg.ActiveDBConn
+		for _, c := range m.host.Store().GetData().Plugins.Connections {
+			if c.Category != "db" {
+				continue
+			}
+			mark := ""
+			if c.ID == active {
+				mark = "（当前激活分析连接）"
+			}
+			dbLabel := c.Database
+			if dbLabel == "" {
+				dbLabel = "（未指定，工具会自动取已同步表结构中的库）"
+			}
+			connLines = append(connLines, fmt.Sprintf("- connId=%s 名称=%s 类型=%s 默认库=%s%s",
+				c.ID, c.Name, c.DbType, dbLabel, mark))
+		}
+		if len(connLines) > 0 {
+			sysPrompt += "\n\n## 可用数据库连接（db 类型）\n调用 db_schema / db_query 时优先使用下列 connId" +
+				"（database 可省略，工具会自动补全）：\n" + strings.Join(connLines, "\n") +
+				"\n若未显式指定 connId，工具会自动使用当前激活的分析连接（或第一个 db 连接）。"
+		}
+	}
 
 	messages := []ai.ChatMessage{{Role: "system", Content: sysPrompt}}
 	// 加载当前激活会话的历史上下文（关键：必须用当前会话，而非顶层 Messages，否则会串到别的会话）
@@ -879,6 +904,7 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 
 	// 保存会话（写入当前激活会话）
 	now := time.Now().Format("2006-01-02 15:04:05")
+	m.mu.Lock()
 	d = m.readAgentData()
 	sess := d.activeSession()
 	if sess == nil {
@@ -904,6 +930,7 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	d.Usage.CompletionTokens += accUsage.CompletionTokens
 	d.Usage.TotalTokens += accUsage.TotalTokens
 	_ = m.writeAgentData(d)
+	m.mu.Unlock()
 
 	m.b.Emit("agent:done", map[string]interface{}{"content": result.Content, "thinking": result.Thinking, "usage": accUsage})
 	m.appendLog(AgentLog{Level: "info", Category: "agent", Title: "Agent 运行结束", Detail: fmt.Sprintf("步骤数=%d 输出长度=%d token=%d", len(result.Steps), len(result.Content), accUsage.TotalTokens), UserID: cfg.CurrentUserID})

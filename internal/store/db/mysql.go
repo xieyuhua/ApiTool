@@ -55,3 +55,37 @@ func (m *MySQLDB) Write(data model.AppData) error {
 func (m *MySQLDB) Close() error {
 	return m.db.Close()
 }
+
+// UpdateAgent 仅更新 meta.agent 单列，避免全量重写整个库。
+func (m *MySQLDB) UpdateAgent(raw string) error {
+	return updateAgent(m.db, raw)
+}
+
+// ReadAgent 读取 meta.agent 单列。
+func (m *MySQLDB) ReadAgent() (string, error) {
+	return readAgent(m.db)
+}
+
+// ReadSkills 读取全部技能（独立表）。
+func (m *MySQLDB) ReadSkills() ([]AgentSkill, error) {
+	return readSkills(m.db)
+}
+
+// SaveSkills 覆盖保存技能列表（独立表）。
+func (m *MySQLDB) SaveSkills(skills []AgentSkill) error {
+	return withTx(m.db, func(tx *sql.Tx) error {
+		return saveSkills(tx, skills)
+	})
+}
+
+// ReadDBAnalysis 读取数据库连接分析数据（独立表）。
+func (m *MySQLDB) ReadDBAnalysis() (*DBAnalysisSnapshot, error) {
+	return readDBAnalysis(m.db)
+}
+
+// SaveDBAnalysis 覆盖保存数据库连接分析数据（独立表）。
+func (m *MySQLDB) SaveDBAnalysis(snap *DBAnalysisSnapshot) error {
+	return withTx(m.db, func(tx *sql.Tx) error {
+		return saveDBAnalysis(tx, snap)
+	})
+}

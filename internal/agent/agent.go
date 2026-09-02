@@ -19,6 +19,7 @@ import (
 	"apitool/internal/bus"
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/store/db"
 	"apitool/internal/util"
 )
 
@@ -34,30 +35,23 @@ type Host interface {
 
 // Manager 承载 agent 运行、配置与 MCP 客户端等全部逻辑，不再依赖 main 包的 App。
 type Manager struct {
-	host          Host
-	b             bus.Bus
-	ctx           context.Context
-	mu            sync.Mutex // 对应原 agentMu，保护 agent.json 读写
-	agentDataPath string
+	host Host
+	b    bus.Bus
+	ctx  context.Context
+	mu   sync.Mutex // 保护 AgentData 读写（数据最终落主库 meta.agent 列）
 }
 
-// NewManager 创建 agent 管理器。host 提供数据与配置能力，b 用于事件推送，
-// agentDataPath 为 agent.json 的绝对路径。
-func NewManager(host Host, b bus.Bus, agentDataPath string) *Manager {
-	return &Manager{host: host, b: b, ctx: context.Background(), agentDataPath: agentDataPath}
+// NewManager 创建 agent 管理器。host 提供数据与配置能力，b 用于事件推送。
+// agent 数据统一通过 host.Store() 持久化到应用主库（SQLite/MySQL）。
+func NewManager(host Host, b bus.Bus) *Manager {
+	return &Manager{host: host, b: b, ctx: context.Background()}
 }
 
 // ============================ 数据模型 ============================
 
 // AgentSkill 技能（可热加载）：一段带描述的系统能力/提示词片段，运行时按需注入。
-type AgentSkill struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"` // 何时使用该技能（供模型判断）
-	Prompt      string `json:"prompt"`      // 技能被激活时注入的提示词
-	Enabled     bool   `json:"enabled"`     // 是否启用（热加载开关）
-	UpdatedAt   string `json:"updatedAt"`
-}
+// 类型定义在 store/db 包（db.AgentSkill），独立存储于 agent_skills 表。
+type AgentSkill = db.AgentSkill
 
 // MCPServer MCP 服务器配置。支持 stdio（本地命令）与 http/sse（远程）两种传输。
 type MCPServer struct {
@@ -230,10 +224,6 @@ type AgentData struct {
 
 // ============================ 持久化 ============================
 
-func (m *Manager) agentFilePath() string {
-	return m.agentDataPath
-}
-
 func defaultAgentData() AgentData {
 	return AgentData{
 		Config: AgentConfig{
@@ -262,15 +252,14 @@ func defaultAgentData() AgentData {
 	}
 }
 
+// readAgentData 从应用主库（meta.agent 列）读取并补全 Agent 数据。
+// 主库不可用时由 Store 回退到旧 agent.json 文件（兼容迁移）。调用方需持有 m.mu。
 func (m *Manager) readAgentData() AgentData {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	data := defaultAgentData()
-	b, err := os.ReadFile(m.agentDataPath)
-	if err != nil {
-		return data
+	raw := m.host.Store().LoadAgentRaw()
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &data)
 	}
-	_ = json.Unmarshal(b, &data)
 	if data.Config.MaxLoops <= 0 {
 		data.Config.MaxLoops = 6
 	}
@@ -280,8 +269,57 @@ func (m *Manager) readAgentData() AgentData {
 	if data.Config.Mode == "" {
 		data.Config.Mode = "react"
 	}
+	// 技能独立存储于 agent_skills 表：优先从独立表读取。
+	// 先保留 meta.agent 中解析出的旧 skills（用于首次迁移判断），不可提前清空。
+	metaSkills := data.Skills
+	if metaSkills == nil {
+		metaSkills = []AgentSkill{}
+	}
+	dbSkills := m.host.Store().LoadSkills()
+	if len(dbSkills) == 0 && len(metaSkills) > 0 {
+		// 独立表为空但旧 meta.agent JSON 中含有 skills：首次迁移，写入独立表。
+		dbSkills = metaSkills
+		_ = m.host.Store().SaveSkills(dbSkills)
+	}
+	// 合并预置技能（不覆盖用户已有的同 ID 技能），并持久化新增的预置技能。
+	merged := mergeDefaultSkills(dbSkills)
+	if len(merged) != len(dbSkills) {
+		_ = m.host.Store().SaveSkills(merged)
+	}
+	data.Skills = merged
 	if data.Skills == nil {
 		data.Skills = []AgentSkill{}
+	}
+	// 数据库连接分析数据（表结构同步 / 字段语义维护）独立存储于
+	// db_schemas / db_semantics / db_last_db 表，优先从独立表读取。
+	snap := m.host.Store().LoadDBAnalysis()
+	oldSchemas := data.Config.DBSchemas
+	oldSem := data.Config.DBSemantics
+	oldLast := data.Config.DBLastDB
+	if len(snap.Schemas) == 0 && len(oldSchemas) > 0 {
+		// 独立表为空但旧 meta.agent JSON 中含有：首次迁移，写入独立表。
+		snap.Schemas = schemasToJSONMap(oldSchemas)
+		snap.Semantics = oldSem
+		snap.LastDB = oldLast
+		_ = m.host.Store().SaveDBAnalysis(snap)
+	}
+	if snap.Schemas != nil {
+		data.Config.DBSchemas = schemasFromJSONMap(snap.Schemas)
+	}
+	if snap.Semantics != nil {
+		data.Config.DBSemantics = snap.Semantics
+	}
+	if snap.LastDB != nil {
+		data.Config.DBLastDB = snap.LastDB
+	}
+	if data.Config.DBSchemas == nil {
+		data.Config.DBSchemas = map[string]DBSyncedTable{}
+	}
+	if data.Config.DBSemantics == nil {
+		data.Config.DBSemantics = map[string]string{}
+	}
+	if data.Config.DBLastDB == nil {
+		data.Config.DBLastDB = map[string]string{}
 	}
 	if data.Servers == nil {
 		data.Servers = []MCPServer{}
@@ -308,8 +346,6 @@ func (m *Manager) readAgentData() AgentData {
 	}
 	// 内置工具开关迁移与兜底
 	data.Config.Tools = migrateToolFlags(data.Config.Tools)
-	// 合并预置的数据分析模板技能（不覆盖用户已有的同 ID 技能）
-	data.Skills = mergeDefaultSkills(data.Skills)
 	for i := range data.Sessions {
 		if data.Sessions[i].Messages == nil {
 			data.Sessions[i].Messages = []AgentMsg{}
@@ -349,6 +385,7 @@ func defaultSkills() []AgentSkill {
 			Description: "当用户要求分析销售额、销量、订单、营收、客单价、最近一周/月/季度销售等与销售业绩相关的话题时使用。",
 			Prompt:      "你是销售数据分析专家。分析销售相关问题时遵循：\n1. 先用 db_schema 找到订单/销售/商品相关表，确认金额、数量、时间、状态等字段。\n2. 用 db_query 执行只读 SQL，按时间(最近一周/月/季度)、品类、地区、渠道等维度聚合，计算销售额、销量、订单数、客单价、环比/同比。\n3. 识别Top商品、异常波动、退货/退款影响。\n4. 给出结论与可执行建议，并用表格或趋势描述呈现关键指标。",
 			Enabled:     true,
+			Builtin:     true,
 			UpdatedAt:   now,
 		},
 		{
@@ -357,6 +394,7 @@ func defaultSkills() []AgentSkill {
 			Description: "当用户要求分析新增用户、活跃用户、留存率、流失率、复购、用户生命周期等与用户行为相关的话题时使用。",
 			Prompt:      "你是用户增长分析专家。分析用户留存/活跃相关问题时遵循：\n1. 用 db_schema 定位用户表、注册表、登录/行为表、订单表。\n2. 用 db_query 计算：日/周/月新增、活跃(DAU/WAU/MAU)、次日/7日/30日留存、复购率、流失率。\n3. 按渠道、注册月份做同期群(Cohort)对比。\n4. 输出留存曲线结论与提升建议。",
 			Enabled:     true,
+			Builtin:     true,
 			UpdatedAt:   now,
 		},
 		{
@@ -365,6 +403,7 @@ func defaultSkills() []AgentSkill {
 			Description: "当用户要求分析访问量、转化率、漏斗、加购、下单转化、渠道效果等与流量和转化相关的话题时使用。",
 			Prompt:      "你是流量与转化分析专家。分析转化相关问题时遵循：\n1. 用 db_schema 定位曝光/点击/访问、加购、下单等各漏斗环节表。\n2. 用 db_query 计算各环节量级与转化率，构建漏斗(曝光→点击→加购→下单→支付)。\n3. 拆解各渠道/落地页的转化差异，定位流失最大环节。\n4. 输出漏斗图结论与优化建议。",
 			Enabled:     true,
+			Builtin:     true,
 			UpdatedAt:   now,
 		},
 		{
@@ -373,6 +412,7 @@ func defaultSkills() []AgentSkill {
 			Description: "当用户要求排查某指标突增/突降、数据异常、波动原因、对比上期差异时使用。",
 			Prompt:      "你是指标异常诊断专家。分析异常波动时遵循：\n1. 用 db_schema 确认指标所属表与维度字段。\n2. 用 db_query 拉取异常期与对照期(环比/同比)的分维度数据。\n3. 通过下钻(地区/渠道/品类/新老用户)定位主要贡献因子。\n4. 给出根因结论与验证 SQL。",
 			Enabled:     true,
+			Builtin:     true,
 			UpdatedAt:   now,
 		},
 	}
@@ -411,6 +451,35 @@ func migrateToolFlags(old ToolFlags) ToolFlags {
 	return ToolFlags{Enabled: enabled, Desc: desc}
 }
 
+// schemasToJSONMap 将表结构快照 map 转为 value 为 JSON 的通用 map，便于跨包存独立表。
+func schemasToJSONMap(schemas map[string]DBSyncedTable) map[string]string {
+	out := map[string]string{}
+	if schemas == nil {
+		return out
+	}
+	for k, v := range schemas {
+		if b, err := json.Marshal(v); err == nil {
+			out[k] = string(b)
+		}
+	}
+	return out
+}
+
+// schemasFromJSONMap 将独立表中 value 为 JSON 的 map 转回表结构快照 map。
+func schemasFromJSONMap(m map[string]string) map[string]DBSyncedTable {
+	out := map[string]DBSyncedTable{}
+	if m == nil {
+		return out
+	}
+	for k, v := range m {
+		var t DBSyncedTable
+		if err := json.Unmarshal([]byte(v), &t); err == nil {
+			out[k] = t
+		}
+	}
+	return out
+}
+
 // activeSession 返回当前激活会话指针（不存在时返回 nil）。
 func (d *AgentData) activeSession() *AgentSession {
 	for i := range d.Sessions {
@@ -421,31 +490,36 @@ func (d *AgentData) activeSession() *AgentSession {
 	return nil
 }
 
+// writeAgentData 将 Agent 数据序列化并持久化到应用主库（meta.agent 列）。
+// 调用方需持有 m.mu；内部会读取当前 AppData 并覆盖 Agent 字段后整体保存。
 func (m *Manager) writeAgentData(data AgentData) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// 限制日志与消息数量，避免文件无限增长
+	// 限制日志与消息数量，避免无限增长
 	if len(data.Logs) > 2000 {
 		data.Logs = data.Logs[len(data.Logs)-2000:]
 	}
 	if len(data.Messages) > 500 {
 		data.Messages = data.Messages[len(data.Messages)-500:]
 	}
-	// 限制每个会话消息数量，避免文件无限增长
+	// 限制每个会话消息数量，避免无限增长
 	for i := range data.Sessions {
 		if len(data.Sessions[i].Messages) > 500 {
 			data.Sessions[i].Messages = data.Sessions[i].Messages[len(data.Sessions[i].Messages)-500:]
 		}
 	}
-	b, err := json.MarshalIndent(data, "", "  ")
+	b, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	tmp := m.agentDataPath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := m.host.Store().SaveAgentRaw(string(b)); err != nil {
 		return err
 	}
-	return os.Rename(tmp, m.agentDataPath)
+	// 同步数据库连接分析数据到独立表（与 meta.agent 冗余，但支持行级读写与查询）。
+	snap := &db.DBAnalysisSnapshot{
+		Schemas:   schemasToJSONMap(data.Config.DBSchemas),
+		Semantics: data.Config.DBSemantics,
+		LastDB:    data.Config.DBLastDB,
+	}
+	return m.host.Store().SaveDBAnalysis(snap)
 }
 
 // ============================ 前端可调用：配置 / CRUD ============================
@@ -459,6 +533,8 @@ func (m *Manager) LoadAgentData() AgentData {
 
 // SaveAgentConfig 保存运行配置。
 func (m *Manager) SaveAgentConfig(cfg AgentConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if cfg.MaxLoops <= 0 {
 		cfg.MaxLoops = 6
@@ -473,9 +549,10 @@ func (m *Manager) SaveAgentConfig(cfg AgentConfig) error {
 	return m.writeAgentData(d)
 }
 
-// SaveAgentSkills 覆盖保存技能列表（热加载：保存后立即生效）。
+// SaveAgentSkills 覆盖保存技能列表（独立表存储，热加载：保存后立即生效）。
 func (m *Manager) SaveAgentSkills(skills []AgentSkill) error {
-	d := m.readAgentData()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	now := time.Now().Format(time.RFC3339)
 	for i := range skills {
 		if skills[i].ID == "" {
@@ -483,12 +560,19 @@ func (m *Manager) SaveAgentSkills(skills []AgentSkill) error {
 		}
 		skills[i].UpdatedAt = now
 	}
+	if err := m.host.Store().SaveSkills(skills); err != nil {
+		return err
+	}
+	// 同步内存中的 AgentData，保证后续全量备份(meta.agent)包含最新技能。
+	d := m.readAgentData()
 	d.Skills = skills
 	return m.writeAgentData(d)
 }
 
 // SaveMCPServers 覆盖保存 MCP 服务器列表。
 func (m *Manager) SaveMCPServers(servers []MCPServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	now := time.Now().Format(time.RFC3339)
 	for i := range servers {
@@ -506,6 +590,8 @@ func (m *Manager) SaveMCPServers(servers []MCPServer) error {
 
 // SaveAgentUsers 覆盖保存用户列表。
 func (m *Manager) SaveAgentUsers(users []AgentUser) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	for i := range users {
 		if users[i].ID == "" {
@@ -518,6 +604,8 @@ func (m *Manager) SaveAgentUsers(users []AgentUser) error {
 
 // ClearAgentMessages 清空当前会话历史。
 func (m *Manager) ClearAgentMessages() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if s := d.activeSession(); s != nil {
 		s.Messages = []AgentMsg{}
@@ -527,6 +615,8 @@ func (m *Manager) ClearAgentMessages() error {
 
 // CreateAgentSession 新建会话，返回新会话 ID。
 func (m *Manager) CreateAgentSession(title string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	id := agentID("sess")
 	now := time.Now().Format(time.RFC3339)
@@ -542,6 +632,8 @@ func (m *Manager) CreateAgentSession(title string) string {
 
 // SwitchAgentSession 切换当前激活会话。
 func (m *Manager) SwitchAgentSession(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if !sessionExists(d, id) {
 		return fmt.Errorf("会话不存在")
@@ -553,6 +645,8 @@ func (m *Manager) SwitchAgentSession(id string) error {
 
 // DeleteAgentSession 删除会话（至少保留一个）。
 func (m *Manager) DeleteAgentSession(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if len(d.Sessions) <= 1 {
 		return fmt.Errorf("至少保留一个会话")
@@ -577,6 +671,8 @@ func (m *Manager) DeleteAgentSession(id string) error {
 
 // RenameAgentSession 重命名会话。
 func (m *Manager) RenameAgentSession(id, title string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	for i := range d.Sessions {
 		if d.Sessions[i].ID == id {
@@ -591,6 +687,8 @@ func (m *Manager) RenameAgentSession(id, title string) error {
 // ============================ 日志 ============================
 
 func (m *Manager) appendLog(l AgentLog) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if l.ID == "" {
 		l.ID = agentID("log")
@@ -650,6 +748,8 @@ func (m *Manager) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
 
 // ClearAgentLogs 清空日志。
 func (m *Manager) ClearAgentLogs() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	d := m.readAgentData()
 	d.Logs = []AgentLog{}
 	return m.writeAgentData(d)

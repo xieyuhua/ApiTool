@@ -68,6 +68,10 @@ func (s *Store) initBackend() {
 	// 3) 首次初始化：若库为空且存在旧 data.json，则导入
 	if s.isEmptySQLite() {
 		if old, ok := loadLegacyJSON(s.dataFile, s.version, s.updateURL); ok {
+			// 一并迁移旧 agent.json（字段语义 / 表结构 / 会话等）
+			if old.Agent == "" {
+				old.Agent = loadLegacyAgentJSON(filepath.Dir(s.dataFile))
+			}
 			_ = impl.Write(old)
 		}
 	}
@@ -112,6 +116,10 @@ func (s *Store) SaveData(data model.AppData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.dbImpl != nil {
+		// agent 数据由 SaveAgentRaw 独立管理，避免此处全量写覆盖其最新值。
+		if raw, err := s.dbImpl.ReadAgent(); err == nil && raw != "" {
+			data.Agent = raw
+		}
 		if err := s.dbImpl.Write(data); err == nil {
 			return nil
 		}
@@ -120,11 +128,92 @@ func (s *Store) SaveData(data model.AppData) error {
 	return s.writeJSON(data)
 }
 
+// SaveAgentRaw 仅持久化 agent 数据（meta.agent 单列），不触碰其他表，
+// 避免每次保存 agent 配置/会话/日志时全量重建整个库。回退模式下写旧 agent.json。
+func (s *Store) SaveAgentRaw(raw string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		if err := s.dbImpl.UpdateAgent(raw); err == nil {
+			return nil
+		}
+		// DB 写入失败则回退 JSON
+	}
+	return os.WriteFile(filepath.Join(filepath.Dir(s.dataFile), "agent.json"), []byte(raw), 0o644)
+}
+
+// LoadAgentRaw 读取 agent 原始 JSON 串（meta.agent 单列）。回退模式下读旧 agent.json。
+func (s *Store) LoadAgentRaw() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		if raw, err := s.dbImpl.ReadAgent(); err == nil {
+			return raw
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(s.dataFile), "agent.json")); err == nil {
+		return string(b)
+	}
+	return ""
+}
+
+// LoadSkills 读取全部技能（独立表 agent_skills）。回退模式下无外部表，返回空切片。
+func (s *Store) LoadSkills() []db.AgentSkill {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		if sk, err := s.dbImpl.ReadSkills(); err == nil {
+			return sk
+		}
+	}
+	return []db.AgentSkill{}
+}
+
+// SaveSkills 覆盖保存技能列表（独立表 agent_skills）。
+func (s *Store) SaveSkills(skills []db.AgentSkill) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		return s.dbImpl.SaveSkills(skills)
+	}
+	return nil
+}
+
+// LoadDBAnalysis 读取数据库连接分析数据（独立表）。
+func (s *Store) LoadDBAnalysis() *db.DBAnalysisSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		if snap, err := s.dbImpl.ReadDBAnalysis(); err == nil {
+			return snap
+		}
+	}
+	return &db.DBAnalysisSnapshot{Schemas: map[string]string{}, Semantics: map[string]string{}, LastDB: map[string]string{}}
+}
+
+// SaveDBAnalysis 覆盖保存数据库连接分析数据（独立表）。
+func (s *Store) SaveDBAnalysis(snap *db.DBAnalysisSnapshot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dbImpl != nil {
+		return s.dbImpl.SaveDBAnalysis(snap)
+	}
+	return nil
+}
+
 // Path 返回数据文件绝对路径。
 func (s *Store) Path() string { return s.dataFile }
 
 // Dir 返回数据文件所在目录（图片等相对资源的基准目录）。
 func (s *Store) Dir() string { return filepath.Dir(s.dataFile) }
+
+// Close 释放底层数据库连接（若存在）。应用在退出时应调用，避免文件句柄残留。
+func (s *Store) Close() error {
+	if s.dbImpl != nil {
+		return s.dbImpl.Close()
+	}
+	return nil
+}
 
 // defaultData 构造默认数据。version/updateURL 由调用方（App）注入，
 // 避免 store 包反向依赖 main 包的常量。
@@ -189,6 +278,12 @@ func (s *Store) readJSON(version, updateURL string) model.AppData {
 	if data.CurrentProjectID == "" || !hasProject(data, data.CurrentProjectID) {
 		data.CurrentProjectID = data.Projects[0].ID
 	}
+	// 兼容旧版：若主库/文件均无 agent 数据，则尝试从同目录旧 agent.json 迁移
+	if data.Agent == "" {
+		if legacy := loadLegacyAgentJSON(filepath.Dir(s.dataFile)); legacy != "" {
+			data.Agent = legacy
+		}
+	}
 	return data
 }
 
@@ -220,6 +315,17 @@ func hasProject(data model.AppData, id string) bool {
 		}
 	}
 	return false
+}
+
+// loadLegacyAgentJSON 读取旧版 agent.json（独立文件）兼容到 AppData.Agent。
+// 仅在数据库/主库为空、且代理数据尚未迁移时调用。
+func loadLegacyAgentJSON(dataDir string) string {
+	p := filepath.Join(dataDir, "agent.json")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // writeJSON 保存全部数据到 JSON 文件（原子写：先写临时文件再 rename）。

@@ -437,8 +437,9 @@ func schemaFromField(f *model.Field) map[string]interface{} {
 	}
 }
 
-func BuildOpenAPI(title string, apis []model.ApiInfo, common model.CommonParams) (string, error) {
+func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, rootID string, common model.CommonParams) (string, error) {
 	paths := map[string]map[string]interface{}{}
+	usedTags := []string{}
 	for _, api := range apis {
 		p := api.URL
 		if u, err := url.Parse(api.URL); err == nil && u.Path != "" {
@@ -450,7 +451,14 @@ func BuildOpenAPI(title string, apis []model.ApiInfo, common model.CommonParams)
 		if paths[p] == nil {
 			paths[p] = map[string]interface{}{}
 		}
+		// 目录分组：取接口所属目录的完整层级路径（如 "用户中心 / 用户管理"），无目录则归入"未分类"
+		tag := dirPathOf(dirs, api.DirID)
+		if tag == "" {
+			tag = "未分类"
+		}
+		usedTags = append(usedTags, tag)
 		op := map[string]interface{}{
+			"tags":        []string{tag},
 			"summary":     api.Name,
 			"description": api.Description,
 			"responses": map[string]interface{}{
@@ -557,6 +565,7 @@ func BuildOpenAPI(title string, apis []model.ApiInfo, common model.CommonParams)
 			"title":   title,
 			"version": "1.0.0",
 		},
+		"tags":  collectTags(usedTags),
 		"paths": paths,
 	}
 	b, err := json.MarshalIndent(doc, "", "  ")
@@ -571,4 +580,62 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// dirPathOf 根据目录列表，返回从根到该目录的完整层级路径（如 "用户中心 / 用户管理"）。
+func dirPathOf(dirs []model.Directory, id string) string {
+	if id == "" {
+		return ""
+	}
+	byID := map[string]model.Directory{}
+	for _, d := range dirs {
+		byID[d.ID] = d
+	}
+	chain := []string{}
+	cur := id
+	guard := 0
+	for cur != "" {
+		d, ok := byID[cur]
+		if !ok {
+			break
+		}
+		chain = append([]string{d.Name}, chain...)
+		cur = d.ParentID
+		if guard++; guard > 50 {
+			break
+		}
+	}
+	return strings.Join(chain, " / ")
+}
+
+// collectTags 根据出现的目录路径收集根 tags 声明（含每一层级），便于 Swagger/Postman 按目录分组展示。
+func collectTags(usedPaths []string) []map[string]interface{} {
+	exists := map[string]bool{}
+	var ordered []string
+	for _, p := range usedPaths {
+		parts := strings.Split(p, " / ")
+		prefix := ""
+		for _, part := range parts {
+			if prefix == "" {
+				prefix = part
+			} else {
+				prefix = prefix + " / " + part
+			}
+			if !exists[prefix] {
+				exists[prefix] = true
+				ordered = append(ordered, prefix)
+			}
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if strings.Count(ordered[i], " / ") != strings.Count(ordered[j], " / ") {
+			return strings.Count(ordered[i], " / ") < strings.Count(ordered[j], " / ")
+		}
+		return ordered[i] < ordered[j]
+	})
+	tags := make([]map[string]interface{}, 0, len(ordered))
+	for _, p := range ordered {
+		tags = append(tags, map[string]interface{}{"name": p})
+	}
+	return tags
 }

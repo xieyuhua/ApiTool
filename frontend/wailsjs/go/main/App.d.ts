@@ -8,6 +8,7 @@ import {share} from '../models';
 import {frontend} from '../models';
 import {plugins} from '../models';
 import {stress} from '../models';
+import {db} from '../models';
 import {sniff} from '../models';
 import {store} from '../models';
 import {sync} from '../models';
@@ -233,7 +234,7 @@ export function RunTestPlan(arg1:string):Promise<model.TestReport>;
 
 export function SaveAgentConfig(arg1:agent.AgentConfig):Promise<void>;
 
-export function SaveAgentSkills(arg1:Array<agent.AgentSkill>):Promise<void>;
+export function SaveAgentSkills(arg1:Array<db.AgentSkill>):Promise<void>;
 
 export function SaveAgentUsers(arg1:Array<agent.AgentUser>):Promise<void>;
 

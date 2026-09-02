@@ -330,31 +330,9 @@ export namespace agent {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
-	export class AgentSkill {
-	    id: string;
-	    name: string;
-	    description: string;
-	    prompt: string;
-	    enabled: boolean;
-	    updatedAt: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AgentSkill(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.description = source["description"];
-	        this.prompt = source["prompt"];
-	        this.enabled = source["enabled"];
-	        this.updatedAt = source["updatedAt"];
-	    }
-	}
 	export class AgentData {
 	    config: AgentConfig;
-	    skills: AgentSkill[];
+	    skills: db.AgentSkill[];
 	    servers: MCPServer[];
 	    users: AgentUser[];
 	    sessions: AgentSession[];
@@ -370,7 +348,7 @@ export namespace agent {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.config = this.convertValues(source["config"], AgentConfig);
-	        this.skills = this.convertValues(source["skills"], AgentSkill);
+	        this.skills = this.convertValues(source["skills"], db.AgentSkill);
 	        this.servers = this.convertValues(source["servers"], MCPServer);
 	        this.users = this.convertValues(source["users"], AgentUser);
 	        this.sessions = this.convertValues(source["sessions"], AgentSession);
@@ -398,7 +376,6 @@ export namespace agent {
 		    return a;
 		}
 	}
-	
 	
 	
 	
@@ -659,6 +636,35 @@ export namespace crypto {
 	        this.ok = source["ok"];
 	        this.output = source["output"];
 	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace db {
+	
+	export class AgentSkill {
+	    id: string;
+	    name: string;
+	    description: string;
+	    prompt: string;
+	    enabled: boolean;
+	    builtin: boolean;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentSkill(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.prompt = source["prompt"];
+	        this.enabled = source["enabled"];
+	        this.builtin = source["builtin"];
+	        this.updatedAt = source["updatedAt"];
 	    }
 	}
 

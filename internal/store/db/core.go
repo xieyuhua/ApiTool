@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"apitool/internal/model"
 )
@@ -18,7 +19,8 @@ func schemaDDL() []string {
 			current_project_id TEXT,
 			settings TEXT,
 			plugins TEXT,
-			clipboard TEXT
+			clipboard TEXT,
+			agent TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS projects (
 			id TEXT PRIMARY KEY,
@@ -131,6 +133,32 @@ func schemaDDL() []string {
 			time TEXT,
 			timestamp BIGINT
 		)`,
+		`CREATE TABLE IF NOT EXISTS agent_skills (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			prompt TEXT,
+			enabled INT NOT NULL DEFAULT 1,
+			builtin INT NOT NULL DEFAULT 0,
+			updated_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS db_schemas (
+			id TEXT PRIMARY KEY,
+			conn_id TEXT NOT NULL,
+			database TEXT NOT NULL,
+			table_name TEXT NOT NULL,
+			rows INT NOT NULL DEFAULT 0,
+			columns TEXT,
+			updated_at TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS db_semantics (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS db_last_db (
+			conn_id TEXT PRIMARY KEY,
+			database TEXT
+		)`,
 	}
 }
 
@@ -143,6 +171,8 @@ func initSchema(db *sql.DB) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("建表失败: %w", err)
 	}
+	// 兼容旧库：meta 表可能已存在但缺少 agent 列，追加该列（已存在则忽略错误）。
+	_, _ = tx.Exec(`ALTER TABLE meta ADD COLUMN agent TEXT`)
 	return tx.Commit()
 }
 
@@ -158,9 +188,9 @@ func readAll(db *sql.DB, version, updateURL string) (model.AppData, error) {
 	}
 
 	// meta
-	var curPID, settingsJSON, pluginsJSON, clipboardJSON sql.NullString
-	_ = db.QueryRow(`SELECT current_project_id, settings, plugins, clipboard FROM meta WHERE key='global'`).Scan(
-		&curPID, &settingsJSON, &pluginsJSON, &clipboardJSON)
+	var curPID, settingsJSON, pluginsJSON, clipboardJSON, agentJSON sql.NullString
+	_ = db.QueryRow(`SELECT current_project_id, settings, plugins, clipboard, agent FROM meta WHERE key='global'`).Scan(
+		&curPID, &settingsJSON, &pluginsJSON, &clipboardJSON, &agentJSON)
 	if settingsJSON.Valid && settingsJSON.String != "" {
 		_ = json.Unmarshal([]byte(settingsJSON.String), &data.Settings)
 	}
@@ -169,6 +199,9 @@ func readAll(db *sql.DB, version, updateURL string) (model.AppData, error) {
 	}
 	if clipboardJSON.Valid && clipboardJSON.String != "" {
 		_ = json.Unmarshal([]byte(clipboardJSON.String), &data.Clipboard)
+	}
+	if agentJSON.Valid && agentJSON.String != "" {
+		data.Agent = agentJSON.String
 	}
 	if data.Settings.TimeoutSec <= 0 {
 		data.Settings.TimeoutSec = 30
@@ -414,7 +447,8 @@ func readTestReports(db *sql.DB, data *model.AppData) error {
 // writeAll 在事务中全量覆盖写入（清空各表后重新插入）。
 func writeAll(tx *sql.Tx, data model.AppData) error {
 	tables := []string{"meta", "projects", "directories", "apis", "environments",
-		"test_cases", "test_plans", "test_reports", "plugin_conns", "clip_items"}
+		"test_cases", "test_plans", "test_reports", "plugin_conns", "clip_items",
+		"agent_skills", "db_schemas", "db_semantics", "db_last_db"}
 	for _, t := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", t)); err != nil {
 			return fmt.Errorf("清空表 %s 失败: %w", t, err)
@@ -424,8 +458,8 @@ func writeAll(tx *sql.Tx, data model.AppData) error {
 	settingsJSON, _ := json.Marshal(data.Settings)
 	pluginsJSON, _ := json.Marshal(data.Plugins)
 	clipboardJSON, _ := json.Marshal(data.Clipboard)
-	if _, err := tx.Exec(`INSERT INTO meta (key, current_project_id, settings, plugins, clipboard) VALUES ('global', ?, ?, ?, ?)`,
-		data.CurrentProjectID, string(settingsJSON), string(pluginsJSON), string(clipboardJSON)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO meta (key, current_project_id, settings, plugins, clipboard, agent) VALUES ('global', ?, ?, ?, ?, ?)`,
+		data.CurrentProjectID, string(settingsJSON), string(pluginsJSON), string(clipboardJSON), data.Agent); err != nil {
 		return err
 	}
 
@@ -493,7 +527,53 @@ func writeAll(tx *sql.Tx, data model.AppData) error {
 			return err
 		}
 	}
+	// 技能与数据库连接分析数据独立存储，全量备份时从 meta.agent 解析出来一并写入对应表。
+	if data.Agent != "" {
+		var ad agentDataSkills
+		if _ = json.Unmarshal([]byte(data.Agent), &ad); ad.Skills != nil {
+			if err := saveSkills(tx, ad.Skills); err != nil {
+				return err
+			}
+		}
+		if ad.Config.DBSchemas != nil || ad.Config.DBSemantics != nil || ad.Config.DBLastDB != nil {
+			schemas := map[string]string{}
+			for k, v := range ad.Config.DBSchemas {
+				schemas[k] = string(v)
+			}
+			snap := &DBAnalysisSnapshot{
+				Schemas:   schemas,
+				Semantics: ad.Config.DBSemantics,
+				LastDB:    ad.Config.DBLastDB,
+			}
+			if err := saveDBAnalysis(tx, snap); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// agentDataSkills 仅用于从 meta.agent JSON 中提取 skills 与数据库连接分析字段（全量备份场景）。
+type agentDataSkills struct {
+	Skills []AgentSkill `json:"skills"`
+	Config struct {
+		DBSchemas   map[string]json.RawMessage `json:"dbSchemas"`
+		DBSemantics map[string]string          `json:"dbSemantics"`
+		DBLastDB    map[string]string          `json:"dbLastDB"`
+	} `json:"config"`
+}
+
+// withTx 开启事务并执行 fn，fn 内出错则回滚，否则提交。
+func withTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 func boolToInt(b bool) int {
@@ -501,4 +581,175 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// readAgent 读取 meta.agent 单列（agent 全部数据）。
+func readAgent(db *sql.DB) (string, error) {
+	var raw sql.NullString
+	err := db.QueryRow(`SELECT agent FROM meta WHERE key='global'`).Scan(&raw)
+	if err != nil {
+		return "", err
+	}
+	return raw.String, nil
+}
+
+// updateAgent 仅更新 meta.agent 单列，避免全量重写整个库。
+// 采用"先 UPDATE，若未命中则 INSERT"的跨方言兼容写法（SQLite/MySQL 通用）。
+func updateAgent(db *sql.DB, raw string) error {
+	res, err := db.Exec(`UPDATE meta SET agent=? WHERE key='global'`, raw)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	_, err = db.Exec(`INSERT INTO meta (key, agent) VALUES ('global', ?)`, raw)
+	return err
+}
+
+// readSkills 读取全部技能（独立表 agent_skills）。
+func readSkills(db *sql.DB) ([]AgentSkill, error) {
+	rows, err := db.Query(`SELECT id, name, description, prompt, enabled, builtin, updated_at FROM agent_skills ORDER BY updated_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AgentSkill
+	for rows.Next() {
+		var s AgentSkill
+		var desc, prompt, updatedAt sql.NullString
+		var enabled, builtin int
+		if err := rows.Scan(&s.ID, &s.Name, &desc, &prompt, &enabled, &builtin, &updatedAt); err != nil {
+			return nil, err
+		}
+		s.Description = desc.String
+		s.Prompt = prompt.String
+		s.Enabled = enabled != 0
+		s.Builtin = builtin != 0
+		s.UpdatedAt = updatedAt.String
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []AgentSkill{}
+	}
+	return out, nil
+}
+
+// saveSkills 覆盖保存技能列表（独立表 agent_skills）。
+// 在事务内先清空再全量插入，桌面场景数据量小，跨方言通用。
+func saveSkills(tx *sql.Tx, skills []AgentSkill) error {
+	if _, err := tx.Exec(`DELETE FROM agent_skills`); err != nil {
+		return fmt.Errorf("清空 agent_skills 失败: %w", err)
+	}
+	for _, s := range skills {
+		if _, err := tx.Exec(`INSERT INTO agent_skills (id, name, description, prompt, enabled, builtin, updated_at) VALUES (?,?,?,?,?,?,?)`,
+			s.ID, s.Name, s.Description, s.Prompt, boolToInt(s.Enabled), boolToInt(s.Builtin), s.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DBAnalysisSnapshot 数据库连接分析数据的快照，跨包传递用通用类型避免循环依赖。
+// Schemas 的 value 为 DBSyncedTable 的 JSON；Semantics/LastDB 为 map[string]string。
+type DBAnalysisSnapshot struct {
+	Schemas   map[string]string // key=connId|database|table(小写) -> DBSyncedTable JSON
+	Semantics map[string]string // key=connId|database|table|column(小写) -> 语义文本
+	LastDB    map[string]string // connId -> database
+}
+
+// readDBAnalysis 读取数据库连接分析数据（独立表）。
+func readDBAnalysis(db *sql.DB) (*DBAnalysisSnapshot, error) {
+	snap := &DBAnalysisSnapshot{Schemas: map[string]string{}, Semantics: map[string]string{}, LastDB: map[string]string{}}
+	rows, err := db.Query(`SELECT id, columns, rows FROM db_schemas`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, cols sql.NullString
+		var rowsN int
+		if err := rows.Scan(&id, &cols, &rowsN); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		snap.Schemas[id.String] = cols.String // 列 JSON 已含 conn/database/table/rows 冗余，便于回写
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	srows, err := db.Query(`SELECT key, value FROM db_semantics`)
+	if err != nil {
+		return nil, err
+	}
+	for srows.Next() {
+		var k, v string
+		if err := srows.Scan(&k, &v); err != nil {
+			srows.Close()
+			return nil, err
+		}
+		snap.Semantics[k] = v
+	}
+	srows.Close()
+	if err := srows.Err(); err != nil {
+		return nil, err
+	}
+	drows, err := db.Query(`SELECT conn_id, database FROM db_last_db`)
+	if err != nil {
+		return nil, err
+	}
+	for drows.Next() {
+		var cid, dbName string
+		if err := drows.Scan(&cid, &dbName); err != nil {
+			drows.Close()
+			return nil, err
+		}
+		snap.LastDB[cid] = dbName
+	}
+	drows.Close()
+	if err := drows.Err(); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
+// saveDBAnalysis 覆盖保存数据库连接分析数据（独立表）。
+func saveDBAnalysis(tx *sql.Tx, snap *DBAnalysisSnapshot) error {
+	if _, err := tx.Exec(`DELETE FROM db_schemas`); err != nil {
+		return fmt.Errorf("清空 db_schemas 失败: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM db_semantics`); err != nil {
+		return fmt.Errorf("清空 db_semantics 失败: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM db_last_db`); err != nil {
+		return fmt.Errorf("清空 db_last_db 失败: %w", err)
+	}
+	for k, colsJSON := range snap.Schemas {
+		// 从 JSON 中提取元信息；列 JSON 形如 {"connId":..,"database":..,"table":..,"rows":..,"columns":[..]}
+		var meta struct {
+			ConnID   string `json:"connId"`
+			Database string `json:"database"`
+			Table    string `json:"table"`
+			Rows     int    `json:"rows"`
+		}
+		_ = json.Unmarshal([]byte(colsJSON), &meta)
+		if _, err := tx.Exec(`INSERT INTO db_schemas (id, conn_id, database, table_name, rows, columns, updated_at) VALUES (?,?,?,?,?,?,?)`,
+			k, meta.ConnID, meta.Database, meta.Table, meta.Rows, colsJSON, time.Now().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	for k, v := range snap.Semantics {
+		if _, err := tx.Exec(`INSERT INTO db_semantics (key, value) VALUES (?,?)`, k, v); err != nil {
+			return err
+		}
+	}
+	for cid, dbName := range snap.LastDB {
+		if _, err := tx.Exec(`INSERT INTO db_last_db (conn_id, database) VALUES (?,?)`, cid, dbName); err != nil {
+			return err
+		}
+	}
+	return nil
 }

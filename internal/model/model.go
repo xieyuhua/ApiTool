@@ -229,6 +229,10 @@ type AppData struct {
 	Settings         Settings    `json:"settings"`
 	Plugins          PluginsData `json:"plugins"`
 	Clipboard        ClipData    `json:"clipboard"`
+	// Agent 为 agent 模块全部数据（配置/技能/MCP/用户/会话/日志，含表结构语义）的 JSON 序列化，
+	// 随应用主库（SQLite/MySQL）持久化；json:"-" 表示不写入顶层 data.json 回退文件，
+	// 回退模式下由 store 单独读取旧 agent.json 兼容。
+	Agent string `json:"-"`
 }
 
 // PluginManager 连接配置（按分类管理：数据库 / Redis / ES / XShell(SSH) / FTP / SFTP）

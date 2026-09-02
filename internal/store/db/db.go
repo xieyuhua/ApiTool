@@ -24,6 +24,18 @@ type DB interface {
 	Close() error
 	// Driver 返回后端类型，便于上层展示与诊断。
 	Driver() string
+	// UpdateAgent 仅更新 meta.agent 单列，避免全量重写整个库（agent 数据频繁变动）。
+	UpdateAgent(raw string) error
+	// ReadAgent 读取 meta.agent 单列。
+	ReadAgent() (string, error)
+	// ReadSkills 读取全部技能（独立表 agent_skills）。
+	ReadSkills() ([]AgentSkill, error)
+	// SaveSkills 覆盖保存技能列表（独立表，行级 upsert）。
+	SaveSkills([]AgentSkill) error
+	// ReadDBAnalysis 读取数据库连接分析数据（独立表 db_schemas/db_semantics/db_last_db）。
+	ReadDBAnalysis() (*DBAnalysisSnapshot, error)
+	// SaveDBAnalysis 覆盖保存数据库连接分析数据（独立表）。
+	SaveDBAnalysis(*DBAnalysisSnapshot) error
 }
 
 // jsonCol 将任意值序列化为 JSON 文本（用于嵌套结构列）。
@@ -57,4 +69,16 @@ func execTx(tx *sql.Tx, stmts ...string) error {
 		}
 	}
 	return nil
+}
+
+// AgentSkill 技能（可热加载）：一段带描述的系统能力/提示词片段，运行时按需注入。
+// 独立存储于 agent_skills 表，支持行级增删改查，不再随 meta.agent 大 JSON 读写。
+type AgentSkill struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"` // 何时使用该技能（供模型判断）
+	Prompt      string `json:"prompt"`      // 技能被激活时注入的提示词
+	Enabled     bool   `json:"enabled"`     // 是否启用（热加载开关）
+	Builtin     bool   `json:"builtin"`     // 是否为预置技能（首次启动写入，升级时不被覆盖）
+	UpdatedAt   string `json:"updatedAt"`
 }

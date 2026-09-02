@@ -89,7 +89,7 @@ func (a *App) startup(ctx context.Context) {
 	a.syncDir = filepath.Join(dataDir, "syncserver")
 	a.store = store.New(a.dataFile, AppVersion, DefaultUpdateURL)
 	// 初始化 agent 模块（MCP/技能/会话/运行），注入宿主能力与事件总线
-	a.Manager = agent.NewManager(a, a, filepath.Join(dataDir, "agent.json"))
+	a.Manager = agent.NewManager(a, a)
 	// 初始化测试引擎（用例生成/执行/报告导出），注入宿主能力与事件总线
 	a.Engine = testing.NewEngine(a, ctx)
 	// 初始化通用工具服务（Hash/HMAC/Cipher），嵌入 App 供 Wails 绑定

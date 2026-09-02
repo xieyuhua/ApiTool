@@ -372,7 +372,7 @@ func (s *SessionStore) ToOpenAPI(sess *Session) (string, error) {
 	if len(apis) == 0 {
 		return "", io.EOF // 调用方据此提示“无 HTTP 流量”
 	}
-	return doc.BuildOpenAPI(sess.Name, apis, model.CommonParams{})
+	return doc.BuildOpenAPI(sess.Name, nil, apis, "", model.CommonParams{})
 }
 
 func kvToMap(kvs []model.KV) map[string]string {
