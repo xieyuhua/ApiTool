@@ -339,7 +339,58 @@ func buildToolsPrompt(tools []MCPTool, skills []AgentSkill, mode string) string 
 var thinkingRe = regexp.MustCompile(`(?s)<thinking>(.*?)</thinking>`)
 var planRe = regexp.MustCompile(`(?s)<plan>(.*?)</plan>`)
 var toolJSONRe = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
-var toolJSONReBare = regexp.MustCompile(`(?s)\{[^{}]*"action"\s*:\s*"tool"[^{}]*\}`)
+
+// extractBareToolJSON 从正文里提取形如 {"action":"tool",...} 的裸 JSON 工具调用对象。
+// 相比正则 [^{}]*，这里用括号计数（忽略字符串内的花括号）以支持嵌套对象，
+// 例如 {"action":"tool","arguments":{"connId":...}}。返回所有候选 JSON 字符串（待后续 json.Unmarshal 校验）。
+func extractBareToolJSON(text string) []string {
+	var out []string
+	for _, loc := range toolJSONProbeRe.FindAllStringIndex(text, -1) {
+		// 从 "action":"tool" 位置向前找匹配的起始 '{'
+		start := strings.LastIndex(text[:loc[0]], "{")
+		if start < 0 {
+			continue
+		}
+		// 从 start 向右括号计数，匹配到与起始 '{' 对应的 '}'
+		var depth int
+		inStr := false
+		var esc bool
+		matched := -1
+		for i := start; i < len(text); i++ {
+			c := text[i]
+			if esc {
+				esc = false
+				continue
+			}
+			if inStr {
+				if c == '\\' {
+					esc = true
+				} else if c == '"' {
+					inStr = false
+				}
+				continue
+			}
+			switch c {
+			case '"':
+				inStr = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					matched = i
+					goto done
+				}
+			}
+		}
+	done:
+		if matched < 0 {
+			continue
+		}
+		out = append(out, text[start:matched+1])
+	}
+	return out
+}
 // 兼容 OpenAI function-call 风格的 <tool_call>/<function>/<parameter> 标签。
 // 支持多种变体：
 //   - <tool_call><function>name</function><parameter name="k">v</parameter></tool_call>
@@ -592,9 +643,7 @@ func parseToolAction(text string) (*toolAction, bool) {
 	if m := toolJSONRe.FindStringSubmatch(text); len(m) >= 2 {
 		candidates = append(candidates, m[1])
 	}
-	if m := toolJSONReBare.FindString(text); m != "" {
-		candidates = append(candidates, m)
-	}
+	candidates = append(candidates, extractBareToolJSON(text)...)
 	for _, c := range candidates {
 		var act toolAction
 		if err := json.Unmarshal([]byte(c), &act); err != nil {
@@ -649,6 +698,10 @@ func stripTags(text string) string {
 	text = thinkingRe.ReplaceAllString(text, "")
 	text = planRe.ReplaceAllString(text, "")
 	text = toolJSONRe.ReplaceAllString(text, "")
+	// 移除裸 JSON 工具调用（如 ｜｜DSML｜｜ 包裹的 {"action":"tool",...}），避免最终正文残留
+	for _, j := range extractBareToolJSON(text) {
+		text = strings.Replace(text, j, "", 1)
+	}
 	text = funcCallsRe.ReplaceAllString(text, "")        // 移除 <function_calls>...</function_calls>
 	text = toolCallTagRe.ReplaceAllString(text, "")      // 移除 <tool_call>...</tool_call> 标签
 	text = toolCallFuncAttrRe.ReplaceAllString(text, "") // 移除 <function name="x">...</function>
@@ -753,12 +806,35 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		result.Usage = accUsage
 	}
 
-	// 记录哪些技能被提及（简单命中：模型思考中出现技能名）
+	// 技能匹配：仅展示被模型在思考中实际运用到的「已启用」技能（不展示未启用的）。
+	// 用 markedSkills 记录已展示过的技能名避免重复，enabledCount 统计已启用的技能数。
+	markedSkills := map[string]bool{}
+	enabledCount := 0
+	for _, s := range d.Skills {
+		if s.Enabled {
+			enabledCount++
+		}
+	}
+	// 记录哪些技能在思考中被模型提及（简单命中：思考文本出现技能名）即展示。
 	markSkills := func(text string) {
 		for _, s := range d.Skills {
-			if s.Enabled && s.Name != "" && strings.Contains(text, s.Name) {
-				result.Steps = append(result.Steps, AgentStep{Type: "skill", Name: s.Name})
-				m.b.Emit("agent:step", AgentStep{Type: "skill", Name: s.Name})
+			if !s.Enabled || s.Name == "" || markedSkills[s.Name] {
+				continue
+			}
+			if strings.Contains(text, s.Name) {
+				markedSkills[s.Name] = true
+				desc := s.Description
+				if desc == "" {
+					desc = "(无描述)"
+				}
+				step := AgentStep{
+					Type:   "skill",
+					Name:   s.Name,
+					Input:  "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt,
+					Output: "模型在思考中运用了该技能",
+				}
+				result.Steps = append(result.Steps, step)
+				m.b.Emit("agent:step", step)
 			}
 		}
 	}
@@ -879,6 +955,18 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 				result.Content = stripTags(out2)
 			}
 		}
+	}
+
+	// 技能匹配过程反馈：本次启用了技能但未匹配到任何适用场景时，明确提示匹配机制在运行，
+	// 让用户知道「有匹配过程，只是没命中」，而不是以为技能没生效。
+	if enabledCount > 0 && len(markedSkills) == 0 {
+		step := AgentStep{
+			Type:   "skill",
+			Name:   "技能匹配",
+			Output: fmt.Sprintf("本次已启用 %d 个技能，但未匹配到适用场景（模型未在思考中运用任何技能）", enabledCount),
+		}
+		result.Steps = append(result.Steps, step)
+		m.b.Emit("agent:step", step)
 	}
 
 	if result.Content == "" {

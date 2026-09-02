@@ -6,6 +6,8 @@
       <span v-if="step.server && step.server !== 'builtin'" class="tc-server">@{{ step.server }}</span>
       <span v-else-if="step.server === 'builtin'" class="tc-server builtin">内置</span>
       <span v-if="step.error || step.type === 'tool-failed'" class="tc-badge err">失败</span>
+      <span v-else-if="step.type === 'skill' && step.name === '技能匹配'" class="tc-badge skill-none">未匹配</span>
+      <span v-else-if="step.type === 'skill' && step.output" class="tc-badge skill">已运用</span>
       <span v-else-if="running" class="tc-badge run">运行中</span>
       <span v-else class="tc-badge ok">成功</span>
       <span v-if="running" class="tc-spin"></span>
@@ -36,10 +38,12 @@ const props = defineProps({ step: { type: Object, required: true } })
 const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'tool-failed': '⚠️' }
 const icon = iconMap[props.step.type] || '🔧'
 
-// 由 step 自身推断「是否运行中」：已有入参、但还没有结果/错误 → 仍在进行中
+// 由 step 自身推断「是否运行中」：已有入参、但还没有结果/错误 → 仍在进行中。
+// 注意：skill 类型不是实时工具调用（是 system prompt 注入），不应视为「运行中」，始终可展开查看。
 const running = computed(() => {
   const s = props.step
-  return !!(s.input || s.type === 'tool' || s.type === 'skill') &&
+  if (s.type === 'skill') return false
+  return !!(s.input || s.type === 'tool') &&
     !(s.output || s.error || s.type === 'tool-failed')
 })
 // 有内容才允许展开/折叠
@@ -82,6 +86,8 @@ function toggle() {
 .tc-badge.ok { color: var(--el-color-success); background: var(--el-color-success-light-9); }
 .tc-badge.err { color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
 .tc-badge.run { color: var(--primary); background: var(--el-color-primary-light-9); }
+.tc-badge.skill { color: #8e44ad; background: #f5eef8; border: 1px solid #8e44ad; }
+.tc-badge.skill-none { color: #8a8a8a; background: #f0f0f0; border: 1px solid #cfcfcf; }
 .tc-toggle { color: var(--text-muted); margin-left: 2px; font-size: 11px; }
 /* 运行中旋转的加载小圈 */
 .tc-spin { width: 11px; height: 11px; margin-left: 2px; border: 2px solid var(--primary); border-top-color: transparent; border-radius: 50%; animation: tc-spin 0.8s linear infinite; }

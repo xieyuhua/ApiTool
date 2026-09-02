@@ -303,13 +303,14 @@ func (m *Manager) readAgentData() AgentData {
 		snap.LastDB = oldLast
 		_ = m.host.Store().SaveDBAnalysis(snap)
 	}
-	if snap.Schemas != nil {
+	// 仅当独立表确有数据时才覆盖，避免「独立表空 / 回退模式」时用空值清掉 meta.agent 中已同步的数据。
+	if len(snap.Schemas) > 0 {
 		data.Config.DBSchemas = schemasFromJSONMap(snap.Schemas)
 	}
-	if snap.Semantics != nil {
+	if len(snap.Semantics) > 0 {
 		data.Config.DBSemantics = snap.Semantics
 	}
-	if snap.LastDB != nil {
+	if len(snap.LastDB) > 0 {
 		data.Config.DBLastDB = snap.LastDB
 	}
 	if data.Config.DBSchemas == nil {
@@ -536,16 +537,60 @@ func (m *Manager) SaveAgentConfig(cfg AgentConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d := m.readAgentData()
-	if cfg.MaxLoops <= 0 {
-		cfg.MaxLoops = 6
+	// 合并而非整体覆盖：前端「同步表结构」等场景只回传部分字段（dbSchemas 等），
+	// 直接 d.Config = cfg 会把内存中已有的 Tools / SystemPrompt / Mode 等配置清零。
+	// 仅当传入字段「非默认零值」时才覆盖，避免配置被局部保存吞掉。
+	if cfg.ActiveDBConn != "" || cfg.DBLastDB != nil {
+		d.Config.ActiveDBConn = cfg.ActiveDBConn
 	}
-	if cfg.ContextLimit <= 0 {
-		cfg.ContextLimit = 20
+	if cfg.DBSchemas != nil {
+		d.Config.DBSchemas = cfg.DBSchemas
 	}
-	if cfg.Mode != "plan" {
-		cfg.Mode = "react"
+	if cfg.DBSemantics != nil {
+		d.Config.DBSemantics = cfg.DBSemantics
 	}
-	d.Config = cfg
+	if cfg.DBLastDB != nil {
+		d.Config.DBLastDB = cfg.DBLastDB
+	}
+	if cfg.SystemPrompt != "" {
+		d.Config.SystemPrompt = cfg.SystemPrompt
+	}
+	if cfg.Mode != "" {
+		d.Config.Mode = cfg.Mode
+	}
+	if cfg.MaxLoops > 0 {
+		d.Config.MaxLoops = cfg.MaxLoops
+	}
+	if cfg.ContextLimit > 0 {
+		d.Config.ContextLimit = cfg.ContextLimit
+	}
+	if cfg.Tools.Enabled != nil || cfg.Tools.Desc != nil {
+		d.Config.Tools = cfg.Tools
+	}
+	if cfg.EnableDBAnalysis {
+		d.Config.EnableDBAnalysis = cfg.EnableDBAnalysis
+	}
+	if cfg.Temperature != 0 {
+		d.Config.Temperature = cfg.Temperature
+	}
+	if cfg.MaxTokens > 0 {
+		d.Config.MaxTokens = cfg.MaxTokens
+	}
+	if cfg.MaxToolOutput > 0 {
+		d.Config.MaxToolOutput = cfg.MaxToolOutput
+	}
+	if cfg.MaxFileRead > 0 {
+		d.Config.MaxFileRead = cfg.MaxFileRead
+	}
+	if cfg.ShowThinking {
+		d.Config.ShowThinking = cfg.ShowThinking
+	}
+	if cfg.EnablePolish {
+		d.Config.EnablePolish = cfg.EnablePolish
+	}
+	if cfg.EnableChart {
+		d.Config.EnableChart = cfg.EnableChart
+	}
 	return m.writeAgentData(d)
 }
 

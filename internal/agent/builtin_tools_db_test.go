@@ -109,3 +109,90 @@ func TestSaveAndLoadSkills(t *testing.T) {
 		t.Fatal("独立表应为非空")
 	}
 }
+
+// TestExtractBareToolJSON 验证带嵌套 arguments 的裸 JSON 工具调用（如 ｜｜DSML｜｜ 包裹）能被正确解析。
+func TestExtractBareToolJSON(t *testing.T) {
+	raw := "｜｜DSML｜｜\n{\"action\":\"tool\",\"server\":\"builtin\",\"tool\":\"db_query\",\"arguments\":{\"connId\":\"db_1788254096769\",\"database\":\"diygw\",\"sql\":\"SELECT * FROM diygw_days_erp\"}}\n｜｜DSML｜｜"
+	act, ok := parseToolAction(raw)
+	if !ok {
+		t.Fatal("嵌套 arguments 的裸 JSON 工具调用未被解析")
+	}
+	if act.Tool != "db_query" {
+		t.Fatalf("解析出的工具名错误: %q", act.Tool)
+	}
+	if act.Server != "builtin" {
+		t.Fatalf("解析出的 server 错误: %q", act.Server)
+	}
+	if act.Arguments["connId"] != "db_1788254096769" {
+		t.Fatalf("解析出的 arguments.connId 错误: %v", act.Arguments["connId"])
+	}
+	// 同时验证 stripTags 能移除裸 JSON 工具调用，避免最终正文残留。
+	clean := stripTags(raw)
+	if strings.Contains(clean, "\"action\"") {
+		t.Fatalf("stripTags 未移除裸 JSON 工具调用，残留: %q", clean)
+	}
+}
+
+// TestDBSchemasIndependentTableRoundtrip 验证同步的表结构经独立表存储后能正确读回，
+// 且 db_query 的未同步表校验能匹配到已同步的表（排查「明明同步了却提示未同步」）。
+func TestDBSchemasIndependentTableRoundtrip(t *testing.T) {
+	m := newTestManager(t)
+	connID := "db_1788254096769"
+	database := "diygw"
+	table := "diygw_days_erp"
+	cfg := m.LoadAgentData().Config
+	cfg.DBSchemas = map[string]DBSyncedTable{
+		dbSchemaKey(connID, database, table): {
+			ConnID:   connID,
+			Database: database,
+			Table:    table,
+			Rows:     100,
+			Columns:  []DBSyncedColumn{{Name: "add_time", Type: "int"}},
+		},
+	}
+	if err := m.SaveAgentConfig(cfg); err != nil {
+		t.Fatalf("SaveAgentConfig 失败: %v", err)
+	}
+	// 重新读回（模拟重启后从独立表加载）
+	got := m.LoadAgentData().Config
+	if len(got.DBSchemas) == 0 {
+		t.Fatal("独立表存储后 DBSchemas 为空，表结构未持久化")
+	}
+	st := syncedTableSet(got, connID, database)
+	if !st[strings.ToLower(table)] {
+		t.Fatalf("已同步的表 %s 未出现在 syncedTableSet 中，实际 DBSchemas 键: %v", table, got.DBSchemas)
+	}
+	// 校验一条引用该表的 SQL 应放行
+	if err := validateSyncedTables("SELECT * FROM diygw_days_erp", st, connID, database, got); err != nil {
+		t.Fatalf("已同步表却被误判为未同步: %v", err)
+	}
+}
+
+// TestDBSchemasPartialConfigSave 模拟前端 saveConfig 只传部分字段（dbSchemas 等），
+// 验证残缺 cfg 覆盖 Config 后仍保留已同步表结构（排查「同步了却提示未同步」）。
+func TestDBSchemasPartialConfigSave(t *testing.T) {
+	m := newTestManager(t)
+	connID := "db_1788254096769"
+	database := "diygw"
+	table := "diygw_days_erp"
+	// 前端只传这 4 个字段，其余为默认零值
+	partial := AgentConfig{
+		ActiveDBConn: connID,
+		DBSchemas: map[string]DBSyncedTable{
+			dbSchemaKey(connID, database, table): {
+				ConnID: connID, Database: database, Table: table, Rows: 100,
+				Columns: []DBSyncedColumn{{Name: "add_time", Type: "int"}},
+			},
+		},
+		DBSemantics: map[string]string{},
+		DBLastDB:    map[string]string{connID: database},
+	}
+	if err := m.SaveAgentConfig(partial); err != nil {
+		t.Fatalf("SaveAgentConfig 失败: %v", err)
+	}
+	got := m.LoadAgentData().Config
+	st := syncedTableSet(got, connID, database)
+	if !st[strings.ToLower(table)] {
+		t.Fatalf("残缺 cfg 保存后已同步表 %s 丢失，DBSchemas: %v", table, got.DBSchemas)
+	}
+}

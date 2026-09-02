@@ -352,7 +352,7 @@ var sqlTableRe = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([^\s,()]+)`)
 // validateSyncedTables 校验 SQL 引用的表是否全部落在已同步集合内。
 // 允许 information_schema / pg_catalog 等系统视图（部分诊断需要）；
 // 派生表 (SELECT ...) 因紧跟左括号，正则不会捕获，故不会误判。
-func validateSyncedTables(sql string, synced map[string]bool) error {
+func validateSyncedTables(sql string, synced map[string]bool, connID, database string, cfg AgentConfig) error {
 	allowed := map[string]bool{"information_schema": true, "pg_catalog": true, "pg_toast": true}
 	var bad []string
 	for _, mt := range sqlTableRe.FindAllStringSubmatch(sql, -1) {
@@ -368,7 +368,20 @@ func validateSyncedTables(sql string, synced map[string]bool) error {
 		bad = append(bad, tok)
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("SQL 引用了未同步的表：%s。本工具只允许查询你在「插件/数据库连接」中已同步配置的表，请仅使用 db_schema 返回的表名来编写 SQL", strings.Join(bad, "、"))
+		// 给出同连接同库的已同步表清单，便于判断是「连接/库不匹配」还是「确实没同步」。
+		var syncedNames []string
+		for _, v := range cfg.DBSchemas {
+			if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
+				syncedNames = append(syncedNames, v.Table)
+			}
+		}
+		hint := ""
+		if len(syncedNames) == 0 {
+			hint = fmt.Sprintf("（连接 %s / 库 %s 下你尚未同步任何表结构；请先在该连接该库执行「同步表结构」）", connID, database)
+		} else {
+			hint = fmt.Sprintf("（连接 %s / 库 %s 已同步的表：%s）", connID, database, strings.Join(syncedNames, "、"))
+		}
+		return fmt.Errorf("SQL 引用了未同步的表：%s。本工具只允许查询你在「插件 / 数据库连接」中已同步配置的表，请仅使用 db_schema 返回的表名来编写 SQL。%s", strings.Join(bad, "、"), hint)
 	}
 	return nil
 }
@@ -398,7 +411,7 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 	// 校验：SQL 只能引用你已同步配置的表，禁止臆测/越权访问未同步表
 	cfg := m.LoadAgentData().Config
 	synced := syncedTableSet(cfg, connID, database)
-	if err := validateSyncedTables(sql, synced); err != nil {
+	if err := validateSyncedTables(sql, synced, connID, database, cfg); err != nil {
 		return "", err
 	}
 	conn, err := findDBConn(m, connID)
