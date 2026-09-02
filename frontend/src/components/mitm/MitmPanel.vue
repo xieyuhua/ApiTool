@@ -313,6 +313,7 @@
     <div v-if="ctxMenu" class="ctx-mask" @click="closeCtxMenu" @contextmenu.prevent="closeCtxMenu">
       <div class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop @contextmenu.prevent.stop>
         <div class="ctx-item" @click="ctxCopyAddr">复制地址</div>
+        <div class="ctx-item" @click="ctxReplay">重放请求</div>
         <div class="ctx-item" @click="ctxCopyCurl">复制为 curl 命令</div>
         <div class="ctx-item" @click="ctxCopyRawHttp">复制原始请求</div>
         <div class="ctx-item" @click="ctxCopyReqHeaders">复制请求头</div>
@@ -534,7 +535,7 @@ import {
   SniffGetSession, SniffDeleteSession, SniffExportOpenAPI, SniffInstallCA, SniffCAPEM,
   SniffSetSystemProxy, SniffGenerateApiFromSession, SniffGenerateApiFromRecords,
   SniffImportCA, SniffPickCAFile, SniffGetSessionErrors, SniffGetRewrites, SniffSetRewrites,
-  CopyToClipboard
+  CopyToClipboard, SendRequest
 } from '../../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { store, reloadStore } from '../../store'
@@ -1216,6 +1217,50 @@ function buildRawHttp(rec) {
   return out
 }
 
+function ctxReplay() {
+  const rec = ctxMenu.value.rec
+  closeCtxMenu()
+  let bodyType = rec.reqBodyType
+  if (!bodyType || bodyType === 'none') {
+    if (rec.reqBody) bodyType = /^\s*[{\[]/.test(rec.reqBody) ? 'json' : 'text'
+    else bodyType = 'none'
+  }
+  const spec = {
+    method: rec.method,
+    url: rec.url,
+    headers: rec.reqHeaders,
+    bodyType: bodyType,
+    body: rec.reqBody || '',
+    timeoutSec: 30,
+  }
+  const loading = ElMessage({ message: '重放请求中…', type: 'info', duration: 0 })
+  SendRequest(spec).then(r => {
+    loading.close()
+    const headers = (r.headers && Object.keys(r.headers).length)
+      ? Object.entries(r.headers).map(([k, v]) => ({ key: k, value: v, enabled: true }))
+      : []
+    const replayed = {
+      ...rec,
+      statusCode: r.status,
+      statusText: r.statusText,
+      respHeaders: headers,
+      respBody: r.error ? ('请求失败：' + r.error) : r.body,
+      respBodyType: r.isJson ? 'json' : 'text',
+      respContentType: (r.headers && r.headers['Content-Type']) || '',
+      durationMs: r.durationMs,
+      note: r.error ? ('重放失败 · ' + r.error) : ('重放成功 · ' + new Date().toLocaleTimeString()),
+      reqClipped: false,
+      respClipped: false,
+    }
+    selected.value = replayed
+    detailTab.value = 'resb'
+    if (r.error) ElMessage.error('重放请求失败：' + r.error)
+    else ElMessage.success('重放成功 · ' + r.status + ' · ' + r.durationMs + 'ms')
+  }).catch(e => {
+    loading.close()
+    ElMessage.error('重放请求异常：' + (e && e.message ? e.message : e))
+  })
+}
 function ctxCopyAddr() { copyText(ctxMenu.value.rec.url); closeCtxMenu() }
 function ctxCopyCurl() { copyText(buildCurl(ctxMenu.value.rec)); closeCtxMenu() }
 function ctxCopyRawHttp() { copyText(buildRawHttp(ctxMenu.value.rec)); closeCtxMenu() }
