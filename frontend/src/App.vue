@@ -225,13 +225,15 @@ const navs = [
       </div>
     </template>
 
-    <DocCenter v-else-if="store.view === 'docs'" />
-    <TestCenter v-else-if="store.view === 'testing'" />
-    <CapturePanel v-else-if="store.view === 'capture'" />
-    <MitmPanel v-else-if="store.view === 'mitm'" />
-    <Tools v-else-if="store.view === 'tools'" />
-    <AgentChat v-else-if="store.view === 'agent'" />
-    <SettingsPanel v-else-if="store.view === 'settings'" />
+    <keep-alive v-else>
+      <DocCenter v-if="store.view === 'docs'" />
+      <TestCenter v-else-if="store.view === 'testing'" />
+      <CapturePanel v-else-if="store.view === 'capture'" />
+      <MitmPanel v-else-if="store.view === 'mitm'" />
+      <Tools v-else-if="store.view === 'tools'" />
+      <AgentChat v-else-if="store.view === 'agent'" />
+      <SettingsPanel v-else-if="store.view === 'settings'" />
+    </keep-alive>
   </div>
 
   <ClipboardHistory v-if="clipVisible" @close="closeClip" />

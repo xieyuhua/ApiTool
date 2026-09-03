@@ -218,16 +218,22 @@ func (m *Manager) ExportOpenAPI(id, title string) (string, error) {
 		}
 		return "", err
 	}
-	if m.bus != nil {
-		save, serr := m.bus.SaveFileDialog(runtimeSaveDialog(title))
-		if serr == nil && save != "" {
-			if werr := writeFile(save, text); werr != nil {
-				return "", werr
-			}
-			return save, nil
-		}
+	if m.bus == nil {
+		// 无对话框能力（理论上不会发生），不弹窗，返回空路径避免误展示文档内容
+		return "", nil
 	}
-	return text, nil
+	save, serr := m.bus.SaveFileDialog(runtimeSaveDialog(title))
+	if serr != nil {
+		return "", serr
+	}
+	if save == "" {
+		// 用户取消保存，返回空路径（不返回文档内容，避免被当作结果展示）
+		return "", nil
+	}
+	if werr := writeFile(save, text); werr != nil {
+		return "", werr
+	}
+	return save, nil
 }
 
 // ExportOpenAPIText 返回 OpenAPI 文本（供前端复制到剪贴板）。

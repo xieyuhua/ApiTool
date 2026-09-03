@@ -28,7 +28,7 @@
           <el-tag v-if="status.systemProxy" type="info">系统代理已开</el-tag>
           <el-tag v-else type="warning">仅监听端口</el-tag>
           <el-button type="primary" plain size="small" @click="copyProxyAddr" title="复制代理地址到剪贴板">复制代理地址</el-button>
-          <el-button type="danger" @click="stopSniff">停止并保存</el-button>
+          <el-button type="danger" @click="stopSniff" :loading="stopping">停止并保存</el-button>
         </template>
         <el-button @click="installCA" :disabled="status.caInstalled" :loading="installing">
           {{ status.caInstalled ? 'CA 已安装' : '安装根证书' }}
@@ -258,6 +258,7 @@
               <div class="kv"><b>耗时</b><span>{{ selected.durationMs }} ms</span></div>
               <div class="kv"><b>Host</b><span>{{ selected.host }}</span></div>
               <div class="kv"><b>说明</b><span>{{ selected.note || '—' }}</span></div>
+              <div class="kv"><b>抓包时间</b><span>{{ selected.timestamp ? formatTime(selected.timestamp) : '—' }}</span></div>
             </el-tab-pane>
             <el-tab-pane label="请求头" name="reqh">
               <div class="body-toolbar">
@@ -528,7 +529,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   SniffStatus, SniffStart, SniffStop, SniffSetFilter, SniffListSessions,
@@ -549,6 +550,8 @@ function toggleCert() { certOpen.value = !certOpen.value }
 const proxyAddr = ref('127.0.0.1:8888')
 const sysProxy = ref(false)
 const starting = ref(false)
+const stopping = ref(false) // 是否正在执行“停止并保存”，用于按钮 loading 反馈
+const flushFrozen = ref(false) // 停止后冻结实时渲染，释放主线程避免点击卡顿
 const installing = ref(false)
 const liveRecords = ref([])
 const selected = ref(null)
@@ -795,10 +798,10 @@ function flushRecords() {
   const batch = pendingRecords
   pendingRecords = []
   if (!batch.length) return
-  // 渲染节流：流量高峰期每帧都有新 batch 时，仍保持至少 ~8fps 的合并渲染，
-  // 避免每帧全量 patch 大列表把主线程占满
+  // 渲染节流：流量高峰期每帧都有新 batch 时，仍保持至少 ~4fps 的合并渲染，
+  // 避免每帧全量 patch 大列表把主线程占满，导致界面点击（如“停止并保存”）卡顿无响应
   const now = performance.now()
-  if (now - lastFlushAt < 120) {
+  if (now - lastFlushAt < 250) {
     flushRaf = requestAnimationFrame(flushRecords)
     return
   }
@@ -819,6 +822,8 @@ function flushRecords() {
 
 // 记录到达：先入缓冲，再由 rAF 统一合并渲染（天然限流）。
 function onRecords(raw) {
+  // 停止过程中冻结渲染：抓包已结束，残留事件无需再 patch 大列表，避免占用主线程
+  if (flushFrozen.value) return
   const batch = Array.isArray(raw) ? raw : [raw]
   if (!batch.length) return
   for (const r of batch) {
@@ -827,6 +832,16 @@ function onRecords(raw) {
   if (flushRaf == null) {
     flushRaf = requestAnimationFrame(flushRecords)
   }
+}
+
+// 停止抓包时立即冻结实时渲染循环，释放主线程，保证“停止并保存”点击即时响应
+function freezeFlush() {
+  if (flushRaf != null) {
+    cancelAnimationFrame(flushRaf)
+    flushRaf = null
+  }
+  pendingRecords = []
+  flushFrozen.value = true
 }
 
 const errorList = ref([])
@@ -1054,6 +1069,17 @@ onMounted(async () => {
   })
 })
 
+// 切回该页（keep-alive 激活）时异步刷新状态与会话列表，确保数据最新。
+// 注意：不重置 liveRecords，已抓流量快照由 keep-alive 保留，这里仅做增量刷新。
+onActivated(async () => {
+  try {
+    const s = await SniffStatus()
+    Object.assign(status, s)
+    sysProxy.value = !!s.systemProxy
+  } catch (e) { /* ignore */ }
+  try { sessions.value = await SniffListSessions() } catch (e) {}
+})
+
 onBeforeUnmount(() => {
   if (flushRaf != null) {
     cancelAnimationFrame(flushRaf)
@@ -1071,6 +1097,7 @@ function setSysProxy(val) {
 
 async function startSniff() {
   starting.value = true
+  flushFrozen.value = false // 重新开始抓包，恢复实时渲染
   try {
     applyFilter()
     const addr = proxyAddr.value.trim() || '127.0.0.1:8888'
@@ -1089,12 +1116,20 @@ async function startSniff() {
 }
 
 async function stopSniff() {
+  if (stopping.value) return
+  stopping.value = true
+  // 先冻结实时渲染并释放主线程，确保后续 SniffStop / 列表刷新不被大列表 patch 阻塞
+  freezeFlush()
   try {
+    // SniffStop 后端立即返回（落盘在后台 goroutine），秒回
     await SniffStop()
-    sessions.value = await SniffListSessions()
     ElMessage.success('已停止并保存会话')
+    // 列表刷新可能读取较多历史会话，放最后且不阻塞“已停止”反馈
+    sessions.value = await SniffListSessions()
   } catch (e) {
     ElMessage.error('停止失败：' + String(e))
+  } finally {
+    stopping.value = false
   }
 }
 
@@ -1364,6 +1399,14 @@ function kvToText(kvs) {
   return kvs.filter(k => k.enabled !== false).map(k => k.key + ': ' + k.value).join('\n')
 }
 
+// 将 RFC3339 时间戳格式化为「年-月-日 时:分:秒」
+function formatTime(ts) {
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 async function refreshSessions() {
   try { sessions.value = await SniffListSessions() } catch (e) {}
 }
@@ -1372,7 +1415,7 @@ async function exportSession(id, name) {
   try {
     const path = await SniffExportOpenAPI(id, name || 'openapi')
     if (path) ElMessage.success('已导出：' + path)
-    else ElMessage.success('已生成 OpenAPI 文档')
+    else ElMessage.info('已取消导出')
   } catch (e) {
     ElMessage.error(String(e))
   }

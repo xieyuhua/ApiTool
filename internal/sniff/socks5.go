@@ -58,6 +58,10 @@ type hybridListener struct {
 	net.Listener
 	upstream string // 内部 HTTP 代理地址 host:port
 	wg       sync.WaitGroup
+
+	mu     sync.Mutex
+	conns  map[net.Conn]struct{} // 当前活跃连接，用于 Close 时强制断开
+	closed bool
 }
 
 // startHybridListener 在 addr 上启动混合代理监听。
@@ -67,7 +71,11 @@ func startHybridListener(addr, upstream string) (*hybridListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &hybridListener{Listener: ln, upstream: upstream}
+	l := &hybridListener{
+		Listener: ln,
+		upstream: upstream,
+		conns:    make(map[net.Conn]struct{}),
+	}
 	l.wg.Add(1)
 	go l.serve()
 	return l, nil
@@ -83,19 +91,48 @@ func (l *hybridListener) serve() {
 		if err != nil {
 			return // 监听关闭（Stop 时触发）
 		}
+		// 关闭检查、登记连接、wg.Add 必须在同一把锁内完成，避免 Close
+		// 已遍历 conns 后仍有新连接被登记而导致 wg.Wait 永久阻塞。
+		l.mu.Lock()
+		if l.closed {
+			l.mu.Unlock()
+			c.Close()
+			continue
+		}
+		l.conns[c] = struct{}{}
 		l.wg.Add(1)
+		l.mu.Unlock()
 		go func() {
 			defer l.wg.Done()
+			defer func() {
+				l.mu.Lock()
+				delete(l.conns, c)
+				l.mu.Unlock()
+				c.Close()
+			}()
 			l.handleConn(c)
 		}()
 	}
 }
 
-// Close 关闭监听器并等待所有处理中的连接退出。
+// Close 关闭监听器并强制断开所有活跃连接，随后等待处理协程退出。
+// 关键：必须主动关闭在途连接。否则 handleConn 中长连接（如 keep-alive、
+// SOCKS5 隧道、流媒体拉流）不会主动退出，导致 wg.Wait 长时间甚至永久阻塞，
+// 进而使上层 Manager.Stop（即前端“停止并保存”按钮）卡死无法返回。
 func (l *hybridListener) Close() error {
-	err := l.Listener.Close()
+	l.mu.Lock()
+	l.closed = true
+	conns := l.conns
+	l.conns = make(map[net.Conn]struct{})
+	l.mu.Unlock()
+
+	_ = l.Listener.Close()
+	// 强制关闭所有活跃连接，触发其转发循环出错并退出，使 wg.Wait 立即返回
+	for c := range conns {
+		c.Close()
+	}
 	l.wg.Wait()
-	return err
+	return nil
 }
 
 // handleConn 依据首字节分发到 SOCKS5 或 HTTP 处理。
