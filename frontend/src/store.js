@@ -66,6 +66,9 @@ export const store = reactive({
       scheme: '',                // 主题方案 id（空=自定义，使用 theme+accent）
       accent: '#165dff',         // 主题色（主色）
       clipboard: { monitor: true, maxItems: 200 },
+      // 详情代码块字体（作用于右侧详情所有代码块）：字体族与字号
+      codeFont: 'Consolas, "Courier New", monospace',
+      codeFontSize: 12.5,
     },
     plugins: { connections: [] },
     clipboard: { history: [] },
@@ -243,6 +246,27 @@ export function setAccent(c) {
   saveNow()
 }
 
+// ---------------- 详情代码块字体 ----------------
+// 通过 CSS 变量 --code-font / --code-font-size 统一控制右侧详情所有代码块的字体与字号。
+const DEFAULT_CODE_FONT = 'Consolas, "Courier New", monospace'
+export function applyCodeFont() {
+  const root = document.documentElement
+  const s = store.data.settings
+  root.style.setProperty('--code-font', s.codeFont || DEFAULT_CODE_FONT)
+  root.style.setProperty('--code-font-size', (Number(s.codeFontSize) || 12.5) + 'px')
+}
+export function setCodeFont(val) {
+  store.data.settings.codeFont = val || DEFAULT_CODE_FONT
+  applyCodeFont()
+  saveNow()
+}
+export function setCodeFontSize(val) {
+  const n = Number(val) || 12.5
+  store.data.settings.codeFontSize = n
+  applyCodeFont()
+  saveNow()
+}
+
 // 当前生效的明暗（用于 UI 回显）
 export function effectiveTheme() {
   return document.documentElement.getAttribute('data-theme') || 'light'
@@ -386,6 +410,8 @@ async function loadInto() {
   d.settings.clipboard ||= { monitor: true, maxItems: 200 }
   if (typeof d.settings.clipboard.maxItems !== 'number') d.settings.clipboard.maxItems = 200
   if (typeof d.settings.clipboard.monitor !== 'boolean') d.settings.clipboard.monitor = true
+  d.settings.codeFont ||= 'Consolas, "Courier New", monospace'
+  if (typeof d.settings.codeFontSize !== 'number') d.settings.codeFontSize = 12.5
   d.plugins ||= { connections: [] }
   d.plugins.connections ||= []
   d.clipboard ||= { history: [] }
@@ -415,6 +441,7 @@ export async function initStore() {
   // 由 requestSave() 在需要落盘的编辑处递增，避免每次按键都触发深 diff 导致卡顿。
   watch(() => store.saveRev, () => { scheduleSave(); scheduleAutoSync() })
   applyScheme() // 应用主题方案（含明暗/主色/专属变量，兼容跟随系统）
+  applyCodeFont() // 应用详情代码块字体（来自设置，持久化）
   try {
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

@@ -924,7 +924,7 @@ async function runPressure() {
 .eg-desc { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
 .eg-desc label { font-size: 12px; color: #86909c; }
 .eg-tabs { margin-top: 16px; }
-.mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.mono :deep(textarea) { font-family: var(--code-font); font-size: var(--code-font-size); }
 
 .assert-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .assert-table { border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; }

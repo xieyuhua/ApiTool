@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser } from '../../../wailsjs/go/main/App'
-import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, THEMES, SCHEMES, setScheme } from '../../store'
+import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, setCodeFont, setCodeFontSize, THEMES, SCHEMES, setScheme } from '../../store'
 import CloudSync from './CloudSync.vue'
 
 const dataPath = ref('')
@@ -238,6 +238,33 @@ async function toggleSync() {
       </div>
 
       <div class="card">
+        <div class="card-title">详情代码块字体</div>
+        <div style="font-size:13px;color:#4e5969;margin-bottom:12px">
+          作用于右侧详情所有代码块（接口调试响应、文档预览的请求/响应示例等），选择后将自动记住。
+        </div>
+        <el-form label-width="110px" label-position="left">
+          <el-form-item label="字体">
+            <el-select :model-value="store.data.settings.codeFont" @change="setCodeFont" style="width:300px">
+              <el-option label="Consolas（默认）" value='Consolas, "Courier New", monospace' />
+              <el-option label="Courier New" value='"Courier New", monospace' />
+              <el-option label="Menlo / Monaco" value='Menlo, Monaco, monospace' />
+              <el-option label="JetBrains Mono" value='"JetBrains Mono", Consolas, monospace' />
+              <el-option label="Fira Code" value='"Fira Code", Consolas, monospace' />
+              <el-option label="Source Code Pro" value='"Source Code Pro", Consolas, monospace' />
+              <el-option label="微软雅黑等宽" value='"Microsoft YaHei Mono", Consolas, monospace' />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="字号(px)">
+            <el-input-number :model-value="Number(store.data.settings.codeFontSize) || 12.5" :min="10" :max="24" :step="0.5" @change="setCodeFontSize" />
+          </el-form-item>
+        </el-form>
+        <div class="code-font-preview" :style="{ fontFamily: store.data.settings.codeFont, fontSize: (Number(store.data.settings.codeFontSize) || 12.5) + 'px' }">{
+  "status": 200,
+  "data": { "name": "张三", "list": [1, 2, 3] }
+}</div>
+      </div>
+
+      <div class="card">
         <div class="card-title">剪贴板记录</div>
         <el-form label-width="120px" label-position="left">
           <el-form-item label="自动监听">
@@ -269,4 +296,8 @@ async function toggleSync() {
 
 <style scoped>
 code { background: #f2f3f5; padding: 1px 5px; border-radius: 4px; }
+.code-font-preview {
+  margin-top: 4px; background: var(--code-bg); color: var(--code-text); border-radius: 8px;
+  padding: 12px; white-space: pre; overflow: auto; line-height: 1.6;
+}
 </style>

@@ -574,7 +574,7 @@ function buildRespDetail(r) {
 .dirty-tip { color: #fa8c16; font-size: 12px; font-weight: 500; }
 .url-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .url-row .el-input { flex: 1; min-width: 0; }
-.mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.mono :deep(textarea) { font-family: var(--code-font); font-size: var(--code-font-size); }
 .resp-meta { color: #86909c; font-size: 12px; font-weight: 400; margin-left: 10px; }
 .resp-acts { display: inline-flex; gap: 8px; align-items: center; }
 .resp-body { user-select: text; cursor: text; }

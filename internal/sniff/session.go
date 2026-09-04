@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	mitm "github.com/lqqyt2423/go-mitmproxy/proxy"
@@ -43,6 +44,12 @@ type TrafficRecord struct {
 	RespBody    string            `json:"respBody"`
 	RespBodyType string           `json:"respBodyType"`
 	RespContentType string        `json:"respContentType"` // 响应 Content-Type（真实值，用于图片等预览）
+	// RespBodyBase64 为原始响应体字节的 base64。仅在响应体不是合法 UTF-8（二进制/GBK 等本地编码）
+	// 或 Content-Type 声明了非 UTF-8 字符集时才附带，供前端按原字符编码或十六进制查看原始内容
+	// （RespBody 是强转的字符串，此时已是乱码且不可逆）。图片响应已整体 base64 存入 RespBody，不再重复附带。
+	RespBodyBase64 string `json:"respBodyBase64,omitempty"`
+	// RespBodyBinary 表示原始响应体字节不是合法 UTF-8（二进制数据，如 protobuf/字体/压缩包等）。
+	RespBodyBinary bool `json:"respBodyBinary,omitempty"`
 	DurationMs  int64             `json:"durationMs"`
 	ProcessName string            `json:"processName"` // 进程名（尽力而为，Windows 需驱动级，暂留空/Host）
 	Note        string            `json:"note"`
@@ -271,6 +278,10 @@ func (s *SessionStore) Save(sess *Session) error {
 				rec.RespBody = rec.RespBody[:maxSaveRespBody]
 				rec.RespBodyTruncated = true
 			}
+			// 原始字节 base64 体积约为原文的 1.33 倍，过大时丢弃（仅落盘副本），避免会话文件膨胀
+			if len(rec.RespBodyBase64) > maxSaveRespBody {
+				rec.RespBodyBase64 = ""
+			}
 			recs[i] = rec
 		}
 		snap.Records = recs
@@ -394,6 +405,60 @@ func newID(prefix string) string {
 	return prefix + "-" + time.Now().Format("20060102150405") + "-" + randHex(4)
 }
 
+// rawBodyKeepLimit 附带原始响应体字节 base64 的上限（按原始字节数计）。
+// 超过该大小不再附带，避免实时推送与落盘体积膨胀；此时前端退化为文本展示。
+const rawBodyKeepLimit = 1 << 20 // 1MB
+
+// nonUTF8Charsets 需要保留原始字节的非 UTF-8 字符集（这些编码直接转 string 会乱码）。
+var nonUTF8Charsets = map[string]bool{
+	"gbk": true, "gb2312": true, "gb18030": true, "x-gbk": true,
+	"big5": true, "big5-hkscs": true,
+	"shift_jis": true, "shift-jis": true, "euc-jp": true,
+	"euc-kr": true, "ks_c_5601-1987": true,
+	"windows-1251": true, "cp1251": true,
+}
+
+// declaredNonUTF8Charset 返回 Content-Type 中声明的非 UTF-8 字符集名（gbk/big5/...），
+// 返回空串表示未声明或声明为 UTF-8/ASCII（此时转 string 不会乱码）。
+func declaredNonUTF8Charset(contentType string) string {
+	ct := strings.ToLower(contentType)
+	i := strings.Index(ct, "charset=")
+	if i < 0 {
+		return ""
+	}
+	cs := strings.TrimSpace(ct[i+len("charset="):])
+	if j := strings.IndexAny(cs, "; \t\"'") ; j >= 0 {
+		cs = cs[:j]
+	}
+	cs = strings.Trim(cs, `"' `)
+	if nonUTF8Charsets[cs] {
+		return cs
+	}
+	return ""
+}
+
+// fillRespRawBody 必要时为记录填充原始响应体字节的 base64，
+// 让前端可以按原字符编码（如 GBK）或十六进制查看原始内容，而不是展示强转后的乱码。
+// 触发条件：字节不是合法 UTF-8（二进制数据或本地编码），或 Content-Type 声明了非 UTF-8 字符集。
+func fillRespRawBody(rec *TrafficRecord, respBody []byte, contentType string) {
+	if rec == nil || len(respBody) == 0 {
+		return
+	}
+	// 图片响应已整体 base64 存入 RespBody（供前端预览），不重复附带
+	if strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		return
+	}
+	binary := !utf8.Valid(respBody)
+	if !binary && declaredNonUTF8Charset(contentType) == "" {
+		return
+	}
+	rec.RespBodyBinary = binary
+	if len(respBody) > rawBodyKeepLimit {
+		return
+	}
+	rec.RespBodyBase64 = base64.StdEncoding.EncodeToString(respBody)
+}
+
 // recordFromReqResp 根据解密后的请求与响应生成一条流量记录。
 // reqBody / respBody 为原始字节，由调用方读取。
 func (s *SessionStore) recordFromReqResp(req *http.Request, resp *http.Response, reqBody, respBody []byte) *TrafficRecord {
@@ -456,6 +521,7 @@ func (s *SessionStore) recordFromReqResp(req *http.Request, resp *http.Response,
 		DurationMs:   0,
 		ProcessName:  "",
 	}
+	fillRespRawBody(&rec, respBody, resp.Header.Get("Content-Type"))
 	return &rec
 }
 
@@ -550,6 +616,7 @@ func (s *SessionStore) recordFromReqRespExt(req *mitm.Request, respBody, reqBody
 		DurationMs:   int64(time.Since(startTime).Milliseconds()),
 		ProcessName:  "",
 	}
+	fillRespRawBody(&rec, respBody, respCT)
 	return &rec
 }
 

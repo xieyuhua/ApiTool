@@ -15,6 +15,8 @@
   --nav-active: #165dff;
   --code-bg: #1d2129;
   --code-text: #e5e6eb;
+  --code-font: Consolas, "Courier New", monospace;
+  --code-font-size: 12.5px;
 }
 [data-theme="dark"] {
   --bg: #16181d;
@@ -125,7 +127,7 @@ html, body {
 /* 响应区 */
 .resp-body {
   background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 12px;
-  font-family: Consolas, "Courier New", monospace; font-size: 12.5px;
+  font-family: var(--code-font); font-size: var(--code-font-size);
   max-height: 46vh; overflow: auto; white-space: pre-wrap; word-break: break-all;
   margin: 0;
 }
@@ -147,7 +149,7 @@ html, body {
 .doc-preview th { background: var(--surface-2); }
 .doc-preview pre {
   background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 12px;
-  font-size: 12.5px; overflow: auto; max-height: 320px;
+  font-family: var(--code-font); font-size: var(--code-font-size); overflow: auto; max-height: 320px;
 }
 
 /* 主题方案选择网格 */

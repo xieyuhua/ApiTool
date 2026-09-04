@@ -304,6 +304,10 @@ func writeFile(path, content string) error {
 // 会话存储仍保存完整数据，不影响历史查看与生成接口等功能。
 const liveBodyClipLimit = 1 << 20 // 1MB
 
+// liveRawBodyClipLimit 实时推送时原始字节 base64 的保留上限
+// （1MB 原始字节对应的 base64 长度，取整到 4 的倍数以保证解码合法）。
+const liveRawBodyClipLimit = (liveBodyClipLimit / 3) * 4
+
 // clipLiveRecords 对实时推送的记录做剪裁：非图片 body 超过阈值时截断并打标记。
 // 图片响应保留完整 base64（预览需要）。仅修改推送切片副本，不影响已入库的完整数据。
 func clipLiveRecords(records []TrafficRecord) []TrafficRecord {
@@ -315,6 +319,11 @@ func clipLiveRecords(records []TrafficRecord) []TrafficRecord {
 		}
 		if len(r.RespBody) > liveBodyClipLimit && !strings.HasPrefix(strings.ToLower(r.RespContentType), "image/") {
 			r.RespBody = r.RespBody[:liveBodyClipLimit] + "\n...[已截断]"
+			r.RespClipped = true
+		}
+		// 原始字节 base64 同步裁剪，保证与文本视图看到的数据范围一致
+		if len(r.RespBodyBase64) > liveRawBodyClipLimit {
+			r.RespBodyBase64 = r.RespBodyBase64[:liveRawBodyClipLimit]
 			r.RespClipped = true
 		}
 	}

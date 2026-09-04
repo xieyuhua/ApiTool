@@ -2089,6 +2089,8 @@ export namespace sniff {
 	    respBody: string;
 	    respBodyType: string;
 	    respContentType: string;
+	    respBodyBase64?: string;
+	    respBodyBinary?: boolean;
 	    durationMs: number;
 	    processName: string;
 	    note: string;
@@ -2122,6 +2124,8 @@ export namespace sniff {
 	        this.respBody = source["respBody"];
 	        this.respBodyType = source["respBodyType"];
 	        this.respContentType = source["respContentType"];
+	        this.respBodyBase64 = source["respBodyBase64"];
+	        this.respBodyBinary = source["respBodyBinary"];
 	        this.durationMs = source["durationMs"];
 	        this.processName = source["processName"];
 	        this.note = source["note"];

@@ -231,7 +231,7 @@ async function saveParams() {
 .dirty-tip { color: #fa8c16; font-size: 12px; font-weight: 500; }
 .toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
 .tip { color: #c2c7cf; font-size: 12px; margin-left: 10px; }
-.mono :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.mono :deep(textarea) { font-family: var(--code-font); font-size: var(--code-font-size); }
 .sub-block { margin-bottom: 18px; }
 .sub-title { font-size: 13px; font-weight: 600; color: #4e5969; margin-bottom: 8px; }
 .sub-tip { font-weight: 400; color: #c2c7cf; font-size: 12px; }

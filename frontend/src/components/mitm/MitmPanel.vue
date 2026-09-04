@@ -168,12 +168,12 @@
 
         <!-- 实时流量（标题栏可折叠收起，避免大列表占用主界面空间） -->
         <div class="traffic-head" @click="trafficOpen = !trafficOpen">
-          <span class="th-caret">{{ trafficOpen ? '▾' : '▸' }}</span>
           <span class="th-title">实时流量（{{ filteredRecords.length }} / {{ liveRecords.length }}）
             <em v-if="filteredRecords.length > MAX_RENDER" class="render-limit">仅显示最新 {{ MAX_RENDER }} 条</em>
+            <span class="th-caret">{{ trafficOpen ? '▾' : '▸' }}</span>
           </span>
           <div class="th-actions" @click.stop>
-            <el-input v-model="liveFilter" size="small" placeholder="搜索 host/url/方法" clearable style="width:120px" />
+            <el-input v-model="liveFilter" size="small" placeholder="搜索 host/url/方法" clearable style="width:220px" />
             <el-radio-group v-model="viewMode" size="small">
               <el-radio-button value="list">平铺</el-radio-button>
               <el-radio-button value="group">分组</el-radio-button>
@@ -248,6 +248,14 @@
             </div>
             <div class="dh-actions">
               <el-button size="small" @click="copyText(selected.reqBody)">复制请求体</el-button>
+              <el-select v-model="codeFont" size="small" style="width:132px" placeholder="代码块字体"
+                title="切换右侧详情代码块的展示字体（全局生效并记住选择）">
+                <el-option v-for="f in FONT_OPTIONS" :key="f.value" :label="f.label" :value="f.value" />
+              </el-select>
+              <el-select v-model="codeFontSize" size="small" style="width:78px"
+                title="代码块字号">
+                <el-option v-for="s in FONT_SIZES" :key="s" :label="s + ' px'" :value="s" />
+              </el-select>
               <el-button size="small" type="primary" @click="openImportDialog">生成接口并导入接口树</el-button>
             </div>
           </div>
@@ -264,7 +272,7 @@
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(kvToText(selected.reqHeaders))">复制</el-button>
               </div>
-              <pre class="code">{{ kvToText(selected.reqHeaders) }}</pre>
+              <pre class="code" :style="codeStyle">{{ kvToText(selected.reqHeaders) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="请求体" name="reqb">
               <div class="body-toolbar">
@@ -273,19 +281,19 @@
                   {{ reqFormatted ? '查看原文' : '格式化' }}
                 </el-button>
               </div>
-              <pre class="code">{{ displayBody(selected.reqBody, reqFormatted) }}</pre>
+              <pre class="code" :style="codeStyle">{{ displayBody(selected.reqBody, reqFormatted) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="原始请求" name="rawreq">
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(buildRawHttp(selected))">复制</el-button>
               </div>
-              <pre class="code">{{ buildRawHttp(selected) }}</pre>
+              <pre class="code" :style="codeStyle">{{ buildRawHttp(selected) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="响应头" name="resh">
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(kvToText(selected.respHeaders))">复制</el-button>
               </div>
-              <pre class="code">{{ kvToText(selected.respHeaders) }}</pre>
+              <pre class="code" :style="codeStyle">{{ kvToText(selected.respHeaders) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="响应体" name="resb">
               <div v-if="selected.respClipped" class="clipped-tip">⚠️ 响应体超过实时推送上限（1MB）已被截断，会话历史中保留完整数据</div>
@@ -296,12 +304,22 @@
               </template>
               <template v-else>
                 <div class="body-toolbar">
-                  <el-button link type="primary" size="small" @click="copyText(displayBody(selected.respBody, true))">复制</el-button>
-                  <el-button link type="primary" size="small" @click="toggleFormat('resp')">
+                  <!-- 非 UTF-8/二进制响应：可切换原始字节的展示方式（原编码文本 / 十六进制 / Base64） -->
+                  <el-select v-if="respBytes" v-model="respView" size="small" style="width:126px"
+                    title="切换响应体的展示方式，查看原始字节内容">
+                    <el-option label="自动" value="auto" />
+                    <el-option label="UTF-8 文本" value="utf8" />
+                    <el-option label="GBK 文本" value="gbk" />
+                    <el-option label="十六进制" value="hex" />
+                    <el-option label="Base64" value="base64" />
+                  </el-select>
+                  <span v-if="respBytes" class="body-meta">{{ respBytes.length }} 字节</span>
+                  <el-button link type="primary" size="small" @click="copyText(respBodyView)">复制</el-button>
+                  <el-button v-if="respViewIsText" link type="primary" size="small" @click="toggleFormat('resp')">
                     {{ respFormatted ? '查看原文' : '格式化' }}
                   </el-button>
                 </div>
-                <pre class="code">{{ displayBody(selected.respBody, respFormatted) }}</pre>
+                <pre class="code" :style="codeStyle">{{ respBodyView }}</pre>
               </template>
             </el-tab-pane>
           </el-tabs>
@@ -1482,6 +1500,128 @@ function displayBody(text, formatted) {
   return text
 }
 
+// ---- 详情代码块展示字体（字体 + 字号，作用于右侧详情所有代码块，选择会记住）----
+const FONT_OPTIONS = [
+  { label: '默认（系统等宽）', value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace' },
+  { label: 'Cascadia Code', value: '"Cascadia Code", "Cascadia Mono", Consolas, monospace' },
+  { label: 'JetBrains Mono', value: '"JetBrains Mono", Consolas, monospace' },
+  { label: 'Consolas', value: 'Consolas, "Lucida Console", monospace' },
+  { label: 'Source Code Pro', value: '"Source Code Pro", Consolas, monospace' },
+  { label: 'Fira Code', value: '"Fira Code", Consolas, monospace' },
+  { label: 'Courier New', value: '"Courier New", monospace' },
+  { label: '微软雅黑', value: '"Microsoft YaHei", "微软雅黑", sans-serif' },
+  { label: '黑体', value: 'SimHei, "Microsoft YaHei", sans-serif' },
+  { label: '宋体', value: 'SimSun, "Songti SC", serif' },
+  { label: '楷体', value: 'KaiTi, "Kaiti SC", serif' },
+]
+const FONT_SIZES = [12, 13, 14, 15, 16, 18]
+const FONT_STORE_KEY = 'mitm.codeFont'
+const FONT_SIZE_STORE_KEY = 'mitm.codeFontSize'
+
+function loadFontPref(key, def) {
+  try {
+    const v = localStorage.getItem(key)
+    return v == null ? def : v
+  } catch (e) { return def }
+}
+const codeFont = ref(loadFontPref(FONT_STORE_KEY, FONT_OPTIONS[0].value))
+const codeFontSize = ref(Number(loadFontPref(FONT_SIZE_STORE_KEY, 12)) || 12)
+// 内联样式：未指定字体时留空，沿用 .code 的默认字体栈
+const codeStyle = computed(() => ({
+  fontFamily: codeFont.value || undefined,
+  fontSize: codeFontSize.value + 'px',
+}))
+watch(codeFont, v => { try { localStorage.setItem(FONT_STORE_KEY, v) } catch (e) {} })
+watch(codeFontSize, v => { try { localStorage.setItem(FONT_SIZE_STORE_KEY, String(v)) } catch (e) {} })
+
+// ---- 响应体原始字节视图（解决二进制/GBK 等非 UTF-8 内容显示为乱码）----
+// 后端对非 UTF-8 响应额外下发原始字节的 base64，前端据此还原真实内容。
+const respView = ref('auto') // auto | utf8 | gbk | hex | base64
+const HEX_DUMP_LIMIT = 64 * 1024 // 十六进制视图最多渲染的字节数，避免超大 body 卡死界面
+
+// 解码当前选中记录的原始响应体字节；无 base64（普通文本响应）时返回 null
+const respBytes = computed(() => {
+  const b64 = selected.value && selected.value.respBodyBase64
+  if (!b64) return null
+  try {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return bytes
+  } catch (e) {
+    return null
+  }
+})
+
+// 响应 Content-Type 中声明的字符编码（如 gbk），无声明时为空
+const respCharset = computed(() => {
+  const ct = String((selected.value && selected.value.respContentType) || '').toLowerCase()
+  const m = ct.match(/charset=([\w-]+)/)
+  return m ? m[1] : ''
+})
+
+// 按指定编码把字节解码为文本，不支持该编码时返回 null
+function decodeAs(bytes, enc) {
+  try {
+    return new TextDecoder(enc).decode(bytes)
+  } catch (e) {
+    return null
+  }
+}
+
+// 十六进制转储（偏移 + 16 进制 + ASCII 对照），Charles/Fiddler 风格
+function hexDump(bytes) {
+  const n = Math.min(bytes.length, HEX_DUMP_LIMIT)
+  const lines = []
+  for (let off = 0; off < n; off += 16) {
+    const slice = bytes.subarray(off, Math.min(off + 16, n))
+    let hex = ''
+    for (let i = 0; i < 16; i++) {
+      hex += i < slice.length ? slice[i].toString(16).padStart(2, '0') + ' ' : '   '
+    }
+    let ascii = ''
+    for (let i = 0; i < slice.length; i++) {
+      const b = slice[i]
+      ascii += (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : '.'
+    }
+    lines.push(off.toString(16).padStart(8, '0') + '  ' + hex.trimEnd() + '  |' + ascii + '|')
+  }
+  if (bytes.length > n) lines.push('… 仅展示前 ' + n + ' 字节（共 ' + bytes.length + ' 字节）')
+  return lines.join('\n')
+}
+
+// 当前响应体的展示内容：有原始字节时按所选视图还原，否则沿用原文本展示
+const respBodyView = computed(() => {
+  const rec = selected.value
+  if (!rec) return ''
+  const bytes = respBytes.value
+  // 普通文本响应（后端未下发原始字节）
+  if (!bytes) return displayBody(rec.respBody, respFormatted.value)
+  const show = (text) => displayBody(text, respFormatted.value)
+  const v = respView.value
+  if (v === 'base64') return (rec.respBodyBase64 || '').replace(/(.{64})/g, '$1\n')
+  if (v === 'hex') return hexDump(bytes)
+  if (v === 'gbk') return show(decodeAs(bytes, 'gbk') || decodeAs(bytes, 'utf-8') || String(rec.respBody || ''))
+  if (v === 'utf8') return show(decodeAs(bytes, 'utf-8') || String(rec.respBody || ''))
+  // auto：优先按响应头声明的编码还原；二进制数据默认十六进制；其余按 UTF-8
+  const cs = respCharset.value
+  if (cs && cs !== 'utf-8' && cs !== 'utf8') {
+    const t = decodeAs(bytes, cs)
+    if (t != null) return show(t)
+  }
+  if (rec.respBodyBinary) return hexDump(bytes)
+  const t = decodeAs(bytes, 'utf-8')
+  return show(t != null ? t : String(rec.respBody || ''))
+})
+
+// 当前视图是否为文本（是才显示「格式化」按钮）
+const respViewIsText = computed(() => {
+  if (!respBytes.value) return true
+  if (respView.value === 'hex' || respView.value === 'base64') return false
+  if (respView.value === 'auto' && selected.value && selected.value.respBodyBinary) return false
+  return true
+})
+
 // ---- 响应图片预览 ----
 function isImageResp(r) {
   if (!r || !r.respBody) return false
@@ -1575,7 +1715,11 @@ async function copyProxyAddr() {
 .filter-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .filter-row .fl { font-size: 12px; color: var(--mp-sub); white-space: nowrap; flex-shrink: 0; }
-.traffic-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; color: var(--mp-text); }
+/* 标题靠左、操作区靠右，空间不足时自动换行 */
+.traffic-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-weight: 600; font-size: 13px; color: var(--mp-text);
+}
 .traffic-list {
   flex: 1; overflow: auto; border: 1px solid var(--mp-border); border-radius: var(--mp-radius); min-height: 120px;
   background: #fff; contain: layout style paint; box-shadow: 0 1px 3px rgba(0, 21, 41, .04); padding: 4px;
@@ -1589,7 +1733,7 @@ async function copyProxyAddr() {
 .clipped-tip { font-size: 12px; color: #f76707; background: #fff7e8; border: 1px solid #ffd25e; border-radius: 6px; padding: 4px 8px; margin-bottom: 8px; }
 .traffic-item.active { background: var(--mp-primary-soft); border-color: #bcd4ff; box-shadow: inset 3px 0 0 var(--mp-primary); }
 .traffic-item.checked { background: #f0f6ff; }
-.traffic-head .th-actions { display: flex; gap: 4px; align-items: center; }
+.traffic-head .th-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; }
 /* 协议/方法/状态码 彩色徽章 */
 .traffic-item .proto, .traffic-item .method, .traffic-item .status {
   font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; flex-shrink: 0; letter-spacing: .2px;
@@ -1631,7 +1775,7 @@ async function copyProxyAddr() {
   box-shadow: 0 1px 3px rgba(0, 21, 41, .04);
 }
 .detail-head .dh-meta { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
-.detail-head .dh-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.detail-head .dh-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
 .detail-head .du {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #4e5969;
   max-width: 520px; background: #f2f3f5; padding: 3px 8px; border-radius: 6px;
@@ -1643,6 +1787,8 @@ async function copyProxyAddr() {
 .code {
   background: #fbfcfe; border: 1px solid var(--mp-border); border-radius: 10px; padding: 12px;
   font-size: 12px; line-height: 1.6; white-space: pre; word-break: normal; overflow: auto; max-height: 100%;
+  /* 默认使用现代等宽字体栈（Windows 上优先 Cascadia Code，避免退回老旧等宽字体） */
+  font-family: ui-monospace, SFMono-Regular, "Cascadia Code", "Cascadia Mono", Menlo, Consolas, "Courier New", monospace;
 }
 /* 详情区标签栏占满高度，内容超出时出现左右/上下滚动条而非被隐藏 */
 .mitm-right .el-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -1652,7 +1798,8 @@ async function copyProxyAddr() {
 .mitm-right .el-tab-pane .code { flex: 1; min-height: 0; max-height: none; }
 .mitm-right .el-tab-pane > .body-toolbar + .code { flex: 1; }
 .ca { max-height: 240px; }
-.body-toolbar { display: flex; justify-content: flex-end; margin-bottom: 4px; min-height: 20px; }
+.body-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 4px; min-height: 20px; }
+.body-toolbar .body-meta { margin-right: auto; font-size: 12px; color: var(--mp-sub); font-weight: 400; }
 .mitm-errors { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .mitm-errors .err-item { --el-alert-padding: 6px 10px; }
 

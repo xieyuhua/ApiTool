@@ -220,6 +220,9 @@ type Settings struct {
 	Theme   string       `json:"theme"`   // light | dark | system
 	Accent  string       `json:"accent"`  // 主题强调色
 	AutoSync bool        `json:"autoSync"` // 是否启用云同步
+	// 详情代码块字体（作用于右侧详情所有代码块）
+	CodeFont    string  `json:"codeFont"`    // 字体族
+	CodeFontSize float64 `json:"codeFontSize"` // 字号(px)
 }
 
 // AppData 应用全部数据
