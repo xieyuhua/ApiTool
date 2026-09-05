@@ -363,22 +363,6 @@ const passRate = computed(() => {
   return Math.round((r.passed / r.total) * 100) + '%'
 })
 
-// ---------------- 运行全部用例（功能测试） ----------------
-async function runAll() {
-  if (!cases.value.length) { ElMessage.warning('暂无可运行的用例'); return }
-  running.value = true
-  try {
-    const r = await RunTestCases(cases.value.map(c => c.id), curEnvId.value, runConcurrency.value)
-    appendReport(r)
-    viewingReport.value = r
-    reportVisible.value = true
-  } catch (e) {
-    ElMessage.error(String(e))
-  } finally {
-    running.value = false
-  }
-}
-
 // ---------------- 用例导入（捕获 / 接口） ----------------
 const capturedList = ref([])
 const capSelected = ref([])
@@ -537,9 +521,6 @@ async function runPressure() {
         <el-button type="success" :loading="running" :disabled="!selectedCaseIds.length" @click="runSelected">
           运行选中用例
         </el-button>
-        <el-button type="warning" :loading="running" :disabled="!cases.length" @click="runAll">
-          运行全部用例
-        </el-button>
         <el-tooltip content="并发执行数（同时发起的请求数），可显著加快大量用例的运行" placement="top">
           <span class="conc-wrap">
             并发
@@ -686,13 +667,16 @@ async function runPressure() {
           <el-option label="浏览器捕获导入" value="capture" />
           <el-option label="AI 生成" value="ai" />
         </el-select>
-        <el-button link type="primary" @click="toggleSelectAllPressure">
-          {{ pressureFiltered.length > 0 && pressureFiltered.every(c => pressure.selectedIds.includes(c.id)) ? '取消全选' : '全选' }}
-        </el-button>
       </div>
 
       <el-table :data="pressureFiltered" style="width:100%; margin-top:14px" empty-text="请在下方勾选压测用例">
         <el-table-column width="46">
+          <template #header>
+            <el-checkbox
+              :model-value="pressureFiltered.length > 0 && pressureFiltered.every(c => pressure.selectedIds.includes(c.id))"
+              :indeterminate="pressure.selectedIds.length > 0 && !pressureFiltered.every(c => pressure.selectedIds.includes(c.id))"
+              @change="toggleSelectAllPressure" />
+          </template>
           <template #default="{ row }">
             <el-checkbox :model-value="pressure.selectedIds.includes(row.id)" @change="togglePressureCase(row.id)" />
           </template>
