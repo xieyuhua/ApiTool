@@ -40,8 +40,18 @@ function toggleSelectAllCases() {
 // 用例来源：接口导入 / 浏览器捕获导入 / AI 生成
 const sourceText = { api: '接口导入', capture: '浏览器捕获导入', ai: 'AI 生成' }
 const caseSourceFilter = ref('')
-const filteredCases = computed(() =>
-  caseSourceFilter.value ? cases.value.filter(c => c.source === caseSourceFilter.value) : cases.value)
+const caseKeyword = ref('')
+const filteredCases = computed(() => {
+  const kw = caseKeyword.value.trim().toLowerCase()
+  const src = caseSourceFilter.value
+  return cases.value.filter(c => {
+    if (src && c.source !== src) return false
+    if (kw && !((c.name || '').toLowerCase().includes(kw) ||
+                (c.url || '').toLowerCase().includes(kw) ||
+                (c.method || '').toLowerCase().includes(kw))) return false
+    return true
+  })
+})
 
 const catType = {
   '正常流程': 'success', '参数边界': 'warning', '异常场景': 'danger', '权限安全': 'info',
@@ -391,12 +401,30 @@ function toggleApi(id) {
   if (i >= 0) apiSelected.value.splice(i, 1)
   else apiSelected.value.push(id)
 }
-function selectAllCap() { capSelected.value = capturedList.value.map(r => r.id) }
+function selectAllCap() { capSelected.value = capFiltered.value.map(r => r.id) }
 function clearCap() { capSelected.value = [] }
-function selectAllApi() { apiSelected.value = projectApis().map(a => a.id) }
+function selectAllApi() { apiSelected.value = apiFiltered.value.map(a => a.id) }
 function clearApi() { apiSelected.value = [] }
-function toggleAllCap(val) { capSelected.value = val ? capturedList.value.map(r => r.id) : [] }
-function toggleAllApi(val) { apiSelected.value = val ? projectApis().map(a => a.id) : [] }
+function toggleAllCap(val) { capSelected.value = val ? capFiltered.value.map(r => r.id) : [] }
+function toggleAllApi(val) { apiSelected.value = val ? apiFiltered.value.map(a => a.id) : [] }
+
+// 导入页列表关键词模糊查询
+const capKeyword = ref('')
+const apiKeyword = ref('')
+const capFiltered = computed(() => {
+  const kw = capKeyword.value.trim().toLowerCase()
+  if (!kw) return capturedList.value
+  return capturedList.value.filter(r =>
+    (r.url || '').toLowerCase().includes(kw) || (r.method || '').toLowerCase().includes(kw))
+})
+const apiFiltered = computed(() => {
+  const kw = apiKeyword.value.trim().toLowerCase()
+  if (!kw) return projectApis()
+  return projectApis().filter(a =>
+    (a.name || '').toLowerCase().includes(kw) ||
+    (a.url || '').toLowerCase().includes(kw) ||
+    (a.method || '').toLowerCase().includes(kw))
+})
 async function importSelectedCap() {
   if (!capSelected.value.length) { ElMessage.warning('请勾选要导入的捕获请求'); return }
   importing.value = true
@@ -531,6 +559,7 @@ async function runPressure() {
           <el-option label="浏览器捕获导入" value="capture" />
           <el-option label="AI 生成" value="ai" />
         </el-select>
+        <el-input v-model="caseKeyword" placeholder="搜索用例名称 / 请求" clearable size="default" style="width:220px" />
         <el-select v-model="planTarget" placeholder="选择计划" size="default" style="width:180px" clearable>
           <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
@@ -585,13 +614,14 @@ async function runPressure() {
             <el-button link type="primary" @click="selectAllCap">全选</el-button>
             <el-button link @click="clearCap" :disabled="!capSelected.length">清空</el-button>
             <el-button link type="primary" @click="refreshCaptured">刷新捕获列表</el-button>
+            <el-input v-model="capKeyword" placeholder="搜索 URL / 方法" clearable size="default" style="width:220px" />
             <span class="tip">将「请求捕获」中抓到的请求转为测试用例</span>
           </div>
-          <el-table :data="capturedList" style="width:100%" empty-text="暂无捕获请求，请先在「请求捕获」中开启捕获">
+          <el-table :data="capFiltered" style="width:100%" empty-text="暂无捕获请求，请先在「请求捕获」中开启捕获">
             <el-table-column width="46">
               <template #header>
-                <el-checkbox :model-value="capturedList.length > 0 && capSelected.length === capturedList.length"
-                  :indeterminate="capSelected.length > 0 && capSelected.length < capturedList.length"
+                <el-checkbox :model-value="capFiltered.length > 0 && capSelected.length === capFiltered.length"
+                  :indeterminate="capSelected.length > 0 && capSelected.length < capFiltered.length"
                   @change="toggleAllCap" />
               </template>
               <template #default="{ row }">
@@ -610,13 +640,14 @@ async function runPressure() {
             <el-button :loading="importing" @click="importSelectedApis" :disabled="!apiSelected.length">导入选中（{{ apiSelected.length }}）</el-button>
             <el-button link type="primary" @click="selectAllApi">全选</el-button>
             <el-button link @click="clearApi" :disabled="!apiSelected.length">清空</el-button>
+            <el-input v-model="apiKeyword" placeholder="搜索接口名称 / URL" clearable size="default" style="width:220px" />
             <span class="tip">将「接口管理」中的接口转为测试用例</span>
           </div>
-          <el-table :data="projectApis()" style="width:100%" empty-text="暂无接口">
+          <el-table :data="apiFiltered" style="width:100%" empty-text="暂无接口">
             <el-table-column width="46">
               <template #header>
-                <el-checkbox :model-value="projectApis().length > 0 && apiSelected.length === projectApis().length"
-                  :indeterminate="apiSelected.length > 0 && apiSelected.length < projectApis().length"
+                <el-checkbox :model-value="apiFiltered.length > 0 && apiSelected.length === apiFiltered.length"
+                  :indeterminate="apiSelected.length > 0 && apiSelected.length < apiFiltered.length"
                   @change="toggleAllApi" />
               </template>
               <template #default="{ row }">
