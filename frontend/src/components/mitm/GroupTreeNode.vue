@@ -26,6 +26,8 @@
         :expanded-set="expandedSet"
         :selected="selected"
         :selected-set="selectedSet"
+        :col-style="colStyle"
+        :col-resize-fn="colResizeFn"
         @toggle="onToggleUp"
         @select-node="onSelectNodeUp"
         @select-rec="onSelectRecUp"
@@ -42,10 +44,15 @@
         @contextmenu.prevent="$emit('ctx-menu', { rec, event: $event })">
         <el-checkbox size="small" :model-value="selectedSet.has(rec.id)" @click.stop
           @change="(v) => onSelectRecToggle(rec.id, v)" />
-        <span class="proto" :class="'p-' + rec.protocol.toLowerCase()">{{ rec.protocol }}</span>
-        <span class="method" v-if="rec.method" :class="'m-' + rec.method.toUpperCase()">{{ rec.method }}</span>
-        <span class="url" :title="rec.url">{{ rec.url }}</span>
-        <span class="status" v-if="rec.statusCode" :class="'s-' + String(rec.statusCode)[0]">{{ rec.statusCode }}</span>
+        <span class="proto" :class="'p-' + rec.protocol.toLowerCase()" :style="colStyle('proto')">{{ rec.protocol }}</span>
+        <i class="col-resizer" @mousedown.stop="colResizeFn('proto', $event)"></i>
+        <span class="method" v-if="rec.method" :class="'m-' + rec.method.toUpperCase()" :style="colStyle('method')">{{ rec.method }}</span>
+        <i class="col-resizer" v-if="rec.method" @mousedown.stop="colResizeFn('method', $event)"></i>
+        <span class="url" :title="rec.url" :style="colStyle('url')">{{ rec.url }}</span>
+        <i class="col-resizer" @mousedown.stop="colResizeFn('url', $event)"></i>
+        <span class="status" v-if="rec.statusCode" :class="'s-' + String(rec.statusCode)[0]" :style="colStyle('status')">{{ rec.statusCode }}</span>
+        <i class="col-resizer" v-if="rec.statusCode" @mousedown.stop="colResizeFn('status', $event)"></i>
+        <span class="ctype" v-if="rec.respContentType" :title="rec.respContentType" :style="colStyle('ctype')">{{ rec.respContentType }}</span>
       </div>
     </template>
   </div>
@@ -60,6 +67,9 @@ const props = defineProps({
   expandedSet: { type: Set, default: () => new Set() },
   selected: { type: Object, default: null },
   selectedSet: { type: Set, default: () => new Set() },
+  // 列宽样式函数（由父组件传入，保证平铺/分组共用同一套宽度与拖拽状态）
+  colStyle: { type: Function, default: () => ({}) },
+  colResizeFn: { type: Function, default: () => {} },
 })
 const emit = defineEmits(['toggle', 'select-node', 'select-rec', 'select-rec-toggle', 'ctx-menu'])
 
@@ -107,10 +117,13 @@ export default {
 .grp-check { display: flex; align-items: center; }
 
 /* 叶子请求行：年轻风格彩色徽章（与平铺列表一致） */
-.traffic-item.grp-item { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-bottom: 1px solid #f2f3f5; cursor: pointer; font-size: 13px; border-radius: 8px; transition: background .12s ease; }
+.traffic-item.grp-item { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-bottom: 1px solid #f2f3f5; cursor: pointer; font-size: 13px; border-radius: 8px; transition: background .12s ease; width: max-content; min-width: 100%; }
 .traffic-item.grp-item:hover { background: #f2f7ff; }
 .traffic-item.grp-item.active { background: #e8f3ff; box-shadow: inset 3px 0 0 #165dff; }
 .traffic-item.grp-item.checked { background: #f0f6ff; }
+.traffic-item.grp-item > .el-checkbox { flex-shrink: 0; }
+.traffic-item.grp-item .col-resizer { flex-shrink: 0; align-self: stretch; width: 7px; margin: 0 -3px; cursor: col-resize; z-index: 3; border-radius: 3px; }
+.traffic-item.grp-item .col-resizer:hover { background: rgba(22, 93, 255, .25); }
 .traffic-item.grp-item .proto, .traffic-item.grp-item .method, .traffic-item.grp-item .status {
   font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; flex-shrink: 0; letter-spacing: .2px;
 }
@@ -133,5 +146,9 @@ export default {
 .traffic-item.grp-item .s-3 { color: #165dff; background: #e8f3ff; }
 .traffic-item.grp-item .s-4 { color: #ff7d00; background: #fff3e8; }
 .traffic-item.grp-item .s-5 { color: #f53f3f; background: #ffece8; }
-.traffic-item.grp-item .url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1d2129; }
+.traffic-item.grp-item .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1d2129; }
+.traffic-item.grp-item .ctype {
+  flex-shrink: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: #4e5969; background: #f2f3f5; padding: 2px 7px; border-radius: 6px;
+}
 </style>

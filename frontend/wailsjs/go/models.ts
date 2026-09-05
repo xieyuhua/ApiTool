@@ -1146,6 +1146,8 @@ export namespace model {
 	    theme: string;
 	    accent: string;
 	    autoSync: boolean;
+	    codeFont: string;
+	    codeFontSize: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1166,6 +1168,8 @@ export namespace model {
 	        this.theme = source["theme"];
 	        this.accent = source["accent"];
 	        this.autoSync = source["autoSync"];
+	        this.codeFont = source["codeFont"];
+	        this.codeFontSize = source["codeFontSize"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

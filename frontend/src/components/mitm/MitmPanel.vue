@@ -209,10 +209,15 @@
                 @contextmenu.prevent="openCtxMenu(r, $event)">
                 <el-checkbox size="small" :model-value="selectedIdSet.has(r.id)" @click.stop
                   @change="(v) => toggleSelect(r.id, v)" />
-                <span class="proto" :class="'p-' + r.protocol.toLowerCase()">{{ r.protocol }}</span>
-                <span class="method" v-if="r.method" :class="'m-' + r.method.toUpperCase()">{{ r.method }}</span>
-                <span class="url" :title="r.url">{{ r.url || r.host }}</span>
-                <span class="status" v-if="r.statusCode" :class="'s-' + String(r.statusCode)[0]">{{ r.statusCode }}</span>
+                <span class="proto" :class="'p-' + r.protocol.toLowerCase()" :style="colStyle('proto')">{{ r.protocol }}</span>
+                <i class="col-resizer" @mousedown.stop="startColResize($event, 'proto')"></i>
+                <span class="method" v-if="r.method" :class="'m-' + r.method.toUpperCase()" :style="colStyle('method')">{{ r.method }}</span>
+                <i class="col-resizer" v-if="r.method" @mousedown.stop="startColResize($event, 'method')"></i>
+                <span class="url" :title="r.url" :style="colStyle('url')">{{ r.url || r.host }}</span>
+                <i class="col-resizer" @mousedown.stop="startColResize($event, 'url')"></i>
+                <span class="status" v-if="r.statusCode" :class="'s-' + String(r.statusCode)[0]" :style="colStyle('status')">{{ r.statusCode }}</span>
+                <i class="col-resizer" v-if="r.statusCode" @mousedown.stop="startColResize($event, 'status')"></i>
+                <span class="ctype" v-if="r.respContentType" :title="r.respContentType" :style="colStyle('ctype')">{{ r.respContentType }}</span>
               </div>
             </template>
 
@@ -227,6 +232,8 @@
                 :expanded-set="expandedKeys"
                 :selected="selected"
                 :selected-set="selectedIdSet"
+                :col-style="colStyle"
+                :col-resize-fn="startColResize"
                 @toggle="toggleGroup"
                 @select-node="onGroupSelectNode"
                 @select-rec="selectRecord"
@@ -248,14 +255,6 @@
             </div>
             <div class="dh-actions">
               <el-button size="small" @click="copyText(selected.reqBody)">复制请求体</el-button>
-              <el-select v-model="codeFont" size="small" style="width:132px" placeholder="代码块字体"
-                title="切换右侧详情代码块的展示字体（全局生效并记住选择）">
-                <el-option v-for="f in FONT_OPTIONS" :key="f.value" :label="f.label" :value="f.value" />
-              </el-select>
-              <el-select v-model="codeFontSize" size="small" style="width:78px"
-                title="代码块字号">
-                <el-option v-for="s in FONT_SIZES" :key="s" :label="s + ' px'" :value="s" />
-              </el-select>
               <el-button size="small" type="primary" @click="openImportDialog">生成接口并导入接口树</el-button>
             </div>
           </div>
@@ -265,6 +264,7 @@
               <div class="kv"><b>状态</b><span>{{ selected.statusCode || '—' }} {{ selected.statusText }}</span></div>
               <div class="kv"><b>耗时</b><span>{{ selected.durationMs }} ms</span></div>
               <div class="kv"><b>Host</b><span>{{ selected.host }}</span></div>
+              <div class="kv"><b>内容类型</b><span>{{ selected.respContentType || '—' }}</span></div>
               <div class="kv"><b>说明</b><span>{{ selected.note || '—' }}</span></div>
               <div class="kv"><b>抓包时间</b><span>{{ selected.timestamp ? formatTime(selected.timestamp) : '—' }}</span></div>
             </el-tab-pane>
@@ -272,7 +272,7 @@
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(kvToText(selected.reqHeaders))">复制</el-button>
               </div>
-              <pre class="code" :style="codeStyle">{{ kvToText(selected.reqHeaders) }}</pre>
+              <pre class="code">{{ kvToText(selected.reqHeaders) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="请求体" name="reqb">
               <div class="body-toolbar">
@@ -281,24 +281,24 @@
                   {{ reqFormatted ? '查看原文' : '格式化' }}
                 </el-button>
               </div>
-              <pre class="code" :style="codeStyle">{{ displayBody(selected.reqBody, reqFormatted) }}</pre>
+              <pre class="code">{{ displayBody(selected.reqBody, reqFormatted) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="原始请求" name="rawreq">
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(buildRawHttp(selected))">复制</el-button>
               </div>
-              <pre class="code" :style="codeStyle">{{ buildRawHttp(selected) }}</pre>
+              <pre class="code">{{ buildRawHttp(selected) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="响应头" name="resh">
               <div class="body-toolbar">
                 <el-button link type="primary" size="small" @click="copyText(kvToText(selected.respHeaders))">复制</el-button>
               </div>
-              <pre class="code" :style="codeStyle">{{ kvToText(selected.respHeaders) }}</pre>
+              <pre class="code">{{ kvToText(selected.respHeaders) }}</pre>
             </el-tab-pane>
             <el-tab-pane label="响应体" name="resb">
               <div v-if="selected.respClipped" class="clipped-tip">⚠️ 响应体超过实时推送上限（1MB）已被截断，会话历史中保留完整数据</div>
               <template v-if="isImageResp(selected)">
-                <div class="img-preview">
+                <div class="img-preview" @contextmenu.prevent="openBodyCtx($event, 'image')">
                   <img :src="imgSrc(selected.respBody)" alt="响应图片预览" />
                 </div>
               </template>
@@ -319,7 +319,7 @@
                     {{ respFormatted ? '查看原文' : '格式化' }}
                   </el-button>
                 </div>
-                <pre class="code" :style="codeStyle">{{ respBodyView }}</pre>
+                <pre class="code" @contextmenu.prevent="openBodyCtx($event, 'text')">{{ respBodyView }}</pre>
               </template>
             </el-tab-pane>
           </el-tabs>
@@ -340,6 +340,14 @@
         <div class="ctx-item" @click="ctxCopyResBody" v-if="ctxMenu.rec.respBody">复制响应体</div>
         <div class="ctx-sep" v-if="ctxMenu.rec.respBody"></div>
         <div class="ctx-item" @click="selectRecord(ctxMenu.rec); closeCtxMenu()">查看详情</div>
+      </div>
+    </div>
+
+    <!-- 响应体右键菜单：图片→复制地址；文本→复制文本 -->
+    <div v-if="bodyCtx" class="ctx-mask" @click="closeBodyCtx" @contextmenu.prevent="closeBodyCtx">
+      <div class="ctx-menu" :style="{ left: bodyCtx.x + 'px', top: bodyCtx.y + 'px' }" @click.stop @contextmenu.prevent.stop>
+        <div v-if="bodyCtx.type === 'image'" class="ctx-item" @click="ctxCopyImageAddr">复制</div>
+        <div v-if="bodyCtx.type === 'text'" class="ctx-item" @click="ctxCopyBodyText">复制</div>
       </div>
     </div>
 
@@ -577,6 +585,59 @@ const selectedIds = ref([])
 const detailTab = ref('overview')
 const liveFilter = ref('')
 const viewMode = ref('list') // list / group
+
+// ---- 实时流量列宽（可调 + 横向滚动；默认宽度，记忆到 localStorage） ----
+const COL_W_KEY = 'mitm-col-widths'
+const DEFAULT_COL_W = { proto: 56, method: 64, url: 300, status: 52, ctype: 180 }
+function loadColWidths() {
+  try {
+    const o = JSON.parse(localStorage.getItem(COL_W_KEY) || '{}')
+    const out = {}
+    for (const k in DEFAULT_COL_W) if (typeof o[k] === 'number' && o[k] >= 24) out[k] = o[k]
+    return out
+  } catch { return {} }
+}
+const colWidths = reactive({ ...DEFAULT_COL_W, ...loadColWidths() })
+function saveColWidths() {
+  try { localStorage.setItem(COL_W_KEY, JSON.stringify(colWidths)) } catch { /* ignore */ }
+}
+// 单个列的内联样式：固定宽度 + 不收缩 + 超出省略（配合容器 overflow-x 实现横向滚动）
+function colStyle(col) {
+  return {
+    width: (colWidths[col] || DEFAULT_COL_W[col]) + 'px',
+    flexShrink: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  }
+}
+// 列宽拖拽调整：在列右侧分隔条按下拖动
+let colResizing = null
+function startColResize(e, col) {
+  colResizing = { col, startX: e.clientX, startW: colWidths[col] || DEFAULT_COL_W[col] }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onColResizeMove)
+  window.addEventListener('mouseup', stopColResize)
+  e.preventDefault()
+  e.stopPropagation()
+}
+function onColResizeMove(e) {
+  if (!colResizing) return
+  let w = colResizing.startW + (e.clientX - colResizing.startX)
+  if (w < 24) w = 24
+  colWidths[colResizing.col] = Math.round(w)
+}
+function stopColResize() {
+  if (!colResizing) return
+  colResizing = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onColResizeMove)
+  window.removeEventListener('mouseup', stopColResize)
+  saveColWidths()
+}
+onBeforeUnmount(stopColResize)
 const trafficOpen = ref(true) // 实时流量板块是否展开（可折叠收起节省空间）
 const showErrors = ref(true) // 是否显示解密失败/连接错误提示（关闭则隐藏错误列表、解决引导与弹窗提示，仅保留顶部「解密失败日志」计数）
 // 分组模式下记录用户手动展开的节点 key（host 或目录），默认全部折叠
@@ -1236,6 +1297,13 @@ function openCtxMenu(recOrPayload, ev) {
 }
 function closeCtxMenu() { ctxMenu.value = null }
 
+// 响应体右键菜单：图片预览/文本区域右键 → 复制地址(图片) 或 复制文本(文本)
+const bodyCtx = ref(null) // { x, y, type: 'image' | 'text' }
+function openBodyCtx(e, type) { bodyCtx.value = { x: e.clientX, y: e.clientY, type } }
+function closeBodyCtx() { bodyCtx.value = null }
+function ctxCopyImageAddr() { if (selected.value && selected.value.url) copyText(selected.value.url); closeBodyCtx() }
+function ctxCopyBodyText() { copyText(respBodyView.value); closeBodyCtx() }
+
 // 生成 bash/curl 命令（单引号包裹并转义内部单引号）
 function bashQuote(s) {
   if (s == null) return "''"
@@ -1500,40 +1568,6 @@ function displayBody(text, formatted) {
   return text
 }
 
-// ---- 详情代码块展示字体（字体 + 字号，作用于右侧详情所有代码块，选择会记住）----
-const FONT_OPTIONS = [
-  { label: '默认（系统等宽）', value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace' },
-  { label: 'Cascadia Code', value: '"Cascadia Code", "Cascadia Mono", Consolas, monospace' },
-  { label: 'JetBrains Mono', value: '"JetBrains Mono", Consolas, monospace' },
-  { label: 'Consolas', value: 'Consolas, "Lucida Console", monospace' },
-  { label: 'Source Code Pro', value: '"Source Code Pro", Consolas, monospace' },
-  { label: 'Fira Code', value: '"Fira Code", Consolas, monospace' },
-  { label: 'Courier New', value: '"Courier New", monospace' },
-  { label: '微软雅黑', value: '"Microsoft YaHei", "微软雅黑", sans-serif' },
-  { label: '黑体', value: 'SimHei, "Microsoft YaHei", sans-serif' },
-  { label: '宋体', value: 'SimSun, "Songti SC", serif' },
-  { label: '楷体', value: 'KaiTi, "Kaiti SC", serif' },
-]
-const FONT_SIZES = [12, 13, 14, 15, 16, 18]
-const FONT_STORE_KEY = 'mitm.codeFont'
-const FONT_SIZE_STORE_KEY = 'mitm.codeFontSize'
-
-function loadFontPref(key, def) {
-  try {
-    const v = localStorage.getItem(key)
-    return v == null ? def : v
-  } catch (e) { return def }
-}
-const codeFont = ref(loadFontPref(FONT_STORE_KEY, FONT_OPTIONS[0].value))
-const codeFontSize = ref(Number(loadFontPref(FONT_SIZE_STORE_KEY, 12)) || 12)
-// 内联样式：未指定字体时留空，沿用 .code 的默认字体栈
-const codeStyle = computed(() => ({
-  fontFamily: codeFont.value || undefined,
-  fontSize: codeFontSize.value + 'px',
-}))
-watch(codeFont, v => { try { localStorage.setItem(FONT_STORE_KEY, v) } catch (e) {} })
-watch(codeFontSize, v => { try { localStorage.setItem(FONT_SIZE_STORE_KEY, String(v)) } catch (e) {} })
-
 // ---- 响应体原始字节视图（解决二进制/GBK 等非 UTF-8 内容显示为乱码）----
 // 后端对非 UTF-8 响应额外下发原始字节的 base64，前端据此还原真实内容。
 const respView = ref('auto') // auto | utf8 | gbk | hex | base64
@@ -1727,7 +1761,12 @@ async function copyProxyAddr() {
 .traffic-item {
   display: flex; gap: 8px; align-items: center; padding: 8px 12px; cursor: pointer; font-size: 13px;
   border-radius: 9px; transition: background .12s ease; border: 1px solid transparent;
+  width: max-content; min-width: 100%;
 }
+.traffic-item > .el-checkbox { flex-shrink: 0; }
+/* 列宽拖拽分隔条 */
+.traffic-item .col-resizer { flex-shrink: 0; align-self: stretch; width: 7px; margin: 0 -3px; cursor: col-resize; z-index: 3; border-radius: 3px; }
+.traffic-item .col-resizer:hover { background: rgba(22, 93, 255, .25); }
 .traffic-item:hover { background: #f2f7ff; }
 .traffic-head .render-limit { font-style: normal; font-size: 12px; color: #f76707; font-weight: 400; margin-left: 6px; }
 .clipped-tip { font-size: 12px; color: #f76707; background: #fff7e8; border: 1px solid #ffd25e; border-radius: 6px; padding: 4px 8px; margin-bottom: 8px; }
@@ -1757,7 +1796,11 @@ async function copyProxyAddr() {
 .traffic-item .s-3 { color: #165dff; background: #e8f3ff; }
 .traffic-item .s-4 { color: #ff7d00; background: #fff3e8; }
 .traffic-item .s-5 { color: #f53f3f; background: #ffece8; }
-.traffic-item .url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1d2129; }
+.traffic-item .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1d2129; }
+.traffic-item .ctype {
+  flex-shrink: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: #4e5969; background: #f2f3f5; padding: 2px 7px; border-radius: 6px;
+}
 
 /* 右键菜单 */
 .ctx-mask { position: fixed; inset: 0; z-index: 3000; }
@@ -1786,9 +1829,10 @@ async function copyProxyAddr() {
 .kv b { color: var(--mp-sub); width: 80px; font-weight: 500; }
 .code {
   background: #fbfcfe; border: 1px solid var(--mp-border); border-radius: 10px; padding: 12px;
-  font-size: 12px; line-height: 1.6; white-space: pre; word-break: normal; overflow: auto; max-height: 100%;
-  /* 默认使用现代等宽字体栈（Windows 上优先 Cascadia Code，避免退回老旧等宽字体） */
-  font-family: ui-monospace, SFMono-Regular, "Cascadia Code", "Cascadia Mono", Menlo, Consolas, "Courier New", monospace;
+  line-height: 1.6; white-space: pre; word-break: normal; overflow: auto; max-height: 100%;
+  /* 字体与字号统一由「设置 → 详情代码块字体」控制（CSS 变量 --code-font / --code-font-size） */
+  font-family: var(--code-font, Consolas, "Courier New", monospace);
+  font-size: var(--code-font-size, 12.5px);
 }
 /* 详情区标签栏占满高度，内容超出时出现左右/上下滚动条而非被隐藏 */
 .mitm-right .el-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
