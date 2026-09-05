@@ -401,10 +401,6 @@ function toggleApi(id) {
   if (i >= 0) apiSelected.value.splice(i, 1)
   else apiSelected.value.push(id)
 }
-function selectAllCap() { capSelected.value = capFiltered.value.map(r => r.id) }
-function clearCap() { capSelected.value = [] }
-function selectAllApi() { apiSelected.value = apiFiltered.value.map(a => a.id) }
-function clearApi() { apiSelected.value = [] }
 function toggleAllCap(val) { capSelected.value = val ? capFiltered.value.map(r => r.id) : [] }
 function toggleAllApi(val) { apiSelected.value = val ? apiFiltered.value.map(a => a.id) : [] }
 
@@ -551,9 +547,6 @@ async function runPressure() {
           </span>
         </el-tooltip>
         <span class="spacer" />
-                <el-button link type="primary" @click="toggleSelectAllCases">
-          {{ filteredCases.length > 0 && filteredCases.every(c => selectedCaseIds.includes(c.id)) ? '取消全选' : '全选' }}
-        </el-button>
         <el-select v-model="caseSourceFilter" placeholder="全部来源" size="default" style="width:150px" clearable>
           <el-option label="接口导入" value="api" />
           <el-option label="浏览器捕获导入" value="capture" />
@@ -570,6 +563,12 @@ async function runPressure() {
 
       <el-table :data="filteredCases" style="width:100%" empty-text="暂无测试用例，点击「AI 生成用例」后生成">
         <el-table-column width="46">
+          <template #header>
+            <el-checkbox
+              :model-value="filteredCases.length > 0 && filteredCases.every(c => selectedCaseIds.includes(c.id))"
+              :indeterminate="selectedCaseIds.length > 0 && !filteredCases.every(c => selectedCaseIds.includes(c.id))"
+              @change="toggleSelectAllCases" />
+          </template>
           <template #default="{ row }">
             <el-checkbox :model-value="selectedCaseIds.includes(row.id)" @change="toggleCase(row.id)" />
           </template>
@@ -611,8 +610,6 @@ async function runPressure() {
         <el-tab-pane label="从浏览器捕获导入">
           <div class="toolbar">
             <el-button :loading="importing" @click="importSelectedCap" :disabled="!capSelected.length">导入选中（{{ capSelected.length }}）</el-button>
-            <el-button link type="primary" @click="selectAllCap">全选</el-button>
-            <el-button link @click="clearCap" :disabled="!capSelected.length">清空</el-button>
             <el-button link type="primary" @click="refreshCaptured">刷新捕获列表</el-button>
             <el-input v-model="capKeyword" placeholder="搜索 URL / 方法" clearable size="default" style="width:220px" />
             <span class="tip">将「请求捕获」中抓到的请求转为测试用例</span>
@@ -638,8 +635,6 @@ async function runPressure() {
         <el-tab-pane label="从接口导入">
           <div class="toolbar">
             <el-button :loading="importing" @click="importSelectedApis" :disabled="!apiSelected.length">导入选中（{{ apiSelected.length }}）</el-button>
-            <el-button link type="primary" @click="selectAllApi">全选</el-button>
-            <el-button link @click="clearApi" :disabled="!apiSelected.length">清空</el-button>
             <el-input v-model="apiKeyword" placeholder="搜索接口名称 / URL" clearable size="default" style="width:220px" />
             <span class="tip">将「接口管理」中的接口转为测试用例</span>
           </div>
