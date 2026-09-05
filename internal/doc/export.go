@@ -476,7 +476,7 @@ func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, ro
 		usedTags = append(usedTags, tag)
 		op := map[string]interface{}{
 			"tags":        []string{tag},
-			"summary":     api.Name,
+			"summary":     p,
 			"description": api.Description,
 			"responses": map[string]interface{}{
 				"200": map[string]interface{}{

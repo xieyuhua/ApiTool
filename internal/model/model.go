@@ -148,6 +148,7 @@ type TestCase struct {
 	CreatedAt   string      `json:"createdAt"`
 	DirID       string      `json:"dirId,omitempty"`
 	DirName     string      `json:"dirName,omitempty"`
+	Source      string      `json:"source,omitempty"` // 用例来源：api=接口导入 capture=浏览器捕获导入 ai=AI生成
 }
 
 // TestPlan 测试执行计划（有序用例 + 运行环境）

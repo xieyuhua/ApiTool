@@ -30,6 +30,18 @@ function toggleCase(id) {
   if (i >= 0) selectedCaseIds.value.splice(i, 1)
   else selectedCaseIds.value.push(id)
 }
+// 用例列表全选 / 取消全选（基于当前来源筛选结果）
+function toggleSelectAllCases() {
+  const all = filteredCases.value.map(c => c.id)
+  const allSelected = all.length > 0 && all.every(id => selectedCaseIds.value.includes(id))
+  selectedCaseIds.value = allSelected ? [] : all
+}
+
+// 用例来源：接口导入 / 浏览器捕获导入 / AI 生成
+const sourceText = { api: '接口导入', capture: '浏览器捕获导入', ai: 'AI 生成' }
+const caseSourceFilter = ref('')
+const filteredCases = computed(() =>
+  caseSourceFilter.value ? cases.value.filter(c => c.source === caseSourceFilter.value) : cases.value)
 
 const catType = {
   '正常流程': 'success', '参数边界': 'warning', '异常场景': 'danger', '权限安全': 'info',
@@ -421,12 +433,30 @@ const pressure = ref({
   concurrency: 5,
   iterations: 10,
   current: 0,
+  keyword: '',
+  source: '',
   result: null, // { total, passed, failed, totalMs, avgMs, tps, errorRate, byCode }
+})
+// 压测用例：按关键词（名称/URL）与来源筛选
+const pressureFiltered = computed(() => {
+  const kw = pressure.value.keyword.trim().toLowerCase()
+  const src = pressure.value.source
+  return cases.value.filter(c => {
+    if (src && c.source !== src) return false
+    if (kw && !((c.name || '').toLowerCase().includes(kw) || (c.url || '').toLowerCase().includes(kw))) return false
+    return true
+  })
 })
 function togglePressureCase(id) {
   const i = pressure.value.selectedIds.indexOf(id)
   if (i >= 0) pressure.value.selectedIds.splice(i, 1)
   else pressure.value.selectedIds.push(id)
+}
+// 全选 / 取消全选（基于当前筛选结果）
+function toggleSelectAllPressure() {
+  const all = pressureFiltered.value.map(c => c.id)
+  const allSelected = all.length > 0 && all.every(id => pressure.value.selectedIds.includes(id))
+  pressure.value.selectedIds = allSelected ? [] : all
 }
 async function runPressure() {
   const ids = pressure.value.selectedIds
@@ -480,6 +510,9 @@ async function runPressure() {
     <div v-show="tab === 'cases'" class="tc-page">
       <div class="toolbar">
         <el-button type="primary" @click="openGenerate">✨ AI 生成用例（选择接口）</el-button>
+        <el-button link type="primary" @click="toggleSelectAllCases">
+          {{ filteredCases.length > 0 && filteredCases.every(c => selectedCaseIds.includes(c.id)) ? '取消全选' : '全选' }}
+        </el-button>
         <el-button type="success" :loading="running" :disabled="!selectedCaseIds.length" @click="runSelected">
           运行选中用例
         </el-button>
@@ -493,6 +526,11 @@ async function runPressure() {
           </span>
         </el-tooltip>
         <span class="spacer" />
+        <el-select v-model="caseSourceFilter" placeholder="全部来源" size="default" style="width:150px" clearable>
+          <el-option label="接口导入" value="api" />
+          <el-option label="浏览器捕获导入" value="capture" />
+          <el-option label="AI 生成" value="ai" />
+        </el-select>
         <el-select v-model="planTarget" placeholder="选择计划" size="default" style="width:180px" clearable>
           <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
@@ -501,7 +539,7 @@ async function runPressure() {
         <el-button style="margin-left:auto" type="danger" plain @click="clearCases">清空用例</el-button>
       </div>
 
-      <el-table :data="cases" style="width:100%" empty-text="暂无测试用例，点击「AI 生成用例」后生成">
+      <el-table :data="filteredCases" style="width:100%" empty-text="暂无测试用例，点击「AI 生成用例」后生成">
         <el-table-column width="46">
           <template #default="{ row }">
             <el-checkbox :model-value="selectedCaseIds.includes(row.id)" @change="toggleCase(row.id)" />
@@ -511,6 +549,13 @@ async function runPressure() {
         <el-table-column label="分类" width="110">
           <template #default="{ row }">
             <el-tag :type="catType[row.category] || 'info'" size="small">{{ row.category }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.source === 'ai' ? 'success' : row.source === 'capture' ? 'warning' : 'primary'" size="small">
+              {{ sourceText[row.source] || '其他' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="请求" min-width="260">
@@ -608,7 +653,19 @@ async function runPressure() {
         <span class="tip">已选 {{ pressure.selectedIds.length }} 条用例</span>
       </div>
 
-      <el-table :data="cases" style="width:100%; margin-top:14px" empty-text="请在下方勾选压测用例">
+      <div class="toolbar" style="margin-top:12px">
+        <el-input v-model="pressure.keyword" placeholder="搜索用例名称 / URL" clearable size="default" style="width:220px" />
+        <el-select v-model="pressure.source" placeholder="全部来源" size="default" style="width:150px" clearable>
+          <el-option label="接口导入" value="api" />
+          <el-option label="浏览器捕获导入" value="capture" />
+          <el-option label="AI 生成" value="ai" />
+        </el-select>
+        <el-button link type="primary" @click="toggleSelectAllPressure">
+          {{ pressureFiltered.length > 0 && pressureFiltered.every(c => pressure.selectedIds.includes(c.id)) ? '取消全选' : '全选' }}
+        </el-button>
+      </div>
+
+      <el-table :data="pressureFiltered" style="width:100%; margin-top:14px" empty-text="请在下方勾选压测用例">
         <el-table-column width="46">
           <template #default="{ row }">
             <el-checkbox :model-value="pressure.selectedIds.includes(row.id)" @change="togglePressureCase(row.id)" />

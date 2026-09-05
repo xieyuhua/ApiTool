@@ -82,7 +82,8 @@ func schemaDDL() []string {
 			assertions TEXT,
 			enabled INT,
 			created_at TEXT,
-			dir_name TEXT
+			dir_name TEXT,
+			source TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS test_plans (
 			id TEXT PRIMARY KEY,
@@ -173,6 +174,8 @@ func initSchema(db *sql.DB) error {
 	}
 	// 兼容旧库：meta 表可能已存在但缺少 agent 列，追加该列（已存在则忽略错误）。
 	_, _ = tx.Exec(`ALTER TABLE meta ADD COLUMN agent TEXT`)
+	// 兼容旧库：test_cases 表可能缺少 source 列（用例来源），追加该列（已存在则忽略错误）。
+	_, _ = tx.Exec(`ALTER TABLE test_cases ADD COLUMN source TEXT`)
 	return tx.Commit()
 }
 
@@ -352,7 +355,7 @@ func readEnvironments(db *sql.DB, data *model.AppData) error {
 }
 
 func readTestCases(db *sql.DB, data *model.AppData) error {
-	rows, err := db.Query(`SELECT id, project_id, api_id, dir_id, category, name, description, method, url, body_type, body, content_type, headers, query, form_items, assertions, enabled, created_at, dir_name FROM test_cases`)
+	rows, err := db.Query(`SELECT id, project_id, api_id, dir_id, category, name, description, method, url, body_type, body, content_type, headers, query, form_items, assertions, enabled, created_at, dir_name, source FROM test_cases`)
 	if err != nil {
 		return err
 	}
@@ -363,9 +366,9 @@ func readTestCases(db *sql.DB, data *model.AppData) error {
 	}
 	for rows.Next() {
 		var c model.TestCase
-		var pid, headers, query, formItems, assertionsJSON, createdAt, dirName sql.NullString
+		var pid, headers, query, formItems, assertionsJSON, createdAt, dirName, source sql.NullString
 		var enabled int
-		if err := rows.Scan(&c.ID, &pid, &c.ApiID, &c.DirID, &c.Category, &c.Name, &c.Description, &c.Method, &c.URL, &c.BodyType, &c.Body, &c.ContentType, &headers, &query, &formItems, &assertionsJSON, &enabled, &createdAt, &dirName); err != nil {
+		if err := rows.Scan(&c.ID, &pid, &c.ApiID, &c.DirID, &c.Category, &c.Name, &c.Description, &c.Method, &c.URL, &c.BodyType, &c.Body, &c.ContentType, &headers, &query, &formItems, &assertionsJSON, &enabled, &createdAt, &dirName, &source); err != nil {
 			return err
 		}
 		_ = scanJSON(headers.String, &c.Headers)
@@ -375,6 +378,7 @@ func readTestCases(db *sql.DB, data *model.AppData) error {
 		c.Enabled = enabled != 0
 		c.CreatedAt = createdAt.String
 		c.DirName = dirName.String
+		c.Source = source.String
 		if p, ok := byProj[pid.String]; ok {
 			p.TestCases = append(p.TestCases, c)
 		}
@@ -494,10 +498,10 @@ func writeAll(tx *sql.Tx, data model.AppData) error {
 			}
 		}
 		for _, c := range p.TestCases {
-			if _, err := tx.Exec(`INSERT INTO test_cases (id, project_id, api_id, dir_id, category, name, description, method, url, body_type, body, content_type, headers, query, form_items, assertions, enabled, created_at, dir_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			if _, err := tx.Exec(`INSERT INTO test_cases (id, project_id, api_id, dir_id, category, name, description, method, url, body_type, body, content_type, headers, query, form_items, assertions, enabled, created_at, dir_name, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				c.ID, p.ID, c.ApiID, c.DirID, c.Category, c.Name, c.Description, c.Method, c.URL, c.BodyType, c.Body,
 				c.ContentType, jsonCol(c.Headers), jsonCol(c.Query), jsonCol(c.FormItems), jsonCol(c.Assertions),
-				boolToInt(c.Enabled), c.CreatedAt, c.DirName); err != nil {
+				boolToInt(c.Enabled), c.CreatedAt, c.DirName, c.Source); err != nil {
 				return err
 			}
 		}

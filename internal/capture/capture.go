@@ -318,7 +318,7 @@ func writeCaptureJSON(w http.ResponseWriter, code int, v interface{}) {
 
 // capturedToTestCase 将单条捕获请求转换为可执行测试用例（用于自动化测试 / 压测）
 func capturedToTestCase(c CapturedRequest) model.TestCase {
-	name := c.Method + " " + util.FirstNonEmpty(c.Path, c.URL)
+	name := util.FirstNonEmpty(c.Path, c.URL)
 	bodyType := "json"
 	switch c.BodyType {
 	case "form":
@@ -345,6 +345,7 @@ func capturedToTestCase(c CapturedRequest) model.TestCase {
 		},
 		Enabled:   true,
 		CreatedAt: time.Now().Format(time.RFC3339),
+		Source:    "capture",
 	}
 	return tc
 }

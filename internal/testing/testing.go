@@ -186,6 +186,7 @@ func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonPara
 			Assertions:  c.Assertions,
 			Enabled:     true,
 			CreatedAt:   now,
+			Source:      "ai",
 		})
 	}
 	if len(out) == 0 {
@@ -270,7 +271,7 @@ func apiToTestCase(api model.ApiInfo) model.TestCase {
 		ApiName:     api.Name,
 		DirID:       api.DirID,
 		Category:    "正常流程",
-		Name:        api.Method + " " + util.FirstNonEmpty(api.Name, api.URL),
+		Name:        util.FirstNonEmpty(api.Name, api.URL),
 		Description: api.Description,
 		Method:      api.Method,
 		URL:         api.URL,
@@ -285,6 +286,7 @@ func apiToTestCase(api model.ApiInfo) model.TestCase {
 		},
 		Enabled:   true,
 		CreatedAt: time.Now().Format(time.RFC3339),
+		Source:    "api",
 	}
 	return tc
 }

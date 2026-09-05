@@ -1364,6 +1364,7 @@ export namespace model {
 	    createdAt: string;
 	    dirId?: string;
 	    dirName?: string;
+	    source?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TestCase(source);
@@ -1390,6 +1391,7 @@ export namespace model {
 	        this.createdAt = source["createdAt"];
 	        this.dirId = source["dirId"];
 	        this.dirName = source["dirName"];
+	        this.source = source["source"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
