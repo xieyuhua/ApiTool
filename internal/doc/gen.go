@@ -88,7 +88,7 @@ func buildDocContent(ctx context.Context, s *store.Store, version, updateURL, di
 	case "html", "word":
 		content = BuildHTML(title, rootID, dirs, apis, proj.Common)
 	case "openapi":
-		content, err = BuildOpenAPI(title, dirs, apis, rootID, proj.Common)
+		content, err = BuildOpenAPI(title, dirs, apis, rootID, proj.Common, "")
 	default:
 		return "", "", fmt.Errorf("不支持的格式: %s", format)
 	}

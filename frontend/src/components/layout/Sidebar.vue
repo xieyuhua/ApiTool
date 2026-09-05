@@ -40,6 +40,7 @@ function confirmNewApi() {
     applyParsedToApi(api, cliParsed.value)
     if (newApiName.value.trim()) api.name = newApiName.value.trim()
     newApiVisible.value = false
+    requestSave()
     return
   }
   const raw = newApiUrl.value.trim()
@@ -62,6 +63,7 @@ function confirmNewApi() {
   }
   if (newApiName.value.trim()) api.name = newApiName.value.trim()
   newApiVisible.value = false
+  requestSave()
 }
 
 function applyParsedToApi(api, p) {
@@ -260,6 +262,7 @@ async function del(node) {
       node.type === 'dir' ? '删除目录会同时删除其下所有子目录和接口，确定删除？' : '确定删除该接口？',
       '删除确认', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     node.type === 'dir' ? removeDir(node.id) : removeApi(node.id)
+    requestSave()
     ElMessage.success('已删除')
   } catch { /* 取消 */ }
 }
@@ -272,6 +275,7 @@ function duplicate(node) {
   copy.name = a.name + ' 副本'
   currentProject().apis.push(copy)
   openApiInTab(copy.id, { newTab: true })
+  requestSave()
 }
 
 function handleCmd(cmd, node) {

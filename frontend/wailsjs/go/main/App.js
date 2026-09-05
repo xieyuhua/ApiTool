@@ -510,8 +510,8 @@ export function SniffDeleteSession(arg1) {
   return window['go']['main']['App']['SniffDeleteSession'](arg1);
 }
 
-export function SniffExportOpenAPI(arg1, arg2) {
-  return window['go']['main']['App']['SniffExportOpenAPI'](arg1, arg2);
+export function SniffExportOpenAPI(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SniffExportOpenAPI'](arg1, arg2, arg3);
 }
 
 export function SniffGenerateApiFromRecords(arg1, arg2, arg3) {

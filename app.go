@@ -634,11 +634,12 @@ func (a *App) SniffDeleteSession(id string) error {
 }
 
 // SniffExportOpenAPI 将抓包会话导出为 OpenAPI 3.0（弹出保存对话框）。
-func (a *App) SniffExportOpenAPI(id, title string) (string, error) {
+// hostMode："original"=接口地址用抓包实际完整地址；"env"=host 替换为环境变量 {{host}}。
+func (a *App) SniffExportOpenAPI(id, title, hostMode string) (string, error) {
 	if a.sniffMgr == nil {
 		return "", fmt.Errorf("抓包模块未初始化")
 	}
-	return a.sniffMgr.ExportOpenAPI(id, title)
+	return a.sniffMgr.ExportOpenAPI(id, title, hostMode)
 }
 
 // SniffInstallCA 将根 CA 安装到系统信任库（需管理员权限）。

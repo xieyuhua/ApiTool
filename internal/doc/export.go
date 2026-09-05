@@ -437,13 +437,30 @@ func schemaFromField(f *model.Field) map[string]interface{} {
 	}
 }
 
-func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, rootID string, common model.CommonParams) (string, error) {
+// BuildOpenAPI 生成标准 OpenAPI 3.0.3 文档。
+// hostMode:
+//   - "original"：接口地址使用抓包实际完整地址（含 host/path/query），不附加 servers，保证导入后地址不被替换；
+//   - "env"：将 host 替换为环境变量 {{host}}，servers=[{url:"{{host}}"}]，path 仅保留路径（Query 以 parameters 形式导出，标准做法）。
+func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, rootID string, common model.CommonParams, hostMode string) (string, error) {
 	paths := map[string]map[string]interface{}{}
 	usedTags := []string{}
+	envHost := hostMode == "env"
 	for _, api := range apis {
-		p := api.URL
-		if u, err := url.Parse(api.URL); err == nil && u.Path != "" {
-			p = u.Path
+		var p string
+		if envHost {
+			// 环境变量模式：host 抽成 {{host}}，path 仅保留路径（Query 以 parameters 形式导出）
+			if u, err := url.Parse(api.URL); err == nil && (u.Path != "" || u.RawQuery != "") {
+				base := u.Path
+				if base == "" {
+					base = "/"
+				}
+				p = base
+			} else {
+				p = api.URL
+			}
+		} else {
+			// 原地址模式：保留抓包实际完整地址（host+path+query），导入其他平台即真实地址
+			p = api.URL
 		}
 		if p == "" {
 			p = "/"
@@ -473,11 +490,14 @@ func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, ro
 			},
 		}
 		var params []map[string]interface{}
-		for _, kv := range EnabledKVs(api.Query) {
-			params = append(params, map[string]interface{}{
-				"name": kv.Key, "in": "query", "description": kv.Description,
-				"schema": map[string]string{"type": "string"}, "example": kv.Value,
-			})
+		// 原地址模式下 Query 已包含在路径完整 URL 中，不再重复；env 模式按标准以 parameters 导出
+		if envHost {
+			for _, kv := range EnabledKVs(api.Query) {
+				params = append(params, map[string]interface{}{
+					"name": kv.Key, "in": "query", "description": kv.Description,
+					"schema": map[string]string{"type": "string"}, "example": kv.Value,
+				})
+			}
 		}
 		for _, kv := range EnabledKVs(api.Headers) {
 			params = append(params, map[string]interface{}{
@@ -559,14 +579,19 @@ func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, ro
 		}
 		paths[p][method] = op
 	}
+	servers := []map[string]interface{}{}
+	if envHost {
+		servers = append(servers, map[string]interface{}{"url": "{{host}}"})
+	}
 	doc := map[string]interface{}{
 		"openapi": "3.0.3",
 		"info": map[string]interface{}{
 			"title":   title,
 			"version": "1.0.0",
 		},
-		"tags":  collectTags(usedTags),
-		"paths": paths,
+		"servers": servers,
+		"tags":    collectTags(usedTags),
+		"paths":   paths,
 	}
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {

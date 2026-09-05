@@ -12,7 +12,7 @@ import {
   removeTestCase, saveTestCase, addTestPlan, removeTestPlan,
   appendReport, removeReport,
   genJobId, genStat, genDoneInfo, genErrorInfo, startGenJob,
-  clearTestData,
+  clearTestData, reloadStore,
 } from '../../store'
 import KVEditor from './KVEditor.vue'
 
@@ -379,6 +379,12 @@ function toggleApi(id) {
   if (i >= 0) apiSelected.value.splice(i, 1)
   else apiSelected.value.push(id)
 }
+function selectAllCap() { capSelected.value = capturedList.value.map(r => r.id) }
+function clearCap() { capSelected.value = [] }
+function selectAllApi() { apiSelected.value = projectApis().map(a => a.id) }
+function clearApi() { apiSelected.value = [] }
+function toggleAllCap(val) { capSelected.value = val ? capturedList.value.map(r => r.id) : [] }
+function toggleAllApi(val) { apiSelected.value = val ? projectApis().map(a => a.id) : [] }
 async function importSelectedCap() {
   if (!capSelected.value.length) { ElMessage.warning('请勾选要导入的捕获请求'); return }
   importing.value = true
@@ -386,7 +392,7 @@ async function importSelectedCap() {
     const n = await ImportCapturedAsTestCases(capSelected.value)
     ElMessage.success(`已导入 ${n} 条用例`)
     capSelected.value = []
-    await refreshCaptured()
+    await reloadStore() // 后端已落库，重新拉取内存数据，用例列表立即刷新
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
@@ -400,6 +406,7 @@ async function importSelectedApis() {
     const n = await ImportApisAsTestCases(apiSelected.value)
     ElMessage.success(`已导入 ${n} 条用例`)
     apiSelected.value = []
+    await reloadStore() // 后端已落库，重新拉取内存数据，用例列表立即刷新
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
@@ -530,11 +537,18 @@ async function runPressure() {
         <el-tab-pane label="从浏览器捕获导入">
           <div class="toolbar">
             <el-button :loading="importing" @click="importSelectedCap" :disabled="!capSelected.length">导入选中（{{ capSelected.length }}）</el-button>
+            <el-button link type="primary" @click="selectAllCap">全选</el-button>
+            <el-button link @click="clearCap" :disabled="!capSelected.length">清空</el-button>
             <el-button link type="primary" @click="refreshCaptured">刷新捕获列表</el-button>
             <span class="tip">将「请求捕获」中抓到的请求转为测试用例</span>
           </div>
           <el-table :data="capturedList" style="width:100%" empty-text="暂无捕获请求，请先在「请求捕获」中开启捕获">
             <el-table-column width="46">
+              <template #header>
+                <el-checkbox :model-value="capturedList.length > 0 && capSelected.length === capturedList.length"
+                  :indeterminate="capSelected.length > 0 && capSelected.length < capturedList.length"
+                  @change="toggleAllCap" />
+              </template>
               <template #default="{ row }">
                 <el-checkbox :model-value="capSelected.includes(row.id)" @change="toggleCap(row.id)" />
               </template>
@@ -549,10 +563,17 @@ async function runPressure() {
         <el-tab-pane label="从接口导入">
           <div class="toolbar">
             <el-button :loading="importing" @click="importSelectedApis" :disabled="!apiSelected.length">导入选中（{{ apiSelected.length }}）</el-button>
+            <el-button link type="primary" @click="selectAllApi">全选</el-button>
+            <el-button link @click="clearApi" :disabled="!apiSelected.length">清空</el-button>
             <span class="tip">将「接口管理」中的接口转为测试用例</span>
           </div>
           <el-table :data="projectApis()" style="width:100%" empty-text="暂无接口">
             <el-table-column width="46">
+              <template #header>
+                <el-checkbox :model-value="projectApis().length > 0 && apiSelected.length === projectApis().length"
+                  :indeterminate="apiSelected.length > 0 && apiSelected.length < projectApis().length"
+                  @change="toggleAllApi" />
+              </template>
               <template #default="{ row }">
                 <el-checkbox :model-value="apiSelected.includes(row.id)" @change="toggleApi(row.id)" />
               </template>

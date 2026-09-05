@@ -428,6 +428,23 @@
       </el-table>
     </el-dialog>
 
+    <!-- 导出 OpenAPI：选择接口地址方式 -->
+    <el-dialog v-model="openApiExport.visible" title="导出 OpenAPI" width="460px" append-to-body>
+      <div class="oa-tip">请选择导出后「接口地址」的表示方式：</div>
+      <el-radio-group v-model="openApiExport.hostMode">
+        <el-radio value="original">原地址（抓包实际完整地址）</el-radio>
+        <el-radio value="env">环境变量 {{host}}</el-radio>
+      </el-radio-group>
+      <div class="oa-sub">
+        原地址：保留抓包真实的 host/path/query，导入其他平台即真实地址，不会被替换；<br />
+        环境变量：host 统一替换为 <code>{{host}}</code>，便于在不同环境间切换。
+      </div>
+      <template #footer>
+        <el-button size="small" @click="openApiExport.visible = false">取消</el-button>
+        <el-button size="small" type="primary" @click="confirmOpenApiExport">导出</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 解密失败日志 -->
     <el-dialog v-model="errorDialog" title="解密 / 连接失败日志" width="640px" append-to-body>
       <div v-if="errList.length === 0" class="empty-box">
@@ -472,9 +489,9 @@
             <el-input v-model="row.to" size="small" placeholder="127.0.0.1:8200 或 api.test.com/v2/api?v=2" clearable />
           </template>
         </el-table-column>
-        <el-table-column label="协议" width="100" align="center">
+        <el-table-column label="协议" width="110" align="center">
           <template #default="{ row }">
-            <el-select v-model="row.scheme" size="small" style="width: 88px" placeholder="自动">
+            <el-select v-model="row.scheme" size="small" style="width: 96px" placeholder="自动">
               <el-option label="自动" value="auto" />
               <el-option label="HTTP" value="http" />
               <el-option label="HTTPS" value="https" />
@@ -800,6 +817,8 @@ function onSelectRecToggle(payload) {
 
 const sessions = ref([])
 const sessionsDialog = ref(false)
+// 导出 OpenAPI 时的地址方式选择：original=抓包实际完整地址；env=host 替换为 {{host}}
+const openApiExport = reactive({ visible: false, id: '', name: '', hostMode: 'original' })
 const caDialog = ref(false)
 const caPem = ref('')
 const importCADialog = ref(false)
@@ -1498,8 +1517,15 @@ async function refreshSessions() {
 }
 
 async function exportSession(id, name) {
+  openApiExport.visible = true
+  openApiExport.id = id
+  openApiExport.name = name || 'openapi'
+  openApiExport.hostMode = 'original'
+}
+async function confirmOpenApiExport() {
   try {
-    const path = await SniffExportOpenAPI(id, name || 'openapi')
+    const path = await SniffExportOpenAPI(openApiExport.id, openApiExport.name, openApiExport.hostMode)
+    openApiExport.visible = false
     if (path) ElMessage.success('已导出：' + path)
     else ElMessage.info('已取消导出')
   } catch (e) {
@@ -1906,6 +1932,9 @@ async function copyProxyAddr() {
 
 /* 请求改写（域名重定向 + 参数替换）弹窗 */
 .rw-tip { color: #4e5969; font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
+.oa-tip { color: #1d2129; font-size: 14px; margin: 0 0 10px; }
+.oa-sub { color: #86909c; font-size: 12px; line-height: 1.7; margin-top: 12px; }
+.oa-sub code { background: #f2f3f5; border-radius: 4px; padding: 1px 6px; color: #165dff; }
 .rw-tip code { background: #f2f3f5; border-radius: 5px; padding: 1px 6px; font-size: 12px; color: #165dff; }
 .rw-tip b { color: #1d2129; }
 

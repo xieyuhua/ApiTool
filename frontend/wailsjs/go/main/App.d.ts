@@ -268,7 +268,7 @@ export function SniffCAPath():Promise<string>;
 
 export function SniffDeleteSession(arg1:string):Promise<void>;
 
-export function SniffExportOpenAPI(arg1:string,arg2:string):Promise<string>;
+export function SniffExportOpenAPI(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function SniffGenerateApiFromRecords(arg1:Array<sniff.TrafficRecord>,arg2:string,arg3:string):Promise<number>;
 

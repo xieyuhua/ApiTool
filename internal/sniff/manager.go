@@ -206,12 +206,13 @@ func (m *Manager) DeleteSession(id string) error {
 }
 
 // ExportOpenAPI 将会话导为 OpenAPI 文档（弹出保存对话框）。
-func (m *Manager) ExportOpenAPI(id, title string) (string, error) {
+// hostMode："original"=接口地址用抓包实际完整地址；"env"=host 替换为环境变量 {{host}}。
+func (m *Manager) ExportOpenAPI(id, title, hostMode string) (string, error) {
 	sess, ok := m.store.Get(id)
 	if !ok {
 		return "", fmt.Errorf("会话不存在")
 	}
-	text, err := m.store.ToOpenAPI(sess)
+	text, err := m.store.ToOpenAPI(sess, hostMode)
 	if err != nil {
 		if err == io.EOF {
 			return "", fmt.Errorf("该会话没有可导出的 HTTP(S) 流量")
@@ -237,12 +238,12 @@ func (m *Manager) ExportOpenAPI(id, title string) (string, error) {
 }
 
 // ExportOpenAPIText 返回 OpenAPI 文本（供前端复制到剪贴板）。
-func (m *Manager) ExportOpenAPIText(id, title string) (string, error) {
+func (m *Manager) ExportOpenAPIText(id, title, hostMode string) (string, error) {
 	sess, ok := m.store.Get(id)
 	if !ok {
 		return "", fmt.Errorf("会话不存在")
 	}
-	return m.store.ToOpenAPI(sess)
+	return m.store.ToOpenAPI(sess, hostMode)
 }
 
 // Status 返回当前状态。

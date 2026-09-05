@@ -355,7 +355,7 @@ func (s *SessionStore) Delete(id string) error {
 }
 
 // ToOpenAPI 将整个会话的 HTTP(S) 记录转换为 OpenAPI 3.0 文档（按 URL+方法聚合去重）。
-func (s *SessionStore) ToOpenAPI(sess *Session) (string, error) {
+func (s *SessionStore) ToOpenAPI(sess *Session, hostMode string) (string, error) {
 	var apis []model.ApiInfo
 	seen := map[string]bool{}
 	for _, r := range sess.Records {
@@ -383,7 +383,7 @@ func (s *SessionStore) ToOpenAPI(sess *Session) (string, error) {
 	if len(apis) == 0 {
 		return "", io.EOF // 调用方据此提示“无 HTTP 流量”
 	}
-	return doc.BuildOpenAPI(sess.Name, nil, apis, "", model.CommonParams{})
+	return doc.BuildOpenAPI(sess.Name, nil, apis, "", model.CommonParams{}, hostMode)
 }
 
 func kvToMap(kvs []model.KV) map[string]string {

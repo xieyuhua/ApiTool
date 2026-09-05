@@ -514,7 +514,7 @@ func ExportOpenAPI(ids []string, title string, b bus.Bus) (string, error) {
 	if title == "" {
 		title = "浏览器捕获接口"
 	}
-	content, err := doc.BuildOpenAPI(title, nil, apis, "", model.CommonParams{})
+	content, err := doc.BuildOpenAPI(title, nil, apis, "", model.CommonParams{}, "")
 	if err != nil {
 		return "", err
 	}
@@ -561,7 +561,7 @@ func BuildOpenAPI(ids []string, title string) (string, error) {
 	if title == "" {
 		title = "浏览器捕获接口"
 	}
-	return doc.BuildOpenAPI(title, nil, apis, "", model.CommonParams{})
+	return doc.BuildOpenAPI(title, nil, apis, "", model.CommonParams{}, "")
 }
 
 // ---------------- Token 持久化 ----------------
