@@ -538,9 +538,6 @@ async function runPressure() {
     <div v-show="tab === 'cases'" class="tc-page">
       <div class="toolbar">
         <el-button type="primary" @click="openGenerate">✨ AI 生成用例（选择接口）</el-button>
-        <el-button link type="primary" @click="toggleSelectAllCases">
-          {{ filteredCases.length > 0 && filteredCases.every(c => selectedCaseIds.includes(c.id)) ? '取消全选' : '全选' }}
-        </el-button>
         <el-button type="success" :loading="running" :disabled="!selectedCaseIds.length" @click="runSelected">
           运行选中用例
         </el-button>
@@ -554,6 +551,9 @@ async function runPressure() {
           </span>
         </el-tooltip>
         <span class="spacer" />
+                <el-button link type="primary" @click="toggleSelectAllCases">
+          {{ filteredCases.length > 0 && filteredCases.every(c => selectedCaseIds.includes(c.id)) ? '取消全选' : '全选' }}
+        </el-button>
         <el-select v-model="caseSourceFilter" placeholder="全部来源" size="default" style="width:150px" clearable>
           <el-option label="接口导入" value="api" />
           <el-option label="浏览器捕获导入" value="capture" />
