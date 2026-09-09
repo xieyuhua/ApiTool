@@ -128,6 +128,15 @@ func fieldFromValue(name string, v interface{}) *model.Field {
 		for _, p := range t {
 			f.Children = append(f.Children, fieldFromValue(p.key, p.val))
 		}
+	case string:
+		// 若字符串本身是合法 JSON（对象/数组），展开为结构化字段，
+		// 避免整段 JSON 被当成 string 的 example 而截断（如 data="[{...}]" 这类常见用法）。
+		if s := strings.TrimSpace(t); s != "" && (strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")) {
+			if sub, err := ParseFields(s, nil); err == nil && len(sub) > 0 {
+				return jsonStringToField(name, sub)
+			}
+		}
+		return f
 	case []interface{}:
 		if len(t) > 0 {
 			first := t[0]
@@ -143,6 +152,23 @@ func fieldFromValue(name string, v interface{}) *model.Field {
 			}
 		}
 	}
+	return f
+}
+
+// jsonStringToField 将“字符串本身是 JSON”解析出的子字段，包装成以 name 命名的字段。
+// sub 为 ParseFields 对字符串内容的解析结果：
+//   - 顶层数组（或标量数组）：ParseFields 返回单个名为 "(root)" 的字段，直接复用并改名；
+//   - 顶层对象：返回若干属性字段，包装为 object 的 children。
+func jsonStringToField(name string, sub []*model.Field) *model.Field {
+	f := &model.Field{Name: name}
+	if len(sub) == 1 && sub[0].Name == "(root)" {
+		f.Type = sub[0].Type
+		f.Children = sub[0].Children
+		f.Description = sub[0].Description
+		return f
+	}
+	f.Type = "object"
+	f.Children = sub
 	return f
 }
 

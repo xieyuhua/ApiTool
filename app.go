@@ -103,9 +103,6 @@ func (a *App) startup(ctx context.Context) {
 	// 启动系统托盘（独立于主界面，提供显隐/测试/退出）
 	a.windowVisible = true
 	go a.startTray()
-	// 安装系统级全局快捷键（即使窗口失焦也能调出剪贴板历史）
-	platform.SetHotkeyHandlers(a.toggleClipboardWindow)
-	go platform.StartGlobalHotkey()
 	// 启动剪贴板后台采集（文本 + 图片）
 	go a.StartClipboardCapture()
 	// 初始化 MITM 抓包管理器（CA 与抓包数据目录）
@@ -129,8 +126,6 @@ func (a *App) shutdown(ctx context.Context) {
 // 返回 true 表示阻止退出，改为隐藏窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
 // 使用 WindowHide 而非 WindowMinimise：隐藏后窗口不在任务栏保留按钮，
 // 托盘图标仍然存在，用户可通过托盘菜单「显示主窗口」恢复。
-// 全局快捷键（Ctrl+Shift+V / Ctrl+`）由 Go 端 WH_KEYBOARD_LL 钩子处理，
-// 不依赖 WebView 存活，因此隐藏窗口不影响剪贴板历史弹出。
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 	// 主动退出（托盘「退出」）时跳过隐藏逻辑，直接放行关闭
 	if a.quitting {
@@ -993,7 +988,7 @@ func (a *App) ExportStressReport(reportJSON string, format string) (string, erro
 }
 
 // ----------------------------------------------------------------------------
-// 剪贴板 / 热键（底层在 internal/platform，业务存储与窗口控制在此）
+// 剪贴板（底层采集在 internal/platform，业务存储与窗口控制在此）
 // ----------------------------------------------------------------------------
 
 // StartClipboardCapture 启动后台采集（platform 负责轮询与去重，结果经 ClipSink 落盘）。

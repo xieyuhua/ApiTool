@@ -52,8 +52,7 @@ onMounted(() => {
       console.error('托盘触发运行测试失败', e)
     }
   })
-  // 全局快捷键（Ctrl+Shift+V / Ctrl+`）与托盘菜单由 Go 端 WH_KEYBOARD_LL 钩子 /
-  // systray 触发，Go 端负责弹出窗口并显示「剪贴板历史」浮层，这里只负责渲染。
+  // 托盘菜单由 systray 触发，Go 端负责弹出窗口并显示「剪贴板历史」浮层，这里只负责渲染。
   EventsOn('apitool:show-clipboard-history', () => {
     clipVisible.value = true
     initClipboardMonitor() // 重新从 Go 拉取最新历史
@@ -80,30 +79,6 @@ async function closeClip() {
 }
 initGenListener()
 window.addEventListener('beforeunload', saveNow)
-
-// 将快捷键组合字符串（如 "Ctrl+Shift+V" / "Meta+Shift+V" / "Ctrl+`"）解析为匹配器
-function matchCombo(e, combo) {
-  if (!combo) return false
-  const parts = combo.split('+').map(s => s.trim())
-  const keyPart = parts[parts.length - 1].toLowerCase()
-  const needCtrl = parts.includes('Ctrl')
-  const needMeta = parts.includes('Meta') || parts.includes('Cmd')
-  const needShift = parts.includes('Shift')
-  const needAlt = parts.includes('Alt')
-  const map = { '`': '`', 'space': ' ', 'esc': 'escape', 'up': 'arrowup', 'down': 'arrowdown', 'left': 'arrowleft', 'right': 'arrowright', 'enter': 'enter' }
-  const raw = e.key === ' ' ? 'space' : e.key
-  const norm = (map[raw.toLowerCase()] || raw).toLowerCase()
-  return (
-    !!e.ctrlKey === needCtrl &&
-    !!e.metaKey === needMeta &&
-    !!e.shiftKey === needShift &&
-    !!e.altKey === needAlt &&
-    norm === keyPart
-  )
-}
-// 注：剪贴板历史全局快捷键（Ctrl+Shift+V / Ctrl+`）已由 Go 端 WH_KEYBOARD_LL 钩子
-// 直接弹出「原生剪贴板历史菜单」，不依赖 WebView，窗口隐藏到托盘时也能用，
-// 因此前端不再监听该组合键，避免与 Go 端重复触发。
 
 // 目录栏宽度可拖拽调整（持久化到 localStorage）
 const NAV_W = 60

@@ -464,6 +464,27 @@ func parseFormBodyToKVs(body string) []model.KV {
 	return kvs
 }
 
+// formFieldValueSchema 若表单字段值是 JSON 对象/数组，则转换为结构化 schema，
+// 避免把整段 JSON 作为字符串 example 导出（如 data=[{...}] / payload={...} 这类常见用法）。
+func formFieldValueSchema(val string) map[string]interface{} {
+	val = strings.TrimSpace(val)
+	if val == "" || !(strings.HasPrefix(val, "{") || strings.HasPrefix(val, "[")) {
+		return nil
+	}
+	fields, err := jsonutil.ParseFields(val, nil)
+	if err != nil || len(fields) == 0 {
+		return nil
+	}
+	if strings.HasPrefix(val, "[") {
+		// 顶层为数组：包装成 array[items=对象]，避免丢失数组外壳
+		return map[string]interface{}{
+			"type":  "array",
+			"items": schemaFromFields(fields),
+		}
+	}
+	return schemaFromFields(fields)
+}
+
 // BuildOpenAPI 生成标准 OpenAPI 3.0.3 文档。
 // hostMode:
 //   - "original"：接口地址使用抓包实际完整地址（含 host/path/query），不附加 servers，保证导入后地址不被替换；
@@ -591,6 +612,12 @@ func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, ro
 						"format":      "binary",
 						"description": kv.Description,
 					}
+				} else if sch := formFieldValueSchema(kv.Value); sch != nil {
+					// 字段值本身是 JSON（对象/数组）：以结构化 schema 表达，避免整段 JSON 作为 example
+					if kv.Description != "" {
+						sch["description"] = kv.Description
+					}
+					props[kv.Key] = sch
 				} else {
 					props[kv.Key] = map[string]interface{}{
 						"type":        "string",

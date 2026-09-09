@@ -401,7 +401,7 @@ async function loadInto() {
     p.testReports ||= []
     p.apis.forEach(normalizeApi)
   }
-  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080', theme: 'light', accent: '#165dff', hotkey: 'Ctrl+Shift+V', clipboard: { monitor: true, maxItems: 200 } }
+  d.settings ||= { aiBaseUrl: '', aiKey: '', aiModel: '', timeoutSec: 30, cloudURL: '', cloudToken: '', cloudUser: '', autoSync: false, version: '1.0.0', updateURL: 'http://127.0.0.1:8080', theme: 'light', accent: '#165dff', clipboard: { monitor: true, maxItems: 200 } }
   d.settings.version ||= '1.0.0'
   d.settings.updateURL ||= 'http://127.0.0.1:8080'
   d.settings.theme ||= 'light'

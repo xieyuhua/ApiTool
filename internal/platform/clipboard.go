@@ -2,7 +2,7 @@
 //   - 系统剪贴板采集与写入（文本 / 图片 CF_DIB <-> PNG）
 //   - 全局键盘钩子（连续两次 Ctrl、Ctrl+B）
 //
-// 抽离自根目录 clipboard_windows.go / hotkey_windows.go。业务侧（历史存储、窗口控制、
+// 抽离自根目录 clipboard_windows.go。业务侧（历史存储、窗口控制、
 // 前端事件通知）由 App 通过 ClipSink 与 bus.Bus 注入，platform 不反向依赖 App 或 runtime。
 package platform
 
