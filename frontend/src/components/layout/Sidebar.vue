@@ -221,17 +221,46 @@ function onNodeDrop() {
       }
     }
     collect(root.childNodes, '')
-    // 在每个父级组内按树中的顺序重排，跨组相对顺序保持不变
-    const reorderByGroup = (items, keyOf, orderMap) => {
-      const groups = {}
-      for (const it of items) (groups[keyOf(it)] ||= []).push(it)
-      for (const key in groups) {
-        const ids = orderMap[key] || []
-        groups[key].sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id))
+    // 按树中当前顺序重建 dirs / apis 数组，使同级排序与目录归属真正持久化。
+    // 注意：el-tree 内部在拖拽时已移动节点，但绑定的数据数组不会自动改变，
+    // 若只更新 parentId/dirId 而不重排数组，刷新或重渲染后顺序会还原。
+    const newDirs = []
+    const walkDirs = (parentId) => {
+      for (const id of (dirOrder[parentId] || [])) {
+        const d = p.dirs.find(x => x.id === id)
+        if (d) { newDirs.push(d); walkDirs(id) }
       }
     }
-    reorderByGroup(p.dirs, d => d.parentId, dirOrder)
-    reorderByGroup(p.apis, a => a.dirId, apiOrder)
+    walkDirs('')
+    for (const d of p.dirs) if (!newDirs.includes(d)) newDirs.push(d) // 兜底：未收录目录保持原序
+    p.dirs = newDirs
+
+    const placed = new Set()
+    const newApis = []
+    for (const pid in apiOrder) {
+      for (const id of apiOrder[pid]) {
+        const a = p.apis.find(x => x.id === id)
+        if (a) { newApis.push(a); placed.add(id) }
+      }
+    }
+    for (const a of p.apis) if (!placed.has(a.id)) newApis.push(a) // 兜底：未收录接口保持原序
+    p.apis = newApis
+
+    // 把顺序写回 sort 字段：左侧树按数组顺序渲染，而 OpenAPI/Markdown 导出
+    // （childDirs）按 d.Sort 排序目录，只有双向同步才能让拖拽结果在两端都持久一致。
+    // 按父级分组赋连续序号，使“同父级内排序”在各处保持一致。
+    for (const pid in dirOrder) {
+      dirOrder[pid].forEach((id, i) => {
+        const d = p.dirs.find(x => x.id === id)
+        if (d) d.sort = i
+      })
+    }
+    for (const pid in apiOrder) {
+      apiOrder[pid].forEach((id, i) => {
+        const a = p.apis.find(x => x.id === id)
+        if (a) a.sort = i
+      })
+    }
     saveNow()
   } catch (e) {
     console.error('拖拽回写失败', e)
