@@ -638,6 +638,17 @@ func sshFactory(conn model.PluginConn) func() (interface{}, func(), error) {
 // PluginSSHExec 在远端执行命令（XShell 风格命令执行，复用同一 SSH 连接）
 func PluginSSHExec(conn model.PluginConn, command string) (string, error) {
 	var out string
+	// 若该连接的终端会话已建立，则复用其 SSH 连接执行命令，省去一次新建连接
+	if st := getStreamByConn(conn); st != nil && st.client != nil {
+		if session, e := st.client.NewSession(); e == nil {
+			defer session.Close()
+			o, e := session.CombinedOutput(command)
+			out = string(o)
+			if e == nil {
+				return out, nil
+			}
+		}
+	}
 	err := withConn("ssh:"+connKey(conn), sshFactory(conn), func(v interface{}) error {
 		session, e := v.(*sshSession).client.NewSession()
 		if e != nil {
@@ -660,11 +671,13 @@ type sshStream struct {
 	rows     int
 	cols     int
 	encoding string // 终端输出编码，用于解码（utf-8/gbk/gb18030）
+	connKey  string // 归属连接的指纹，用于 SFTP 复用同一 SSH 连接
 }
 
 var (
 	sshMu      sync.Mutex
 	sshStreams = map[string]*sshStream{}
+	sshByConn  = map[string][]*sshStream{}
 )
 
 type eventWriter struct {
@@ -726,9 +739,10 @@ func PluginSSHOpen(b bus.Bus, conn model.PluginConn) (string, error) {
 		client.Close()
 		return "", err
 	}
-	st := &sshStream{client: client, sess: sess, stdin: stdin, rows: defRows, cols: defCols, encoding: encoding}
+	st := &sshStream{client: client, sess: sess, stdin: stdin, rows: defRows, cols: defCols, encoding: encoding, connKey: connKey(conn)}
 	sshMu.Lock()
 	sshStreams[id] = st
+	sshByConn[st.connKey] = append(sshByConn[st.connKey], st)
 	sshMu.Unlock()
 	go func() {
 		buf := make([]byte, 4096)
@@ -777,6 +791,17 @@ func PluginSSHClose(id string) error {
 	st := sshStreams[id]
 	if st != nil {
 		delete(sshStreams, id)
+		if list := sshByConn[st.connKey]; list != nil {
+			for i, s := range list {
+				if s == st {
+					sshByConn[st.connKey] = append(list[:i], list[i+1:]...)
+					break
+				}
+			}
+			if len(sshByConn[st.connKey]) == 0 {
+				delete(sshByConn, st.connKey)
+			}
+		}
 	}
 	sshMu.Unlock()
 	if st == nil {
@@ -806,6 +831,18 @@ func getStream(id string) *sshStream {
 	return sshStreams[id]
 }
 
+// getStreamByConn 返回某连接当前可用的终端会话（用于 SFTP 复用其 SSH 连接）。
+// 同一服务器可能开了多个标签，这里返回任意一个可用会话即可（各标签连接独立）。
+func getStreamByConn(conn model.PluginConn) *sshStream {
+	sshMu.Lock()
+	defer sshMu.Unlock()
+	list := sshByConn[connKey(conn)]
+	if len(list) == 0 {
+		return nil
+	}
+	return list[0]
+}
+
 // ===================== SFTP =====================
 
 type sftpHolder struct {
@@ -830,15 +867,36 @@ func joinRemotePath(base, name string) string {
 	return strings.TrimRight(base, "/") + "/" + name
 }
 
+// withSFTP 执行一次 SFTP 操作。优先复用该连接已建立的 SSH 终端会话所在的 *ssh.Client
+// （在同一连接上开启 sftp 子系统通道），避免为每个文件操作再新建一个 SSH 连接；当同一连接
+// 被多次打开时，这能避免服务端连接数/会话数超限而报
+// "administratively prohibited (open failed)"。无可用终端会话时回退到独立的连接池。
+func withSFTP(conn model.PluginConn, fn func(sc *sftpClient) error) error {
+	if st := getStreamByConn(conn); st != nil && st.client != nil {
+		if ch, _, err := st.client.OpenChannel("session", nil); err == nil {
+			if _, err2 := ch.SendRequest("subsystem", true, []byte("sftp")); err2 == nil {
+				if sc, err3 := newSFTPClientFromChannel(ch, st.client); err3 == nil {
+					defer sc.Close()
+					return fn(sc)
+				}
+			}
+			ch.Close()
+		}
+		// 复用失败：落入下方独立连接池
+	}
+	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
+		return fn(v.(*sftpHolder).sc)
+	})
+}
+
 // PluginSFTPList 列出远端目录
 func PluginSFTPList(conn model.PluginConn, path string) ([]FileInfo, error) {
 	var out []FileInfo
-	err := withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		h := v.(*sftpHolder)
+	err := withSFTP(conn, func(sc *sftpClient) error {
 		if path == "" {
 			path = "/"
 		}
-		files, e := h.sc.listDir(path)
+		files, e := sc.listDir(path)
 		out = files
 		return e
 	})
@@ -848,9 +906,9 @@ func PluginSFTPList(conn model.PluginConn, path string) ([]FileInfo, error) {
 // PluginSFTPRead 读取远端文件文本（最大 5MB）
 func PluginSFTPRead(conn model.PluginConn, path string) (string, error) {
 	var out string
-	err := withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
+	err := withSFTP(conn, func(sc *sftpClient) error {
 		var e error
-		out, e = v.(*sftpHolder).sc.readFile(path)
+		out, e = sc.readFile(path)
 		return e
 	})
 	return out, err
@@ -858,8 +916,8 @@ func PluginSFTPRead(conn model.PluginConn, path string) (string, error) {
 
 // PluginSFTPWrite 写入远端文件
 func PluginSFTPWrite(conn model.PluginConn, path, content string) error {
-	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		return v.(*sftpHolder).sc.writeFile(path, content)
+	return withSFTP(conn, func(sc *sftpClient) error {
+		return sc.writeFile(path, content)
 	})
 }
 
@@ -870,8 +928,8 @@ func PluginSFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) err
 		return err
 	}
 	remotePath := joinRemotePath(remoteDir, name)
-	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		return v.(*sftpHolder).sc.writeFileBytes(remotePath, data)
+	return withSFTP(conn, func(sc *sftpClient) error {
+		return sc.writeFileBytes(remotePath, data)
 	})
 }
 
@@ -880,17 +938,17 @@ func PluginSFTPRename(conn model.PluginConn, oldPath, newPath string) error {
 	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
 		return fmt.Errorf("原路径与新路径不能为空")
 	}
-	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		return v.(*sftpHolder).sc.rename(oldPath, newPath)
+	return withSFTP(conn, func(sc *sftpClient) error {
+		return sc.rename(oldPath, newPath)
 	})
 }
 
 // PluginSFTPDownload 下载远端文件到本地（弹出保存对话框），返回本地保存路径
 func PluginSFTPDownload(b bus.Bus, conn model.PluginConn, remotePath, name string) (string, error) {
 	var data []byte
-	err := withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
+	err := withSFTP(conn, func(sc *sftpClient) error {
 		var e error
-		data, e = v.(*sftpHolder).sc.readFileBytes(remotePath)
+		data, e = sc.readFileBytes(remotePath)
 		return e
 	})
 	if err != nil {
@@ -934,20 +992,19 @@ func pathBaseName(p string) string {
 
 // PluginSFTPMkdir 创建远端目录
 func PluginSFTPMkdir(conn model.PluginConn, path string) error {
-	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		return v.(*sftpHolder).sc.mkdir(path)
+	return withSFTP(conn, func(sc *sftpClient) error {
+		return sc.mkdir(path)
 	})
 }
 
 // PluginSFTPDelete 删除远端文件或目录
 func PluginSFTPDelete(conn model.PluginConn, path string) error {
-	return withConn("sftp:"+connKey(conn), sftpFactory(conn), func(v interface{}) error {
-		h := v.(*sftpHolder)
-		isDir, err := h.sc.stat(path)
+	return withSFTP(conn, func(sc *sftpClient) error {
+		isDir, err := sc.stat(path)
 		if err != nil {
 			return err
 		}
-		return h.sc.remove(path, isDir)
+		return sc.remove(path, isDir)
 	})
 }
 

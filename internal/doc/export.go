@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"apitool/internal/jsonutil"
 	"apitool/internal/model"
 	"encoding/json"
 	"fmt"
@@ -437,6 +438,32 @@ func schemaFromField(f *model.Field) map[string]interface{} {
 	}
 }
 
+// parseFormBodyToKVs 将表单请求体解析为表单字段（兼容 JSON 对象与 urlencoded 两种格式）。
+func parseFormBodyToKVs(body string) []model.KV {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil
+	}
+	kvs := []model.KV{}
+	if strings.HasPrefix(body, "{") {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(body), &m); err == nil {
+			for k, v := range m {
+				kvs = append(kvs, model.KV{Enabled: true, Key: k, Value: fmt.Sprint(v)})
+			}
+			return kvs
+		}
+	}
+	vals, err := url.ParseQuery(body)
+	if err != nil {
+		return nil
+	}
+	for k := range vals {
+		kvs = append(kvs, model.KV{Enabled: true, Key: k, Value: vals.Get(k)})
+	}
+	return kvs
+}
+
 // BuildOpenAPI 生成标准 OpenAPI 3.0.3 文档。
 // hostMode:
 //   - "original"：接口地址使用抓包实际完整地址（含 host/path/query），不附加 servers，保证导入后地址不被替换；
@@ -531,17 +558,29 @@ func BuildOpenAPI(title string, dirs []model.Directory, apis []model.ApiInfo, ro
 		if len(params) > 0 {
 			op["parameters"] = params
 		}
-		if len(api.ReqFields) > 0 {
+		// 请求体：优先使用结构化字段；字段为空但有原始 Body 时，实时解析兜底，避免 POST 参数丢失。
+		// 非 form 类型的 Body 均尝试按 JSON 解析（扩展若把 JSON 体误标为 text/none 也能兜住）。
+		reqFields := api.ReqFields
+		if len(reqFields) == 0 && api.BodyType != "form" && strings.TrimSpace(api.Body) != "" {
+			if f, err := jsonutil.ParseFields(api.Body, nil); err == nil && len(f) > 0 {
+				reqFields = f
+			}
+		}
+		if len(reqFields) > 0 {
 			op["requestBody"] = map[string]interface{}{
 				"content": map[string]interface{}{
 					"application/json": map[string]interface{}{
-						"schema": schemaFromFields(api.ReqFields),
+						"schema": schemaFromFields(reqFields),
 					},
 				},
 			}
 		}
 		// 表单参数（Form / 文件上传）：生成 multipart/form-data requestBody
+		// 若 FormItems 为空但有 form 类型 Body，则尝试从 Body 解析兜底
 		formKVs := EnabledKVs(api.FormItems)
+		if len(formKVs) == 0 && api.BodyType == "form" && strings.TrimSpace(api.Body) != "" {
+			formKVs = EnabledKVs(parseFormBodyToKVs(api.Body))
+		}
 		if len(formKVs) > 0 {
 			props := map[string]interface{}{}
 			required := []string{}

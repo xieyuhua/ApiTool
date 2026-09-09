@@ -32,22 +32,45 @@ func openSFTP(conn model.PluginConn) (*ssh.Client, *sftpClient, error) {
 	return client, sc, nil
 }
 
+// newSFTPClient 按标准方式建立 SFTP：先开 "session" 通道，再在其上发起 "subsystem" 请求，
+// 而不是把 "subsystem" 当作通道类型直接 OpenChannel（多数服务端会拒绝并报
+// administratively prohibited）。
 func newSFTPClient(c *ssh.Client) (*sftpClient, error) {
-	ch, _, err := c.OpenChannel("subsystem", []byte("sftp"))
+	ch, _, err := c.OpenChannel("session", nil)
 	if err != nil {
 		return nil, err
 	}
-	// 发送 SSH_FXP_INIT（版本 3）并等待对端版本包
-	if _, err := ch.SendRequest("initialize", true, nil); err != nil {
+	if _, err := ch.SendRequest("subsystem", true, []byte("sftp")); err != nil {
 		ch.Close()
 		return nil, err
 	}
-	buf := make([]byte, 4)
-	if _, e := io.ReadFull(ch, buf); e != nil {
+	return newSFTPClientFromChannel(ch, c)
+}
+
+// newSFTPClientFromChannel 在已建立的 SFTP 通道上完成握手。
+// 传入 c 仅用于记录归属；复用终端连接时 Close 只关闭通道，不会关闭 c。
+func newSFTPClientFromChannel(ch ssh.Channel, c *ssh.Client) (*sftpClient, error) {
+	sc := &sftpClient{c: c, chanIn: ch, chanOut: ch, nextID: 1}
+	if err := sc.handshake(); err != nil {
 		ch.Close()
-		return nil, e
+		return nil, err
 	}
-	return &sftpClient{c: c, chanIn: ch, chanOut: ch, nextID: 1}, nil
+	return sc, nil
+}
+
+// handshake 发送 SSH_FXP_INIT（版本 3）并等待对端的 SSH_FXP_VERSION 响应。
+func (s *sftpClient) handshake() error {
+	if err := s.send([]byte{sshFxpInit, 0, 0, 0, 3}); err != nil {
+		return err
+	}
+	buf, err := s.recv()
+	if err != nil {
+		return err
+	}
+	if len(buf) < 1 || buf[0] != sshFxpVersion {
+		return fmt.Errorf("SFTP 握手失败：期望 SSH_FXP_VERSION，实际收到 %d 字节", len(buf))
+	}
+	return nil
 }
 
 func (s *sftpClient) Close() error {

@@ -372,6 +372,12 @@ func capturedToApi(c CapturedRequest) model.ApiInfo {
 		api.BodyType = "json"
 	}
 	api.Body = c.Body
+	// 表单参数（Form / 文件上传）：从请求体解析出表单字段，供 OpenAPI / 文档渲染使用
+	if api.BodyType == "form" {
+		if kvs := parseFormBodyToKVs(c.Body); len(kvs) > 0 {
+			api.FormItems = kvs
+		}
+	}
 	// 请求字段：请求体为 JSON 时解析
 	if api.BodyType == "json" && strings.TrimSpace(c.Body) != "" {
 		if fields, err := parseJSONBodyToFields(c.Body); err == nil && len(fields) > 0 {
@@ -403,6 +409,35 @@ func parseJSONBodyToFields(s string) ([]*model.Field, error) {
 		return nil, err
 	}
 	return fields, nil
+}
+
+// parseFormBodyToKVs 将表单请求体解析为表单字段（兼容 JSON 对象与 urlencoded 两种格式）。
+// 浏览器扩展上报的 form 请求体可能是 JSON 对象字符串或 key=value&... 形式，这里两者都支持。
+func parseFormBodyToKVs(body string) []model.KV {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil
+	}
+	kvs := []model.KV{}
+	// 优先按 JSON 对象解析
+	if strings.HasPrefix(body, "{") {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(body), &m); err == nil {
+			for k, v := range m {
+				kvs = append(kvs, model.KV{Enabled: true, Key: k, Value: fmt.Sprint(v), Type: model.FormTypeText})
+			}
+			return kvs
+		}
+	}
+	// 退化为 urlencoded：a=1&b=2
+	vals, err := url.ParseQuery(body)
+	if err != nil {
+		return nil
+	}
+	for k := range vals {
+		kvs = append(kvs, model.KV{Enabled: true, Key: k, Value: vals.Get(k), Type: model.FormTypeText})
+	}
+	return kvs
 }
 
 // GenerateApi 将选中的捕获请求转换为接口定义并导入当前项目（指定目录）

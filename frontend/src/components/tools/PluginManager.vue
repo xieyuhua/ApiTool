@@ -1,37 +1,53 @@
 <template>
   <div class="pm">
-    <!-- 卡片网格（列表）头部：分类标题 + 新增 -->
-    <div class="pm-grid-head" v-if="!selected">
-      <span class="pm-grid-title">{{ currentCat }}</span>
-      <el-button size="small" type="primary" @click="openAdd">+ 新增连接</el-button>
+    <!-- 隐藏的文件选择器：常驻渲染，供 SSH / SFTP 上传共用（修复 SSH 标签下点击上传无反应的问题） -->
+    <input ref="fileInputRef" type="file" multiple style="position:absolute;width:0;height:0;opacity:0;left:-9999px" @change="onFilePicked" />
+    <!-- 常驻标签栏：顶部，无标签时也显示 -->
+    <div class="pm-tabs">
+      <span v-if="!openTabs.length" class="pm-tabs-empty">未打开会话</span>
+      <template v-for="tid in openTabs" :key="tid">
+        <div class="pm-tab" :class="{ active: tid === activeTabConn }"
+             @click="activeTabConn = tid" @click.middle.prevent="closeConnTab(tid)" :title="connOf(tid) ? connOf(tid).name : ''">
+          <span class="pm-tab-ico">{{ connOf(tid) ? catIcon(connOf(tid).category) : '🔌' }}</span>
+          <span class="pm-tab-name">{{ connOf(tid) ? connOf(tid).name : '(已删除)' }}</span>
+          <span class="pm-tab-close" @click.stop="closeConnTab(tid)" title="关闭标签">×</span>
+        </div>
+      </template>
+      <button class="pm-tab-plus" @click="selectorVisible = true" title="打开新标签 / 选择会话">＋</button>
     </div>
 
-    <!-- 卡片网格（列表） -->
-    <div class="pm-grid" v-if="!selected">
-      <el-empty v-if="!categoryConns.length" :description="'暂无「' + currentCat + '」连接'">
-        <el-button type="primary" size="small" @click="openAdd">新增连接</el-button>
-      </el-empty>
-      <div v-else class="pm-cards">
-        <div v-for="c in categoryConns" :key="c.id" class="pm-card" :class="{ 'pm-card-active': c.category === 'db' && activeConnId === c.id }" @click="selectConn(c)">
-          <div class="pm-card-top">
-            <span class="pm-card-ico">{{ catIcon(c.category) }}</span>
-            <span class="pm-card-name" :title="c.name">{{ c.name }}</span>
-            <span v-if="c.category === 'db' && activeConnId === c.id" class="pm-card-badge">分析中</span>
-          </div>
-          <div class="pm-card-host">{{ c.host || '—' }}<template v-if="c.port">:{{ c.port }}</template></div>
-          <div class="pm-card-meta">{{ cardMeta(c) }}</div>
-          <div class="pm-card-actions" @click.stop>
-            <span class="pm-act" @click="editConn(c)">编辑</span>
-            <span class="pm-act pm-act-del" @click="removeConn(c.id)">删除</span>
+    <!-- 卡片网格（列表）：无任何打开标签时显示 -->
+    <template v-if="!openTabs.length">
+      <div class="pm-grid-head">
+        <span class="pm-grid-title">{{ currentCat }}</span>
+        <el-button size="small" type="primary" @click="openAdd">+ 新增连接</el-button>
+      </div>
+      <div class="pm-grid">
+        <el-empty v-if="!categoryConns.length" :description="'暂无「' + currentCat + '」连接'">
+          <el-button type="primary" size="small" @click="openAdd">新增连接</el-button>
+        </el-empty>
+        <div v-else class="pm-cards">
+          <div v-for="c in categoryConns" :key="c.id" class="pm-card" :class="{ 'pm-card-active': c.category === 'db' && activeConnId === c.id }" @click="openConnTab(c.id)">
+            <div class="pm-card-top">
+              <span class="pm-card-ico">{{ catIcon(c.category) }}</span>
+              <span class="pm-card-name" :title="c.name">{{ c.name }}</span>
+              <span v-if="c.category === 'db' && activeConnId === c.id" class="pm-card-badge">分析中</span>
+            </div>
+            <div class="pm-card-host">{{ c.host || '—' }}<template v-if="c.port">:{{ c.port }}</template></div>
+            <div class="pm-card-meta">{{ cardMeta(c) }}</div>
+            <div class="pm-card-actions" @click.stop>
+              <span class="pm-act" @click="editConn(c)">编辑</span>
+              <span class="pm-act pm-act-del" @click="removeConn(c.id)">删除</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </template>
 
-    <!-- 详情 / 操作区 -->
-    <div class="pm-detail" v-else v-loading="loading">
+    <!-- 详情 / 操作区（有激活标签时） -->
+    <div class="pm-detail" v-else-if="selected" v-loading="loading">
       <div class="pm-detail-bar">
-        <el-button size="small" @click="selectedId = ''">← 返回列表</el-button>
+        <el-button size="small" @click="closeConnTab(activeTabConn)">← 关闭标签</el-button>
         <span class="pm-detail-title">{{ selected.name }}</span>
         <span class="pm-detail-tag">{{ currentCat }}</span>
         <span class="pm-detail-host">{{ selected.host }}<template v-if="selected.port">:{{ selected.port }}</template></span>
@@ -40,20 +56,21 @@
       <!-- SSH：模仿 XShell 的实时交互终端 -->
       <div class="pm-body" v-if="selected.category === 'ssh'">
         <div class="term-bar">
-          <span class="term-status" :class="{ on: sshConnected }">
-            <i class="dot" />{{ sshConnected ? '已连接' : '未连接' }}
+          <span class="term-status" :class="{ on: sshActive.connected }">
+            <i class="dot" />{{ sshActive.connected ? '已连接' : (sshActive.connecting ? '连接中…' : '未连接') }}
           </span>
           <span class="term-host">{{ selected.username ? selected.username + '@' : '' }}{{ selected.host }}<template v-if="selected.port">:{{ selected.port }}</template></span>
           <span style="flex:1" />
-          <el-button size="small" type="danger" plain :disabled="!sshConnected" @click="closeSsh">断开</el-button>
-          <el-button size="small" type="success" @click="pickUpload(uploadToSsh)">上传文件</el-button>
+          <el-button size="small" type="danger" plain :disabled="!sshActive.connected" @click="closeSshActive">断开</el-button>
+          <el-button size="small" type="success" @click="pickUpload(uploadToSsh)" title="rz：上传文件到远端当前目录（也可在终端直接输入 rz）">rz 上传</el-button>
+          <el-button size="small" type="warning" @click="openSzDialog" title="sz：从远端下载文件（也可在终端直接输入 sz <路径>）">sz 下载</el-button>
           <el-button size="small" @click="clearSshLog">清屏</el-button>
         </div>
 
-        <!-- xterm.js 终端容器：负责渲染输出与捕获键盘输入 -->
-        <div class="term" ref="termRef" @click="focusTermInput">
-          <div v-if="!sshConnected" class="term-overlay">
-            <el-button type="primary" size="small" :loading="sshConnecting" @click="openSsh">连接</el-button>
+        <!-- xterm.js 终端容器：负责渲染输出与捕获键盘输入（按标签 key 隔离，避免多标签 DOM 复用冲突） -->
+        <div class="term" ref="termRef" :key="activeTabConn" @click="focusTermInput">
+          <div v-if="!sshActive.connected" class="term-overlay">
+            <el-button type="primary" size="small" :loading="sshActive.connecting" @click="openSsh">连接</el-button>
             <span class="term-hint">点击「连接」打开实时终端会话</span>
           </div>
         </div>
@@ -117,7 +134,6 @@
             <el-button type="primary" @click="doRename">确定</el-button>
           </template>
         </el-dialog>
-        <input ref="fileInputRef" type="file" multiple style="position:absolute;width:0;height:0;opacity:0" @change="onFilePicked" />
       </div>
 
       <!-- 数据库连接：测试连接 + 启用分析 + 同步表结构 / 字段语义维护 -->
@@ -289,6 +305,53 @@
         {{ testResult.ok ? (testResult.info || '连接成功') : ('失败：' + (testResult.error || '未知错误（请检查连接参数）')) }}
       </div>
     </el-dialog>
+
+    <!-- sz 下载：输入远端文件路径，保存到本地（等效 XShell 中 sz） -->
+    <el-dialog v-model="szDialogVisible" title="sz 下载文件" width="440px" append-to-body>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-size:12px;color:#86909c">输入远端文件的绝对路径，确认后将通过 SFTP 安全下载并保存到本地。</span>
+        <el-input v-model="szRemotePath" placeholder="例如：/tmp/example.tar.gz" @keyup.enter="confirmSz">
+          <template #prepend>远端路径</template>
+        </el-input>
+      </div>
+      <template #footer>
+        <el-button @click="szDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmSz">下载</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 会话选择器：点击标签栏「＋」弹出，列出各分类已有连接，点选即开新标签 -->
+    <el-dialog v-model="selectorVisible" title="打开会话（新标签）" width="600px" append-to-body>
+      <div class="sel-groups">
+        <div v-for="g in selectorGroups" :key="g.value" class="sel-group">
+          <div class="sel-group-title">{{ g.ico }} {{ g.label }}</div>
+          <div v-if="!g.items.length" class="sel-empty">暂无连接</div>
+          <div v-else class="sel-items">
+            <div v-for="c in g.items" :key="c.id" class="sel-item" @click="openConnTab(c.id)">
+              <span class="sel-ico">{{ g.ico }}</span>
+              <span class="sel-name" :title="c.name">{{ c.name }}</span>
+              <span class="sel-host">{{ c.host || '—' }}<template v-if="c.port">:{{ c.port }}</template></span>
+              <span class="sel-open">打开 ↗</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="sel-footer">
+          <el-dropdown @command="onNewConnType" trigger="click">
+            <el-button size="small" type="primary">＋ 新建连接 ▾</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="ssh">XShell(SSH)</el-dropdown-item>
+                <el-dropdown-item command="ftp">FTP</el-dropdown-item>
+                <el-dropdown-item command="sftp">SFTP</el-dropdown-item>
+                <el-dropdown-item command="db">数据库连接</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -335,7 +398,6 @@ const catIconMap = { ssh: '💻', ftp: '📁', sftp: '📂', db: '🗄️' }
 const props = defineProps({ category: { type: String, default: 'ssh' } })
 
 // 视图状态
-const selectedId = ref('')
 const loading = ref(false)
 const showAdd = ref(false)
 const editing = ref(false)
@@ -345,14 +407,15 @@ const testResult = ref(null)
 // 表单状态（新增/编辑连接）
 const form = reactive({ name: '', category: 'ssh', dbType: 'mysql', host: '', port: 0, username: '', password: '', database: '', remark: '', encoding: 'utf-8' })
 
-// SSH 实时终端相关状态
-const sshConnected = ref(false)   // 实时终端是否已连接
-const sshConnecting = ref(false)  // 正在建立连接
-const sshSessionId = ref('')      // 后端 SSH 会话 ID
-let term = null                    // xterm.js 终端实例（页面生命周期内复用）
-let fitAddon = null                // 自适应尺寸插件，根据容器大小计算行列
-const termRef = ref(null)         // 终端容器 DOM
-let termRO = null                  // 终端尺寸变化监听（用于窗口自适应，适配 vim/top/htop 等全屏程序）
+// ===================== 多标签（类浏览器标签） =====================
+const openTabs = ref([])          // 已打开的标签（连接 id 数组，可跨分类）
+const activeTabConn = ref('')     // 当前激活标签对应的连接 id
+const tabCache = {}               // connId -> 非 SSH 标签的视图态快照（切换标签时持久化）
+const sshStatus = reactive({})    // connId -> { connected, connecting, sessionId }（响应式，供标签栏状态展示）
+const sshEngines = {}             // connId -> { term, fitAddon, ro }（非响应式，避免 xterm 被代理）
+const selectorVisible = ref(false)// 会话选择器对话框
+
+const termRef = ref(null)         // 当前激活 SSH 标签的终端容器 DOM
 const remotePath = ref('/')
 const remoteFiles = ref([])
 const remoteContent = ref('')
@@ -368,13 +431,26 @@ let uploadHandler = null  // 当前上传目标处理回调
 
 // 当前分类标题
 const currentCat = computed(() => (categories.find(c => c.value === props.category) || {}).label || '')
-// 当前分类下的连接列表
+// 当前分类下的连接列表（左侧卡片网格用，按导航分类过滤）
 const categoryConns = computed(() => pluginConnections().filter(c => c.category === props.category))
-// 当前选中的连接对象
-const selected = computed(() => categoryConns.value.find(c => c.id === selectedId.value))
+// 当前激活标签对应的连接对象（跨分类查找）
+const selected = computed(() => pluginConnections().find(c => c.id === activeTabConn.value))
+// 标签栏展示用：根据 id 取连接
+function connOf(id) { return pluginConnections().find(c => c.id === id) || null }
+// 会话选择器分组：按分类列出已有连接
+const selectorGroups = computed(() => categories.map(cat => ({
+  value: cat.value, label: cat.label, ico: cat.ico,
+  items: pluginConnections().filter(c => c.category === cat.value),
+})))
+// 当前激活 SSH 标签的实时状态（供模板展示连接/连接中）
+const sshActive = computed(() => {
+  const id = activeTabConn.value
+  if (!id) return { connected: false, connecting: false }
+  const s = sshStatus[id]
+  return s ? { connected: !!s.connected, connecting: !!s.connecting } : { connected: false, connecting: false }
+})
 
-// 切换分类时清空选中与操作状态
-watch(() => props.category, () => { selectedId.value = ''; resetOps() })
+// 切换左侧分类导航仅影响卡片网格过滤；已打开的标签保持不变（组件实例复用，不重置）
 
 // 分类图标
 function catIcon(cat) { return catIconMap[cat] || '🔌' }
@@ -389,7 +465,13 @@ function cardMeta(c) {
   }
 }
 
-function selectConn(c) { selectedId.value = c.id }
+// 打开一个连接为新标签（已打开则直接切换）
+function openConnTab(id) {
+  if (!id) return
+  if (!openTabs.value.includes(id)) openTabs.value.push(id)
+  activeTabConn.value = id
+  selectorVisible.value = false
+}
 
 // 路径分段，用于面包屑导航
 const pathSegments = computed(() => {
@@ -421,23 +503,85 @@ async function call(fn, ...args) {
   }
 }
 
-// 重置所有操作区状态
-function resetOps() {
+// 重置非 SSH 标签的视图态（打开新标签且无可恢复快照时调用）
+function resetView() {
+  remotePath.value = '/'
   remoteFiles.value = []
   remoteContent.value = ''
   currentRemotePath.value = ''
-  closeSsh()
+  remoteMkdirShown.value = false
+  remoteMkdirName.value = ''
+  remoteChecked.value = []
+  renameShown.value = false
+  renameRow.value = null
+  renameName.value = ''
+  dbDatabases.value = []
+  dbTables.value = []
+  selDatabase.value = ''
+  selTables.value = []
+  tblFilter.value = ''
+  syncedFilter.value = ''
+  expandedTables.value = new Set()
 }
 
-// 打开连接时按需加载数据：SSH 自动建立实时会话，文件类自动列目录，DB 类加载分析配置
-watch(selected, (val) => {
-  if (!val) return
-  resetOps()
-  if (val.category === 'ssh') openSsh()
-  else if (val.category === 'sftp' || val.category === 'ftp') listRemote()
-  else if (val.category === 'db') {
-    openDbConn(val)
+// 切换激活标签：保存旧标签视图态、恢复/加载新标签，并接管对应连接的操作区
+function saveCache(id) {
+  if (!id) return
+  tabCache[id] = {
+    remotePath: remotePath.value, remoteFiles: [...remoteFiles.value],
+    remoteContent: remoteContent.value, currentRemotePath: currentRemotePath.value,
+    remoteChecked: [...remoteChecked.value], remoteMkdirShown: remoteMkdirShown.value,
+    remoteMkdirName: remoteMkdirName.value, renameShown: renameShown.value,
+    renameRow: renameRow.value, renameName: renameName.value,
+    dbDatabases: [...dbDatabases.value], dbTables: [...dbTables.value],
+    selDatabase: selDatabase.value, selTables: [...selTables.value],
+    tblFilter: tblFilter.value, syncedFilter: syncedFilter.value,
+    expandedTables: new Set(expandedTables.value),
   }
+}
+function restoreView(c) {
+  remotePath.value = c.remotePath ?? '/'
+  remoteFiles.value = c.remoteFiles ?? []
+  remoteContent.value = c.remoteContent ?? ''
+  currentRemotePath.value = c.currentRemotePath ?? ''
+  remoteChecked.value = c.remoteChecked ?? []
+  remoteMkdirShown.value = c.remoteMkdirShown ?? false
+  remoteMkdirName.value = c.remoteMkdirName ?? ''
+  renameShown.value = c.renameShown ?? false
+  renameRow.value = c.renameRow ?? null
+  renameName.value = c.renameName ?? ''
+  dbDatabases.value = c.dbDatabases ?? []
+  dbTables.value = c.dbTables ?? []
+  selDatabase.value = c.selDatabase ?? ''
+  selTables.value = c.selTables ?? []
+  tblFilter.value = c.tblFilter ?? ''
+  syncedFilter.value = c.syncedFilter ?? ''
+  expandedTables.value = c.expandedTables ? new Set(c.expandedTables) : new Set()
+}
+// 关闭标签：释放 SSH 资源、清理缓存
+function closeConnTab(id) {
+  const idx = openTabs.value.findIndex(x => x === id)
+  if (idx === -1) return
+  disposeSsh(id)
+  delete tabCache[id]
+  openTabs.value.splice(idx, 1)
+  if (activeTabConn.value === id) {
+    const next = openTabs.value[idx] || openTabs.value[idx - 1] || ''
+    activeTabConn.value = next
+  }
+}
+// 激活标签时按需加载：SSH 自动建立/恢复实时会话，文件类自动列目录，DB 类加载分析配置
+watch(activeTabConn, async (newId, oldId) => {
+  if (oldId) saveCache(oldId)
+  if (!newId) { resetView(); return }
+  const conn = connOf(newId)
+  if (!conn) return
+  const cached = tabCache[newId]
+  if (cached) restoreView(cached)
+  else resetView()
+  if (conn.category === 'ssh') await openSsh()
+  else if (conn.category === 'sftp' || conn.category === 'ftp') { if (!cached) await listRemote() }
+  else if (conn.category === 'db') { if (!cached) await openDbConn(conn); else await loadAgentCfg() }
 })
 
 async function openDbConn(val) {
@@ -482,6 +626,16 @@ function blankForm() {
   })
 }
 function openAdd() { editing.value = false; editingId.value = ''; testResult.value = null; blankForm(); showAdd.value = true }
+// 从会话选择器进入「新增连接」表单，并预选分类
+function onNewConnType(type) {
+  selectorVisible.value = false
+  editing.value = false
+  editingId.value = ''
+  testResult.value = null
+  blankForm()
+  form.category = type
+  showAdd.value = true
+}
 function editConn(c) {
   editing.value = true; editingId.value = c.id; testResult.value = null
   Object.assign(form, { name: c.name, category: c.category, dbType: c.dbType || 'mysql', host: c.host, port: c.port,
@@ -730,17 +884,23 @@ function removeSynced(t) {
   saveAgentCfg()
 }
 
-// ===================== SSH 实时终端 =====================
-// 建立带 PTY 的持久会话，用 xterm.js 渲染输出、实时发送输入
+// ===================== SSH 实时终端（每标签独立会话） =====================
+// 每个 SSH 标签拥有独立的 xterm 实例与会话，切换标签时保持会话存活（仅隐藏/重新挂载容器）。
 async function openSsh() {
-  if (sshConnecting.value || sshConnected.value) return
-  sshConnecting.value = true
+  const id = activeTabConn.value
+  const conn = connOf(id)
+  if (!conn || conn.category !== 'ssh') return
+  if (!sshStatus[id]) sshStatus[id] = { connected: false, connecting: false, sessionId: '' }
+  const st = sshStatus[id]
+  const eng = sshEngines[id] || (sshEngines[id] = { term: null, fitAddon: null, ro: null, line: '' })
+  if (st.connecting) return
+  st.connecting = true
   try {
     await nextTick()                  // 等待 .term 容器挂载完成
     if (!termRef.value) throw new Error('终端容器未就绪')
-    // 创建 xterm 实例（页面内仅创建一次），使用标准 VT 引擎，完整支持 ANSI/全屏 TUI
-    if (!term) {
-      term = new Terminal({
+    if (!eng.term) {
+      // 首次：创建 xterm 实例（标准 VT 引擎，完整支持 ANSI/全屏 TUI）
+      const term = new Terminal({
         fontSize: 13,
         fontFamily: 'Consolas, "Courier New", monospace',
         cursorBlink: true,
@@ -750,63 +910,105 @@ async function openSsh() {
           selectionBackground: '#264f78',
         },
       })
-      fitAddon = new FitAddon()
-      term.loadAddon(fitAddon)
+      const fit = new FitAddon()
+      term.loadAddon(fit)
       term.open(termRef.value)
       // 实时输入：每次按键直接发往远端（远端 PTY 开启 ECHO 自行回显，实现「边敲边显示」）
-      term.onData((d) => { if (sshSessionId.value) PluginSSHInput(sshSessionId.value, d) })
+      term.onData((d) => onTermData(id, eng, d))
+      eng.term = term
+      eng.fitAddon = fit
+      term.reset()
+      fit.fit()
+      const sid = await PluginSSHOpen(conn)
+      if (!sid) throw new Error('未能建立会话')
+      st.sessionId = sid
+      st.connected = true
+      EventsOn('ssh:' + sid + ':data', (chunk) => { const e = sshEngines[id]; if (e && e.term) e.term.write(chunk) })
+      EventsOn('ssh:' + sid + ':close', () => {
+        st.connected = false
+        const e = sshEngines[id]
+        if (e && e.term) e.term.writeln('\r\n[连接已关闭]')
+      })
+      nextTick(() => finalizeTerm(eng, st))
+    } else if (!st.connected) {
+      // 曾断开：复用已有终端实例重新建立会话
+      eng.term.reset()
+      eng.fitAddon.fit()
+      const sid = await PluginSSHOpen(conn)
+      if (!sid) throw new Error('未能建立会话')
+      st.sessionId = sid
+      st.connected = true
+      EventsOn('ssh:' + sid + ':data', (chunk) => { const e = sshEngines[id]; if (e && e.term) e.term.write(chunk) })
+      EventsOn('ssh:' + sid + ':close', () => {
+        st.connected = false
+        const e = sshEngines[id]
+        if (e && e.term) e.term.writeln('\r\n[连接已关闭]')
+      })
+      nextTick(() => finalizeTerm(eng, st))
+    } else {
+      // 已连接：将终端容器重新挂载到当前标签（从其它标签切回时）
+      await attachExisting(eng, st)
     }
-    term.reset()         // 清空上一次会话的残留内容
-    fitAddon.fit()       // 先按当前容器尺寸 fit，保证后续 resize 准确
-    const id = await PluginSSHOpen(selected.value)
-    if (!id) throw new Error('未能建立会话')
-    sshSessionId.value = id
-    sshConnected.value = true
-    // 监听后端推送的实时输出（原始字节流）与断开事件，直接交给 xterm 渲染
-    EventsOn('ssh:' + id + ':data', (chunk) => { if (term) term.write(chunk) })
-    EventsOn('ssh:' + id + ':close', () => {
-      sshConnected.value = false
-      if (term) term.writeln('\r\n[连接已关闭]')
-    })
-    // 连接建立后按容器尺寸同步 PTY，并监听后续窗口变化
-    nextTick(() => {
-      updateTermSize()
-      if (termRef.value && !termRO) {
-        termRO = new ResizeObserver(() => updateTermSize())
-        termRO.observe(termRef.value)
-      }
-      if (term) term.focus()
-    })
   } catch (e) {
     ElMessage.error('SSH 连接失败：' + (e.message || e))
   } finally {
-    sshConnecting.value = false
+    st.connecting = false
   }
 }
 
-// 关闭会话并清理事件监听与终端实例
-function closeSsh() {
-  if (termRO) { termRO.disconnect(); termRO = null }
-  if (sshSessionId.value) {
-    EventsOff('ssh:' + sshSessionId.value + ':data')
-    EventsOff('ssh:' + sshSessionId.value + ':close')
-    PluginSSHClose(sshSessionId.value).catch(() => {})
-    sshSessionId.value = ''
+// 将已有终端实例的 DOM 重新挂到当前激活容器的尾部，并重新 fit
+async function attachExisting(eng, st) {
+  await nextTick()
+  if (!termRef.value) return
+  if (eng.term && eng.term.element && eng.term.element.parentNode !== termRef.value) {
+    termRef.value.appendChild(eng.term.element)
   }
-  sshConnected.value = false
-  // 释放 xterm 实例（容器即将卸载），下次连接时重建，避免绑定到已移除的 DOM
-  if (term) { try { term.dispose() } catch (e) {} term = null; fitAddon = null }
+  if (eng.fitAddon) eng.fitAddon.fit()
+  finalizeTerm(eng, st)
 }
 
-function clearSshLog() { if (term) term.reset() }
+// 同步 PTY 尺寸、监听窗口变化并聚焦
+function finalizeTerm(eng, st) {
+  if (!termRef.value) return
+  updateTermSize(eng, st)
+  if (eng.ro) eng.ro.disconnect()
+  eng.ro = new ResizeObserver(() => updateTermSize(eng, st))
+  eng.ro.observe(termRef.value)
+  if (eng.term) eng.term.focus()
+}
+
+// 「断开」当前 SSH 标签（保留终端实例，可再次连接恢复）
+function closeSshActive() { closeSshById(activeTabConn.value) }
+function closeSshById(id) {
+  const st = sshStatus[id]
+  const eng = sshEngines[id]
+  if (eng && eng.ro) { eng.ro.disconnect(); eng.ro = null }
+  if (st && st.sessionId) {
+    EventsOff('ssh:' + st.sessionId + ':data')
+    EventsOff('ssh:' + st.sessionId + ':close')
+    PluginSSHClose(st.sessionId).catch(() => {})
+    st.sessionId = ''
+    st.connected = false
+  }
+}
+// 关闭标签时彻底释放 SSH 资源（断开并销毁终端实例）
+function disposeSsh(id) {
+  closeSshById(id)
+  const eng = sshEngines[id]
+  if (eng && eng.term) { try { eng.term.dispose() } catch (e) {} }
+  delete sshEngines[id]
+  delete sshStatus[id]
+}
+
+function clearSshLog() { const e = sshEngines[activeTabConn.value]; if (e && e.term) e.term.reset() }
 // 终端点击任意处即聚焦输入（模仿 XShell 体验）
-function focusTermInput() { if (term) term.focus() }
+function focusTermInput() { const e = sshEngines[activeTabConn.value]; if (e && e.term) e.term.focus() }
 // 将前端终端容器尺寸同步给远端 PTY（行/列），适配 vim/top/htop 等全屏程序
-function updateTermSize() {
-  if (!term || !fitAddon || !sshConnected.value || !sshSessionId.value) return
+function updateTermSize(eng, st) {
+  if (!eng || !eng.term || !eng.fitAddon || !st || !st.connected || !st.sessionId) return
   try {
-    fitAddon.fit()
-    PluginSSHResize(sshSessionId.value, term.rows, term.cols).catch(() => {})
+    eng.fitAddon.fit()
+    PluginSSHResize(st.sessionId, eng.term.rows, eng.term.cols).catch(() => {})
   } catch (e) {}
 }
 
@@ -973,25 +1175,145 @@ async function uploadToRemote(files) {
 }
 // SSH 终端：上传到远端当前工作目录（通过 pwd 获取），等效 XShell 中 rz 的效果
 async function uploadToSsh(files) {
-  const pwd = (await PluginSSHExec(selected.value, 'pwd') || '').trim()
+  const conn = connOf(activeTabConn.value)
+  if (!conn) return
+  const pwd = (await PluginSSHExec(conn, 'pwd') || '').trim()
   const dir = pwd || '/'
   for (const f of files) {
     const b64 = await fileToBase64(f)
-    await call(PluginSFTPUploadB64, selected.value, dir, f.name, b64)
+    await call(PluginSFTPUploadB64, conn, dir, f.name, b64)
   }
   ElMessage.success(`已上传 ${files.length} 个文件到 ${dir}`)
-  if (term) term.writeln(`\r\n[已上传 ${files.length} 个文件到 ${dir}]`)
+  const eng = sshEngines[activeTabConn.value]
+  if (eng && eng.term) eng.term.writeln(`\r\n[rz 上传完成] ${files.length} 个文件 -> ${dir}`)
+}
+
+// ===================== ZMODEM 风格：rz 上传 / sz 下载 =====================
+// 在 SSH 终端支持以 rz / sz 命令（或工具栏按钮）触发文件传输；
+// 实际走 SFTP 安全通道完成，无需远端安装 lrzsz。
+function basenameOf(p) { const s = (p || '').split('/'); return s[s.length - 1] || 'download.bin' }
+
+// 拦截终端输入：跟踪当前行，遇到 rz / sz 命令时本地处理（取消远端待提交输入后走 SFTP）
+function onTermData(id, eng, d) {
+  const st = sshStatus[id]
+  for (let i = 0; i < d.length; i++) {
+    const ch = d[i]
+    if (ch === '\r' || ch === '\n') {
+      const cmd = (eng.line || '').trim()
+      eng.line = ''
+      if (cmd === 'rz' || /^sz(\s|$)/i.test(cmd)) {
+        // 取消远端已回显但未提交的输入行，再走本地 SFTP 通道（无需远端 lrzsz）
+        if (st && st.sessionId) PluginSSHInput(st.sessionId, '\x03')
+        runZmodem(id, cmd)
+        return
+      }
+      if (st && st.sessionId) PluginSSHInput(st.sessionId, ch)
+    } else if (ch === '\x7f' || ch === '\b') {
+      if (eng.line) eng.line = eng.line.slice(0, -1)
+      if (st && st.sessionId) PluginSSHInput(st.sessionId, ch)
+    } else {
+      eng.line = (eng.line || '') + ch
+      if (st && st.sessionId) PluginSSHInput(st.sessionId, ch)
+    }
+  }
+}
+
+async function runZmodem(id, cmd) {
+  const conn = connOf(id)
+  if (!conn) return
+  if (cmd === 'rz') {
+    // 上传：复用 SFTP 通道写入远端当前工作目录（等效 rz）
+    pickUpload(uploadToSsh)
+    return
+  }
+  const path = cmd.slice(2).trim()
+  if (!path) { ElMessage.warning('sz 用法：sz <远端文件路径>'); return }
+  await runSzByPath(id, path)
+}
+
+async function runSzByPath(id, path) {
+  const conn = connOf(id)
+  if (!conn) return
+  try {
+    const local = await call(PluginSFTPDownload, conn, path, basenameOf(path))
+    const eng = sshEngines[id]
+    if (eng && eng.term) eng.term.writeln(`\r\n[sz 下载完成] ${path} -> ${local || '(已取消)'}`)
+    if (!local) ElMessage.info('已取消下载')
+    else ElMessage.success(`已下载：${local}`)
+  } catch (e) {
+    ElMessage.error('sz 下载失败：' + (e && e.message ? e.message : e))
+  }
+}
+
+// sz 下载对话框（工具栏按钮）：输入远端文件路径后保存到本地
+const szDialogVisible = ref(false)
+const szRemotePath = ref('')
+function openSzDialog() { szRemotePath.value = ''; szDialogVisible.value = true }
+async function confirmSz() {
+  const path = szRemotePath.value.trim()
+  if (!path) { ElMessage.warning('请输入远端文件路径'); return }
+  szDialogVisible.value = false
+  await runSzByPath(activeTabConn.value, path)
 }
 
 function removeConn(id) {
   removePluginConn(id)
-  if (selectedId.value === id) selectedId.value = ''
+  if (openTabs.value.includes(id)) closeConnTab(id)
   ElMessage.success('已删除')
 }
 </script>
 
 <style scoped>
 .pm { display: flex; flex-direction: column; height: 100%; }
+
+/* 常驻标签栏（类浏览器标签，无标签时也显示） */
+.pm-tabs {
+  display: flex; align-items: stretch; gap: 2px; padding: 6px 12px 0;
+  background: var(--surface, #fff); border-bottom: 1px solid #e5e6eb; flex-shrink: 0;
+  overflow-x: auto; min-height: 38px;
+}
+.pm-tabs-empty { font-size: 12px; color: #86909c; align-self: center; padding: 0 4px; }
+.pm-tab {
+  display: flex; align-items: center; gap: 6px; max-width: 200px; padding: 6px 8px;
+  font-size: 13px; color: #4e5969; cursor: pointer; white-space: nowrap;
+  border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+  background: #f2f3f5; user-select: none;
+}
+.pm-tab:hover { color: #1d2129; background: #e8eaed; }
+.pm-tab.active {
+  color: #1d2129; background: #fff; border-color: #e5e6eb; font-weight: 600;
+  position: relative; top: 1px;
+}
+.pm-tab-ico { font-size: 13px; line-height: 1; }
+.pm-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.pm-tab-close {
+  width: 16px; height: 16px; line-height: 14px; text-align: center; border-radius: 4px;
+  font-size: 14px; color: #86909c; flex-shrink: 0;
+}
+.pm-tab-close:hover { background: #f53f3f; color: #fff; }
+.pm-tab-plus {
+  align-self: center; margin-left: 4px; width: 26px; height: 26px; flex-shrink: 0;
+  border: 1px dashed #c9cdd4; border-radius: 6px; background: transparent; cursor: pointer;
+  font-size: 16px; color: #4e5969; line-height: 1;
+}
+.pm-tab-plus:hover { border-color: #165dff; color: #165dff; background: #f0f5ff; }
+
+/* 会话选择器 */
+.sel-groups { max-height: 56vh; overflow: auto; padding-right: 4px; }
+.sel-group { margin-bottom: 14px; }
+.sel-group-title { font-size: 12px; font-weight: 600; color: #86909c; margin-bottom: 6px; letter-spacing: .5px; }
+.sel-empty { font-size: 12px; color: #c0c4cc; padding: 4px 2px; }
+.sel-items { display: flex; flex-direction: column; gap: 6px; }
+.sel-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px;
+  border: 1px solid #e5e6eb; background: #fff; cursor: pointer; transition: all .15s;
+}
+.sel-item:hover { border-color: #165dff; background: #f0f5ff; }
+.sel-ico { font-size: 15px; }
+.sel-name { font-weight: 600; font-size: 13px; color: #1d2129; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-host { font-size: 12px; color: #86909c; font-family: Consolas, monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-open { font-size: 12px; color: #165dff; flex-shrink: 0; }
+.sel-footer { display: flex; justify-content: flex-end; }
 .pm-grid-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px; border-bottom: 1px solid #e5e6eb; background: #fff; flex-shrink: 0;
