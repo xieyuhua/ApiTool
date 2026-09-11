@@ -286,6 +286,7 @@ const runConcurrency = ref(3) // 并发执行数（手动运行选中用例时�
 async function runPlan(plan) {
   running.value = true
   try {
+    await saveNow() // 先落盘：确保调试登录后置脚本写入的环境变量已同步到后端，供测试运行读取
     const r = await RunTestPlan(plan.id)
     appendReport(r)
     viewingReport.value = r
@@ -300,6 +301,7 @@ async function runSelected() {
   if (!selectedCaseIds.value.length) { ElMessage.warning('请先勾选用例'); return }
   running.value = true
   try {
+    await saveNow() // 先落盘：确保调试登录后置脚本写入的环境变量已同步到后端，供测试运行读取
     const r = await RunTestCases(selectedCaseIds.value, curEnvId.value, runConcurrency.value)
     appendReport(r)
     viewingReport.value = r

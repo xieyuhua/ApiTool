@@ -700,8 +700,10 @@ func (e *Engine) runCase(c model.TestCase, env []model.KV, common model.CommonPa
 		Env:         env,
 		ContentType: c.ContentType,
 	}
-	// 合并项目公共参数（用例同名优先），公共参数中的 {{变量}} 也会按环境变量替换
-	util.MergeCommon(&spec, common)
+	// 测试用例执行：环境变量与公共参数直接覆盖用例自带（副本）的同名参数。
+	// 优先级：用例自身 < 公共参数 < 环境变量；{{占位}} 仍由 httpx 在执行时按环境变量替换。
+	util.OverrideByCommon(&spec, common)
+	util.OverrideByEnv(&spec, env)
 	resp := e.host.SendRequest(spec)
 	res.Status = resp.Status
 	res.StatusText = resp.StatusText
