@@ -102,6 +102,10 @@ export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
 }
 
+export function DefaultTestCasePrompt() {
+  return window['go']['main']['App']['DefaultTestCasePrompt']();
+}
+
 export function DeleteAgentSession(arg1) {
   return window['go']['main']['App']['DeleteAgentSession'](arg1);
 }
@@ -664,8 +668,4 @@ export function WindowShow() {
 
 export function WindowUnminimise() {
   return window['go']['main']['App']['WindowUnminimise']();
-}
-
-export function DefaultTestCasePrompt() {
-  return window['go']['main']['App']['DefaultTestCasePrompt']();
 }

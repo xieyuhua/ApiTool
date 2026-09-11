@@ -1137,6 +1137,7 @@ export namespace model {
 	    aiKey: string;
 	    aiModel: string;
 	    timeoutSec: number;
+	    testCasePrompt: string;
 	    clipboard: ClipSettings;
 	    cloudURL: string;
 	    cloudToken: string;
@@ -1159,6 +1160,7 @@ export namespace model {
 	        this.aiKey = source["aiKey"];
 	        this.aiModel = source["aiModel"];
 	        this.timeoutSec = source["timeoutSec"];
+	        this.testCasePrompt = source["testCasePrompt"];
 	        this.clipboard = this.convertValues(source["clipboard"], ClipSettings);
 	        this.cloudURL = source["cloudURL"];
 	        this.cloudToken = source["cloudToken"];
@@ -1212,9 +1214,20 @@ export namespace model {
 	    category: string;
 	    passed: boolean;
 	    status: number;
+	    statusText: string;
 	    durationMs: number;
+	    size: number;
 	    error: string;
+	    requestMethod: string;
+	    requestURL: string;
+	    requestHeaders: KV[];
+	    requestQuery: KV[];
+	    requestFormItems: KV[];
+	    requestBodyType: string;
+	    requestBody: string;
+	    requestContentType: string;
 	    responseBody: string;
+	    responseHeaders: Record<string, string>;
 	    assertionResults: AssertionResult[];
 	
 	    static createFrom(source: any = {}) {
@@ -1228,9 +1241,20 @@ export namespace model {
 	        this.category = source["category"];
 	        this.passed = source["passed"];
 	        this.status = source["status"];
+	        this.statusText = source["statusText"];
 	        this.durationMs = source["durationMs"];
+	        this.size = source["size"];
 	        this.error = source["error"];
+	        this.requestMethod = source["requestMethod"];
+	        this.requestURL = source["requestURL"];
+	        this.requestHeaders = this.convertValues(source["requestHeaders"], KV);
+	        this.requestQuery = this.convertValues(source["requestQuery"], KV);
+	        this.requestFormItems = this.convertValues(source["requestFormItems"], KV);
+	        this.requestBodyType = source["requestBodyType"];
+	        this.requestBody = source["requestBody"];
+	        this.requestContentType = source["requestContentType"];
 	        this.responseBody = source["responseBody"];
+	        this.responseHeaders = source["responseHeaders"];
 	        this.assertionResults = this.convertValues(source["assertionResults"], AssertionResult);
 	    }
 	
@@ -1256,6 +1280,7 @@ export namespace model {
 	    id: string;
 	    planId: string;
 	    planName: string;
+	    envName: string;
 	    createdAt: string;
 	    total: number;
 	    passed: number;
@@ -1273,6 +1298,7 @@ export namespace model {
 	        this.id = source["id"];
 	        this.planId = source["planId"];
 	        this.planName = source["planName"];
+	        this.envName = source["envName"];
 	        this.createdAt = source["createdAt"];
 	        this.total = source["total"];
 	        this.passed = source["passed"];

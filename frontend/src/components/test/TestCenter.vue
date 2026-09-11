@@ -350,6 +350,10 @@ function viewReport(r) {
   viewingReport.value = r
   reportVisible.value = true
 }
+// 过滤启用的键值对（enabled 缺省视为启用）
+function enabledKV(rows) {
+  return (rows || []).filter(x => x.enabled !== false && x.key)
+}
 function onDeleteReport(r) {
   ElMessageBox.confirm('确定删除该报告？', '提示', { type: 'warning' }).then(() => {
     removeReport(r.id)
@@ -940,6 +944,7 @@ async function runPressure() {
           <div class="rs"><div class="rs-n">{{ passRate }}</div><div>通过率</div></div>
           <div class="rs"><div class="rs-n">{{ viewingReport.durationMs }}ms</div><div>总耗时</div></div>
         </div>
+        <div v-if="viewingReport.envName" class="report-env">运行环境：{{ viewingReport.envName }}</div>
 
         <div class="report-bar">
           <el-button size="small" type="success" :loading="summaryLoading" @click="genSummary">✨ AI 分析摘要</el-button>
@@ -957,6 +962,27 @@ async function runPressure() {
           <el-table-column type="expand">
             <template #default="{ row }">
               <div v-if="row.error" class="ar-error">请求错误：{{ row.error }}</div>
+              <!-- 请求 -->
+              <div v-if="row.requestMethod || row.requestURL" class="req-block">
+                <div class="blk-title">请求</div>
+                <div class="req-line"><b>{{ row.requestMethod }}</b> {{ row.requestURL }}</div>
+                <div v-if="enabledKV(row.requestHeaders).length" class="kv-list">
+                  <div v-for="(h, i) in enabledKV(row.requestHeaders)" :key="'h' + i" class="kv-row"><span class="kv-k">{{ h.key }}</span><span class="kv-v">{{ h.value }}</span></div>
+                </div>
+                <div v-if="enabledKV(row.requestQuery).length" class="kv-list">
+                  <div v-for="(q, i) in enabledKV(row.requestQuery)" :key="'q' + i" class="kv-row"><span class="kv-k">{{ q.key }}</span><span class="kv-v">{{ q.value }}</span></div>
+                </div>
+                <div v-if="row.requestBody" class="blk-body"><pre>{{ row.requestBody }}</pre></div>
+              </div>
+              <!-- 响应 -->
+              <div class="resp-block">
+                <div class="resp-title">响应 · {{ row.status }} {{ row.statusText }} · {{ row.durationMs }}ms · {{ (row.size || 0) }}B</div>
+                <div v-if="row.responseHeaders" class="kv-list">
+                  <div v-for="(v, k) in row.responseHeaders" :key="'rh' + k" class="kv-row"><span class="kv-k">{{ k }}</span><span class="kv-v">{{ v }}</span></div>
+                </div>
+                <pre v-if="row.responseBody" class="resp-body">{{ row.responseBody }}</pre>
+              </div>
+              <!-- 断言 -->
               <div v-for="(ar, i) in row.assertionResults" :key="i" class="ar-row">
                 <span :class="ar.passed ? 'ok' : 'fail'">{{ ar.passed ? '✓' : '✗' }}</span>
                 {{ ar.description }} —— {{ ar.detail }}
@@ -996,6 +1022,20 @@ async function runPressure() {
 .m-delete { background: #f53f3f; } .m-patch { background: #722ed1; } .m-head, .m-options { background: #86909c; }
 .murl { color: #4e5969; font-size: 13px; word-break: break-all; }
 .ok { color: #00b42a; font-weight: 600; } .fail { color: #f53f3f; font-weight: 600; }
+.resp-block { border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+.resp-title { background: #f7f8fa; font-size: 12px; font-weight: 600; padding: 6px 12px; color: #4e5969; }
+.resp-body { margin: 0; padding: 10px 12px; white-space: pre-wrap; word-break: break-all; font-family: Consolas, 'Courier New', monospace; font-size: 12px; max-height: 300px; overflow: auto; }
+.report-env { font-size: 12px; color: #86909c; margin: 6px 0 0; }
+.req-block { border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+.blk-title { background: #f2f3f5; font-size: 12px; font-weight: 600; padding: 6px 12px; color: #4e5969; }
+.req-line { padding: 8px 12px; font-size: 13px; word-break: break-all; }
+.req-line b { color: #165dff; margin-right: 6px; }
+.blk-body { padding: 0 12px 10px; }
+.blk-body pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: Consolas, 'Courier New', monospace; font-size: 12px; background: #fff; max-height: 300px; overflow: auto; }
+.kv-list { padding: 4px 12px 10px; }
+.kv-row { display: flex; gap: 8px; font-size: 12px; padding: 2px 0; border-bottom: 1px dashed #f0f0f0; }
+.kv-k { color: #4e5969; min-width: 140px; font-weight: 600; word-break: break-all; }
+.kv-v { color: #1f2329; word-break: break-all; flex: 1; }
 
 .gen-tip { font-size: 13px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 10px 12px; line-height: 1.7; }
 .gen-select-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }

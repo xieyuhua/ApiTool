@@ -171,14 +171,27 @@ type AssertionResult struct {
 
 // TestResult 单个用例执行结果
 type TestResult struct {
-	CaseID           string            `json:"caseId"`
-	CaseName         string            `json:"caseName"`
-	Category         string            `json:"category"`
-	Passed           bool              `json:"passed"`
-	Status           int               `json:"status"`
-	DurationMs       int64             `json:"durationMs"`
-	Error            string            `json:"error"`
+	CaseID     string            `json:"caseId"`
+	CaseName   string            `json:"caseName"`
+	Category   string            `json:"category"`
+	Passed     bool              `json:"passed"`
+	Status     int               `json:"status"`
+	StatusText string            `json:"statusText"`
+	DurationMs int64             `json:"durationMs"`
+	Size       int64             `json:"size"`
+	Error      string            `json:"error"`
+	// 实际请求快照（公共参数合并、环境变量替换前的定义）
+	RequestMethod      string          `json:"requestMethod"`
+	RequestURL         string          `json:"requestURL"`
+	RequestHeaders     []KV            `json:"requestHeaders"`
+	RequestQuery       []KV            `json:"requestQuery"`
+	RequestFormItems   []KV            `json:"requestFormItems"`
+	RequestBodyType    string          `json:"requestBodyType"`
+	RequestBody        string          `json:"requestBody"`
+	RequestContentType string          `json:"requestContentType"`
+	// 完整响应
 	ResponseBody     string            `json:"responseBody"`
+	ResponseHeaders  map[string]string `json:"responseHeaders"`
 	AssertionResults []AssertionResult `json:"assertionResults"`
 }
 
@@ -187,6 +200,7 @@ type TestReport struct {
 	ID         string       `json:"id"`
 	PlanID     string       `json:"planId"`
 	PlanName   string       `json:"planName"`
+	EnvName    string       `json:"envName"` // 运行环境名称（执行上下文）
 	CreatedAt  string       `json:"createdAt"`
 	Total      int          `json:"total"`
 	Passed     int          `json:"passed"`

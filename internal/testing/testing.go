@@ -126,6 +126,11 @@ const defaultTestCaseUserPrompt = `接口信息（JSON）：
 4. json 类型用 target 指定 JSONPath；header/cookie/contentType 的 target 用法见上。
 5. 正常用例务必断言 status eq 200（或接口实际成功码），并尽量用 json 断言校验关键业务字段；涉及鉴权/下载/大响应时可用 contentType、cookie、size、regex 等类型。`
 
+// DefaultTestCaseUserPrompt 返回内置默认提示词（供 Wails 绑定对外暴露，供前端「设置」展示与「恢复默认」）
+func DefaultTestCaseUserPrompt() string {
+	return defaultTestCaseUserPrompt
+}
+
 func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonParams, envKeys []string) ([]model.TestCase, error) {
 	brief := buildApiBrief(api, common, envKeys)
 	system := `你是一名资深 API 测试专家。根据提供的接口信息，生成覆盖全面的自动化测试用例。
@@ -699,8 +704,20 @@ func (e *Engine) runCase(c model.TestCase, env []model.KV, common model.CommonPa
 	util.MergeCommon(&spec, common)
 	resp := e.host.SendRequest(spec)
 	res.Status = resp.Status
+	res.StatusText = resp.StatusText
 	res.DurationMs = resp.DurationMs
+	res.Size = resp.Size
 	res.ResponseBody = resp.Body
+	res.ResponseHeaders = resp.Headers
+	// 记录实际请求快照（公共参数已合并，环境变量在发送时替换，此处保留模板定义）
+	res.RequestMethod = spec.Method
+	res.RequestURL = spec.URL
+	res.RequestHeaders = spec.Headers
+	res.RequestQuery = spec.Query
+	res.RequestFormItems = spec.FormItems
+	res.RequestBodyType = spec.BodyType
+	res.RequestBody = spec.Body
+	res.RequestContentType = spec.ContentType
 	if resp.Error != "" {
 		res.Error = resp.Error
 		res.Passed = false
@@ -766,10 +783,12 @@ func (e *Engine) RunTestCases(caseIDs []string, envID string, concurrency int) (
 	proj := data.Projects[idx]
 
 	var env []model.KV
+	envName := ""
 	if envID != "" {
 		for _, en := range proj.Environments {
 			if en.ID == envID {
 				env = util.EnabledEnvVars(en.Vars)
+				envName = en.Name
 				break
 			}
 		}
@@ -794,6 +813,7 @@ func (e *Engine) RunTestCases(caseIDs []string, envID string, concurrency int) (
 		ID:        util.GenID(),
 		PlanID:    "",
 		PlanName:  "手动执行",
+		EnvName:   envName,
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if len(order) == 0 {

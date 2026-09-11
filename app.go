@@ -61,7 +61,7 @@ func (a *App) AppVersion() string { return AppVersion }
 
 // DefaultTestCasePrompt 返回内置的 AI 生成测试用例默认提示词，供前端「设置」展示与「恢复默认」。
 func (a *App) DefaultTestCasePrompt() string {
-	return testing.DefaultTestCaseUserPrompt
+	return testing.DefaultTestCaseUserPrompt()
 }
 
 // GenerateDescriptions 使用 AI 为字段自动生成描述（转发到 internal/ai，保持 Wails 绑定签名）

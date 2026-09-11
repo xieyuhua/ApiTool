@@ -64,6 +64,8 @@ export function CreateAgentSession(arg1:string):Promise<string>;
 
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
+export function DefaultTestCasePrompt():Promise<string>;
+
 export function DeleteAgentSession(arg1:string):Promise<void>;
 
 export function DeleteClipItem(arg1:string):Promise<void>;
@@ -345,5 +347,3 @@ export function WindowSetAlwaysOnTop(arg1:boolean):Promise<void>;
 export function WindowShow():Promise<void>;
 
 export function WindowUnminimise():Promise<void>;
-
-export function DefaultTestCasePrompt():Promise<string>;
