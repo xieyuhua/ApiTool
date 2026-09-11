@@ -665,3 +665,7 @@ export function WindowShow() {
 export function WindowUnminimise() {
   return window['go']['main']['App']['WindowUnminimise']();
 }
+
+export function DefaultTestCasePrompt() {
+  return window['go']['main']['App']['DefaultTestCasePrompt']();
+}

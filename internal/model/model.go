@@ -208,6 +208,8 @@ type Settings struct {
 	AIKey      string `json:"aiKey"`
 	AIModel    string `json:"aiModel"`
 	TimeoutSec int    `json:"timeoutSec"`
+	// AI 生成测试用例提示词（用户可在「设置」中维护；为空则使用内置默认提示词）
+	TestCasePrompt string `json:"testCasePrompt"`
 	// 剪贴板
 	Clipboard ClipSettings `json:"clipboard"`
 	// 云同步

@@ -345,3 +345,5 @@ export function WindowSetAlwaysOnTop(arg1:boolean):Promise<void>;
 export function WindowShow():Promise<void>;
 
 export function WindowUnminimise():Promise<void>;
+
+export function DefaultTestCasePrompt():Promise<string>;

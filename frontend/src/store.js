@@ -412,6 +412,7 @@ async function loadInto() {
   if (typeof d.settings.clipboard.monitor !== 'boolean') d.settings.clipboard.monitor = true
   d.settings.codeFont ||= 'Consolas, "Courier New", monospace'
   if (typeof d.settings.codeFontSize !== 'number') d.settings.codeFontSize = 12.5
+  d.settings.testCasePrompt ||= ''
   d.plugins ||= { connections: [] }
   d.plugins.connections ||= []
   d.clipboard ||= { history: [] }

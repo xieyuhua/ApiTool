@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser } from '../../../wailsjs/go/main/App'
+import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser, DefaultTestCasePrompt } from '../../../wailsjs/go/main/App'
 import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, setCodeFont, setCodeFontSize, THEMES, SCHEMES, setScheme } from '../../store'
 import CloudSync from './CloudSync.vue'
 
 const dataPath = ref('')
+const defaultPrompt = ref('')   // 内置默认提示词（来自后端，避免前后端文案漂移）
+const showDefault = ref(false)  // 是否展开「查看默认提示词」
 const cloudVisible = ref(false)
 const syncAddr = ref(':8080')
 const syncRunning = ref(false)
@@ -22,6 +24,7 @@ onMounted(async () => {
     syncRunning.value = await SyncServerRunning()
     if (syncRunning.value) syncURL.value = await SyncServerURL()
   } catch { /* ignore */ }
+  try { defaultPrompt.value = await DefaultTestCasePrompt() } catch { /* ignore */ }
 })
 
 function openURL(url) {
@@ -110,6 +113,29 @@ async function toggleSync() {
         <div style="color:#86909c; font-size:12px">
           支持任意 OpenAI 兼容服务（OpenAI / DeepSeek / 通义千问 / 本地 Ollama 等）。
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">AI 生成测试用例提示词</div>
+        <div style="font-size:13px; color:#4e5969; margin-bottom:12px">
+          点击「生成测试用例」时使用的提示词。留空即使用内置默认提示词；如需定制（调整用例分类、断言风格、输出语言等）可在此覆盖。
+          自定义提示词中可用 <code>{{接口信息}}</code> 占位接口摘要，缺省时会自动追加，无需手动拼接。
+        </div>
+        <el-input
+          v-model="store.data.settings.testCasePrompt"
+          type="textarea"
+          :rows="8"
+          :placeholder="defaultPrompt || '加载默认提示词中…'"
+          style="font-family: Consolas, 'Courier New', monospace" />
+        <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <el-button size="small" @click="store.data.settings.testCasePrompt = ''; ElMessage.success('已恢复为默认提示词')">恢复默认</el-button>
+          <el-button size="small" link type="primary" @click="showDefault = !showDefault">
+            {{ showDefault ? '收起默认提示词' : '查看默认提示词' }}
+          </el-button>
+          <span v-if="!store.data.settings.testCasePrompt" style="font-size:12px;color:#00b42a">当前使用默认提示词</span>
+        </div>
+        <el-alert v-if="showDefault && defaultPrompt" type="info" :closable="false"
+          style="margin-top:10px; white-space:pre-wrap; font-family: Consolas, 'Courier New', monospace">{{ defaultPrompt }}</el-alert>
       </div>
 
       <div class="card">

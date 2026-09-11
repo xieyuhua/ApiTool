@@ -83,17 +83,10 @@ func dirNameOf(dirs []model.Directory, id string) string {
 	return ""
 }
 
-func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonParams, envKeys []string) ([]model.TestCase, error) {
-	brief := buildApiBrief(api, common, envKeys)
-	system := `你是一名资深 API 测试专家。根据提供的接口信息，生成覆盖全面的自动化测试用例。
-每个用例必须是完整可独立执行的（包含 method/url/headers/query/bodyType/body 与断言 assertions），
-请求参数要真实可跑（优先使用字段示例值，缺失时给出合理默认值）。
-断言用于校验响应是否符合预期。
-注意：接口信息中的 "commonHeaders" / "commonQuery" 是项目级公共参数，执行时会自动附加到所有请求，
-你无需在用例中重复它们；若需覆盖，请显式设置同名参数。请求地址与参数均支持 {{变量名}} 占位，
-执行时按当前环境变量替换（可用变量见 "availableEnvVars"）。`
-	user := fmt.Sprintf(`接口信息（JSON）：
-%s
+// defaultTestCaseUserPrompt 是 AI 生成测试用例的内置默认提示词（用户可在「设置」中覆盖）。
+// 其中 {{接口信息}} 为接口摘要占位符，运行时替换为实际接口的 JSON 摘要。
+const defaultTestCaseUserPrompt = `接口信息（JSON）：
+{{接口信息}}
 
 请生成测试用例，并只返回一个 JSON 对象，结构如下（不要输出任何额外说明文字）：
 {
@@ -119,7 +112,7 @@ func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonPara
 
 要求：
 1. 至少包含 1 个「正常流程」用例，并尽量补充「参数边界」「异常场景」「权限安全」用例，总计 4~8 个。
-2. assertions 的 type 取值：
+2. assertions 的 type 取值：status / json / bodyContains / header / duration / contentType / cookie / regex / size。
    - status：响应状态码
    - json：按 JSONPath 取响应字段（target 指定路径，如 $.code、$.data.list[0].id）
    - bodyContains：响应体包含文本
@@ -131,7 +124,26 @@ func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonPara
    - size：响应体字节大小（operator 用 gt/lt/gte/lte）
 3. operator 取值：eq / ne / gt / gte / lt / lte / contains / exists / isTrue / isFalse。
 4. json 类型用 target 指定 JSONPath；header/cookie/contentType 的 target 用法见上。
-5. 正常用例务必断言 status eq 200（或接口实际成功码），并尽量用 json 断言校验关键业务字段；涉及鉴权/下载/大响应时可用 contentType、cookie、size、regex 等类型。`, brief)
+5. 正常用例务必断言 status eq 200（或接口实际成功码），并尽量用 json 断言校验关键业务字段；涉及鉴权/下载/大响应时可用 contentType、cookie、size、regex 等类型。`
+
+func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonParams, envKeys []string) ([]model.TestCase, error) {
+	brief := buildApiBrief(api, common, envKeys)
+	system := `你是一名资深 API 测试专家。根据提供的接口信息，生成覆盖全面的自动化测试用例。
+每个用例必须是完整可独立执行的（包含 method/url/headers/query/bodyType/body 与断言 assertions），
+请求参数要真实可跑（优先使用字段示例值，缺失时给出合理默认值）。
+断言用于校验响应是否符合预期。
+注意：接口信息中的 "commonHeaders" / "commonQuery" 是项目级公共参数，执行时会自动附加到所有请求，
+你无需在用例中重复它们；若需覆盖，请显式设置同名参数。请求地址与参数均支持 {{变量名}} 占位，
+执行时按当前环境变量替换（可用变量见 "availableEnvVars"）。`
+	userTmpl := defaultTestCaseUserPrompt
+	if strings.TrimSpace(s.TestCasePrompt) != "" {
+		userTmpl = s.TestCasePrompt
+	}
+	user := strings.ReplaceAll(userTmpl, "{{接口信息}}", brief)
+	// 自定义提示词若未包含 {{接口信息}} 占位符，则自动追加接口摘要，避免漏传上下文
+	if !strings.Contains(userTmpl, "{{接口信息}}") {
+		user += "\n\n接口信息（JSON）：\n" + brief
+	}
 
 	raw, err := ai.Chat(s, system, user)
 	if err != nil {
