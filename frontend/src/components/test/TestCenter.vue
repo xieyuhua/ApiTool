@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GenerateTestCasesAsync, RunTestPlan, RunTestCases,
@@ -356,12 +356,19 @@ function viewReport(r) {
 function enabledKV(rows) {
   return (rows || []).filter(x => x.enabled !== false && x.key)
 }
+// 返回全部含 key 的键值对（报告展示用，含未启用的，确保请求参数全部可见）
+function allKV(rows) {
+  return (rows || []).filter(x => x && x.key)
+}
 function onDeleteReport(r) {
   ElMessageBox.confirm('确定删除该报告？', '提示', { type: 'warning' }).then(() => {
     removeReport(r.id)
     ElMessage.success('已删除')
   }).catch(() => {})
 }
+
+// 每个用例「请求/响应参数」折叠状态，默认收缩（不在 rrOpen 中即为关闭）
+const rrOpen = reactive({})
 
 const passRate = computed(() => {
   const r = viewingReport.value
@@ -964,32 +971,49 @@ async function runPressure() {
           <el-table-column type="expand">
             <template #default="{ row }">
               <div v-if="row.error" class="ar-error">请求错误：{{ row.error }}</div>
-              <!-- 请求 -->
-              <div v-if="row.requestMethod || row.requestURL" class="req-block">
-                <div class="blk-title">请求</div>
-                <div class="req-line"><b>{{ row.requestMethod }}</b> {{ row.requestURL }}</div>
-                <div v-if="enabledKV(row.requestHeaders).length" class="kv-list">
-                  <div v-for="(h, i) in enabledKV(row.requestHeaders)" :key="'h' + i" class="kv-row"><span class="kv-k">{{ h.key }}</span><span class="kv-v">{{ h.value }}</span></div>
+              <!-- 请求地址参数与响应参数：默认收缩，点击展开 -->
+              <el-collapse v-model="rrOpen[row.caseId]">
+                <el-collapse-item name="rr">
+                  <template #title>
+                    <span class="rr-title">请求过程</span>
+                    <span class="rr-badge">{{ row.status || '-' }} · {{ row.durationMs }}ms</span>
+                  </template>
+                  <!-- 请求 -->
+                  <div v-if="row.requestMethod || row.requestURL" class="req-block">
+                    <div class="blk-title">请求 · {{ row.requestMethod }} {{ row.requestURL }}</div>
+                    <div class="req-sub">请求头 Headers</div>
+                    <div v-if="allKV(row.requestHeaders).length" class="kv-list">
+                      <div v-for="(h, i) in allKV(row.requestHeaders)" :key="'h' + i" class="kv-row"><span class="kv-k">{{ h.key }}</span><span class="kv-v">{{ h.value }}</span></div>
+                    </div>
+                    <div v-else class="kv-empty">（无）</div>
+                    <div class="req-sub">Query 参数（GET）</div>
+                    <div v-if="allKV(row.requestQuery).length" class="kv-list">
+                      <div v-for="(q, i) in allKV(row.requestQuery)" :key="'q' + i" class="kv-row"><span class="kv-k">{{ q.key }}</span><span class="kv-v">{{ q.value }}</span></div>
+                    </div>
+                    <div v-else class="kv-empty">（无）</div>
+                    <div class="req-sub">请求体 Body（POST/PUT 等）</div>
+                    <div v-if="row.requestBody" class="blk-body"><pre>{{ row.requestBody }}</pre></div>
+                    <div v-else class="kv-empty">（无）</div>
+                  </div>
+                  <!-- 响应 -->
+                  <div class="resp-block">
+                    <div class="resp-title">响应 · {{ row.status }} {{ row.statusText }} · {{ row.durationMs }}ms · {{ (row.size || 0) }}B</div>
+                    <div v-if="row.responseHeaders" class="kv-list">
+                      <div v-for="(v, k) in row.responseHeaders" :key="'rh' + k" class="kv-row"><span class="kv-k">{{ k }}</span><span class="kv-v">{{ v }}</span></div>
+                    </div>
+                    <pre v-if="row.responseBody" class="resp-body">{{ row.responseBody }}</pre>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+              <!-- 断言判断：直接展示 -->
+              <div class="assert-section">
+                <div class="blk-title">断言判断</div>
+                <div v-for="(ar, i) in row.assertionResults" :key="i" class="ar-row">
+                  <span :class="ar.passed ? 'ok' : 'fail'">{{ ar.passed ? '✓' : '✗' }}</span>
+                  {{ ar.description }} —— {{ ar.detail }}
                 </div>
-                <div v-if="enabledKV(row.requestQuery).length" class="kv-list">
-                  <div v-for="(q, i) in enabledKV(row.requestQuery)" :key="'q' + i" class="kv-row"><span class="kv-k">{{ q.key }}</span><span class="kv-v">{{ q.value }}</span></div>
-                </div>
-                <div v-if="row.requestBody" class="blk-body"><pre>{{ row.requestBody }}</pre></div>
+                <div v-if="!row.assertionResults.length && !row.error" class="ar-row">无断言（按 HTTP 2xx 判定）</div>
               </div>
-              <!-- 响应 -->
-              <div class="resp-block">
-                <div class="resp-title">响应 · {{ row.status }} {{ row.statusText }} · {{ row.durationMs }}ms · {{ (row.size || 0) }}B</div>
-                <div v-if="row.responseHeaders" class="kv-list">
-                  <div v-for="(v, k) in row.responseHeaders" :key="'rh' + k" class="kv-row"><span class="kv-k">{{ k }}</span><span class="kv-v">{{ v }}</span></div>
-                </div>
-                <pre v-if="row.responseBody" class="resp-body">{{ row.responseBody }}</pre>
-              </div>
-              <!-- 断言 -->
-              <div v-for="(ar, i) in row.assertionResults" :key="i" class="ar-row">
-                <span :class="ar.passed ? 'ok' : 'fail'">{{ ar.passed ? '✓' : '✗' }}</span>
-                {{ ar.description }} —— {{ ar.detail }}
-              </div>
-              <div v-if="!row.assertionResults.length && !row.error" class="ar-row">无断言（按 HTTP 2xx 判定）</div>
             </template>
           </el-table-column>
           <el-table-column prop="caseName" label="用例" min-width="200" />
@@ -1030,6 +1054,8 @@ async function runPressure() {
 .report-env { font-size: 12px; color: #86909c; margin: 6px 0 0; }
 .req-block { border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; margin-top: 8px; }
 .blk-title { background: #f2f3f5; font-size: 12px; font-weight: 600; padding: 6px 12px; color: #4e5969; }
+.req-sub { font-size: 12px; font-weight: 600; color: #165dff; padding: 8px 12px 2px; }
+.kv-empty { font-size: 12px; color: #c9cdd4; padding: 0 12px 6px; }
 .req-line { padding: 8px 12px; font-size: 13px; word-break: break-all; }
 .req-line b { color: #165dff; margin-right: 6px; }
 .blk-body { padding: 0 12px 10px; }
@@ -1082,6 +1108,10 @@ async function runPressure() {
 .report-summary pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 13px; line-height: 1.8; margin: 0; }
 .ar-row { font-size: 12px; padding: 3px 0; color: #4e5969; }
 .ar-error { font-size: 12px; padding: 3px 0; color: #f53f3f; }
+.rr-title { font-size: 13px; font-weight: 600; color: #4e5969; }
+.rr-badge { font-size: 11px; color: #86909c; margin-left: 10px; font-weight: 400; }
+.rr-collapse { border: none; margin-top: 4px; }
+.assert-section { border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; margin-top: 10px; padding: 0 12px 8px; }
 
 .pressure-config { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .pcfg-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4e5969; }
