@@ -186,6 +186,18 @@ func genCasesForApi(s model.Settings, api model.ApiInfo, common model.CommonPara
 		for i := range c.Assertions {
 			c.Assertions[i].Enabled = true
 		}
+		// 请求头与 Query 参数默认启用：AI 返回的 KV 无 enabled 字段，反序列化零值为 false，
+		// 若不修正，编辑器中复选框为未选中，执行时会被 enabledKV 过滤掉，导致参数未发送。
+		for i := range c.Headers {
+			c.Headers[i].Enabled = true
+		}
+		for i := range c.Query {
+			c.Query[i].Enabled = true
+		}
+		// BodyType 兜底：有请求体但未指定类型时默认按 JSON 发送，避免 body 被丢弃
+		if strings.TrimSpace(c.Body) != "" && strings.TrimSpace(c.BodyType) == "" {
+			c.BodyType = "json"
+		}
 		out = append(out, model.TestCase{
 			ID:          util.GenID(),
 			ApiID:       api.ID,
