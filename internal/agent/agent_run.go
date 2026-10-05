@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,32 @@ type RunAgentResult struct {
 }
 
 // llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
+// messagesLogText 把发往模型的请求消息序列化为可读文本，写入 request 级日志，
+// 便于在「日志」面板直接核对「到底把什么发给了模型」：系统提示词、历史上下文、
+// 本轮输入、以及工具结果回灌的内容都在内。单条与整体都做截断，避免超长提示词把日志撑爆。
+func messagesLogText(msgs []ai.ChatMessage) string {
+	var sb strings.Builder
+	for i, m := range msgs {
+		role := m.Role
+		if role == "" {
+			role = "user"
+		}
+		label := role
+		switch role {
+		case "system":
+			label = "system（系统提示词）"
+		case "assistant":
+			label = "assistant（模型上一轮输出）"
+		case "user":
+			label = "user（用户输入 / 工具结果回灌）"
+		}
+		sb.WriteString("── [" + strconv.Itoa(i+1) + "] " + label + " ──" + "\n")
+		sb.WriteString(util.Truncate(m.Content, 3000))
+		sb.WriteString("\n\n")
+	}
+	// 整体上限 12000 字符：既能看清上下文，又不会让单条日志过大
+	return util.Truncate(sb.String(), 12000)
+}
 func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, maxTokens int) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
@@ -67,7 +94,7 @@ func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperat
 	req.Header.Set("Authorization", "Bearer "+args.APIKey)
 
 	start := time.Now()
-	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: "模型: " + model + "  消息数: " + fmt.Sprint(len(messages)) + "\n\n" + messagesLogText(messages)})
 	resp, err := client.Do(req)
 	if err != nil {
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 请求失败: " + tag, Detail: err.Error()})
@@ -140,7 +167,7 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 	req.Header.Set("Accept", "text/event-stream")
 
 	start := time.Now()
-	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: "模型: " + model + "\n消息数: " + fmt.Sprint(len(messages))})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: "模型: " + model + "  消息数: " + fmt.Sprint(len(messages)) + "\n\n" + messagesLogText(messages)})
 	resp, err := client.Do(req)
 	if err != nil {
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式请求失败: " + tag, Detail: err.Error()})
