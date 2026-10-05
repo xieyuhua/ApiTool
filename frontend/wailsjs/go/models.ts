@@ -503,6 +503,33 @@ export namespace agent {
 		}
 	}
 	
+	
+	export class WebChatInfo {
+	    running: boolean;
+	    addr: string;
+	    port: string;
+	    url: string;
+	    public: string;
+	    host: string;
+	    token: string;
+	    link: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WebChatInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.addr = source["addr"];
+	        this.port = source["port"];
+	        this.url = source["url"];
+	        this.public = source["public"];
+	        this.host = source["host"];
+	        this.token = source["token"];
+	        this.link = source["link"];
+	    }
+	}
 
 }
 

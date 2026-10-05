@@ -22,6 +22,8 @@ export function BuildCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<str
 
 export function BuildReportHTMLContent(arg1:string):Promise<string>;
 
+export function BuildSessionHTML(arg1:string):Promise<string>;
+
 export function BuildShareDoc(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildSharedHTML(arg1:string,arg2:string):Promise<string>;
@@ -73,6 +75,8 @@ export function DeleteClipItem(arg1:string):Promise<void>;
 export function DeleteTestCases(arg1:Array<string>):Promise<number>;
 
 export function Emit(arg1:string,arg2:Array<any>):Promise<void>;
+
+export function ExportAgentSession(arg1:string,arg2:string):Promise<string>;
 
 export function ExportCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<string>;
 
@@ -226,6 +230,8 @@ export function RefreshShareDoc(arg1:string,arg2:string,arg3:string):Promise<voi
 
 export function RenameAgentSession(arg1:string,arg2:string):Promise<void>;
 
+export function ResetWebChatToken():Promise<agent.WebChatInfo>;
+
 export function RunAgent(arg1:agent.RunAgentArgs):Promise<agent.RunAgentResult>;
 
 export function RunStressTest(arg1:Array<stress.StressTarget>,arg2:stress.StressConfig):Promise<stress.StressReport>;
@@ -310,6 +316,8 @@ export function StartShareServer(arg1:string):Promise<void>;
 
 export function StartSyncServer():Promise<string>;
 
+export function StartWebChat(arg1:string):Promise<agent.WebChatInfo>;
+
 export function StopCaptureServer():Promise<void>;
 
 export function StopClipboardCapture():Promise<void>;
@@ -319,6 +327,8 @@ export function StopShare(arg1:string):Promise<void>;
 export function StopShareServer():Promise<void>;
 
 export function StopSyncServer():Promise<void>;
+
+export function StopWebChat():Promise<void>;
 
 export function Store():Promise<store.Store>;
 
@@ -337,6 +347,8 @@ export function ToolCipher(arg1:string,arg2:string,arg3:string,arg4:string,arg5:
 export function ToolHash(arg1:string,arg2:string):Promise<crypto.Result>;
 
 export function ToolHmac(arg1:string,arg2:string,arg3:string):Promise<crypto.Result>;
+
+export function WebChatInfo():Promise<agent.WebChatInfo>;
 
 export function WindowCenter():Promise<void>;
 

@@ -448,6 +448,26 @@ Agent 内置 4 个**数据分析模板技能**（在「设置 → Agent → 技�
 
 > **为什么之前「说分析销售却不调工具」**：默认系统提示词对数据库分析的引导较弱，模型容易直接用文字作答。现已强化「数据分析请求强制流程」——凡涉及具体数据/统计/分析，必须**先 `db_schema` 探结构、再 `db_query` 取数、最后基于真实数据解读**，并配合上述模板技能引导，模型会主动且可见地调用工具。
 
+### 13.8 局域网访问（手机 / 其他电脑直接对话）
+
+点击 Agent 页顶栏 **「📱 局域网」**，开启后本机会启动一个仅局域网可访问的网页服务，
+手机、平板或另一台电脑用浏览器打开带令牌的地址，就能远程与 AI Agent 对话。
+
+- **访问地址**：`http://<本机局域网IP>:<端口>/?token=<令牌>`（默认端口 `8090`，可改；被占用时换个端口即可）。
+- **自动记住所址**：首次带 `token` 打开后会校验令牌并写入该浏览器的 Cookie，然后**重定向到不带 token 的干净地址**，
+  之后直接访问 `http://<局域网IP>:<端口>/` 即可，令牌不会长期残留在地址栏与浏览器历史里。
+- **网页端能力**（与桌面端同一份数据、同一套工具）：
+  - 完整对话：提问、看思考过程与工具/技能调用明细（入参、返回、错误）、Markdown 表格与图表；
+  - 会话管理：顶部下拉切换会话、＋新建、「⋯」重命名 / 清空 / 删除；
+  - **双向实时共享**：网页端提问，桌面端刷新即可看到；桌面端提问，网页端 4 秒内自动同步（含工具执行过程与 Token 统计）。
+- **安全**：Agent 具备**文件读写、执行命令、数据库查询**能力，因此**必须凭令牌访问**——没有任何令牌时接口返回 401、页面显示「需要有效的访问链接」。
+  点击「重置令牌」可让已分发出去的旧链接**立即失效**。请只在可信局域网内分享，切勿转发到公网。
+- **端口打不开时**：检查 Windows 防火墙是否弹窗放行了该端口（首次开启会询问，勾选「专用网络」即可）。
+
+内部实现：`internal/agent/webchat.go`（HTTP 服务、令牌鉴权、接口）+ `internal/agent/webchat_page.html`（单文件页面，随二进制内嵌），
+沿用项目既有的局域网服务范式（`internal/share`、`internal/capture`）；`util.LocalIP()` 会自动挑选私有网段地址并跳过虚拟网卡，
+避免生成手机连不上的 `169.254.x.x` 地址。
+
 
 ---
 
@@ -830,6 +850,28 @@ A：这是预期行为——浏览器预览环境没有 Go 后端（`window.go` 
 程序已做安全兜底：会显示「当前环境未连接到 Go 后端…」的友好提示而非白屏崩溃。
 要真正使用分享、云同步、发送请求等功能，请用桌面端 `wails build` 构建后运行，或 `wails dev` 实时预览。
 
+**Q：`wails build` 报 `TLS handshake timeout` / `go: downloading ...` 失败？**
+A：本项目依赖已全部 vendor（`vendor/` 目录），编译本身**不需要联网**。但 `wails build` 默认会做两件联网的事：
+① `go mod tidy`（同步 go.mod）；② 生成 bindings 时执行带**测试依赖**的 `go list`（vendor 里不含测试依赖，会退回联网模式）。
+加上对应开关即可完全离线构建：
+
+```powershell
+wails build -m -skipbindings -nosyncgomod
+# -m            跳过 go mod tidy
+# -skipbindings 跳过 bindings 生成（本项目前端直接调用 window.go.main.App，不依赖 frontend/wailsjs 产物）
+# -nosyncgomod  不把 CLI 版本写回 go.mod
+```
+
+若还缺其它步骤，再按需追加：`-s` 跳过前端、`-nopackage` 跳过 NSIS 安装包、`-clean` 清理 bin 目录。
+更彻底的做法是设置 `GOFLAGS=-mod=vendor`、`GOPROXY=off`，缺依赖会立刻报错而不是长时间超时。
+
+仓库还内置了不依赖 Wails CLI 的等价脚本（vendor 离线模式，产物同为 `build/bin/apitool.exe`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1                # 前端 + 后端
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -SkipFrontend  # 仅改后端时，秒级出包
+```
+
 **Q：桌面端仍然报 `reading 'main'` 错误？**
 A：说明 Wails 桥接未正确注入。请确认用 `wails build` / `wails dev` 启动，而非直接打开
 `npm run build` 产出的 `dist`。如仍异常，尝试删除 `frontend/dist` 与 `build/bin` 后重新 `wails build`。
@@ -841,6 +883,7 @@ A：说明 Wails 桥接未正确注入。请确认用 `wails build` / `wails dev
 ```
 apitool/
 ├── main.go                # Wails 应用入口
+├── build.ps1              # 一键构建（vendor 离线模式，产物 build/bin/apitool.exe）
 ├── app.go                 # App 结构体：嵌入各内部模块，暴露 Wails 绑定（数据读写、剪贴板、升级检测等）
 ├── tray.go                # 系统托盘菜单（含「剪贴板历史…」入口）
 ├── internal/              # 业务逻辑（不再平铺于根目录）

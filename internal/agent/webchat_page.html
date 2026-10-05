@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="viewport-fit" content="cover">
+<title>AI Agent · 局域网</title>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#fff; --surface2:#f2f3f5; --border:#e5e6eb;
+  --text:#1f2329; --muted:#86909c; --primary:#165dff; --primary-bg:#e8f1ff;
+  --ok:#00b42a; --err:#f53f3f; --purple:#722ed1;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#17181c; --surface:#1f2024; --surface2:#26272c; --border:#33353c;
+    --text:#e6e6e6; --muted:#9a9ea6; --primary:#4b8bff; --primary-bg:#1c2a45;
+    --ok:#3ccb7f; --err:#ff7875; --purple:#b37feb;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Segoe UI",-apple-system,"Microsoft YaHei",sans-serif;font-size:15px;line-height:1.7;
+  display:flex;flex-direction:column;height:100dvh}
+
+/* ---------- 顶栏 ---------- */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 12px;flex-shrink:0}
+.hrow{display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex-shrink:0}
+.dot.busy{background:#fa8c16;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+.hrow b{font-size:15px}
+.hmeta{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spacer{flex:1}
+button{font-family:inherit}
+.ic{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface);
+  color:var(--text);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ic:active{background:var(--surface2)}
+select#selSession{width:100%;margin-top:8px;padding:7px 8px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);font-size:13px;font-family:inherit}
+.menu{position:relative;flex-shrink:0}
+.menu>summary{list-style:none;cursor:pointer}
+.menu>summary::-webkit-details-marker{display:none}
+.menu-pop{position:absolute;right:0;top:36px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.14);min-width:150px;z-index:20;padding:4px}
+.menu-pop div{padding:8px 12px;font-size:13px;cursor:pointer;border-radius:6px;white-space:nowrap}
+.menu-pop div:hover{background:var(--surface2)}
+.menu-pop div.danger{color:var(--err)}
+
+/* ---------- 消息区 ---------- */
+main{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:8px;align-items:flex-start}
+.msg.user{flex-direction:row-reverse}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;
+  justify-content:center;font-size:16px;flex-shrink:0}
+.bubble{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 13px;
+  max-width:88%;min-width:0;overflow-wrap:break-word}
+.msg.user .bubble{background:var(--primary-bg);border-color:transparent}
+.mtime{font-size:11px;color:var(--muted);margin-top:6px;text-align:right}
+details.think{background:var(--surface2);border-left:3px solid var(--purple);border-radius:8px;
+  padding:6px 10px;margin-bottom:8px}
+details.think>summary,details.step>summary{cursor:pointer;font-size:12px;color:var(--purple);font-weight:600;outline:none}
+details.step{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px 9px;margin:6px 0}
+details.step.err{border-color:var(--err)}
+.sname{font-size:12px;font-weight:600;color:var(--text)}
+.srv{font-weight:400;color:var(--muted);margin-left:4px}
+.badge{font-size:11px;padding:0 8px;border-radius:10px;margin-left:6px;font-weight:400}
+.badge.ok{color:var(--ok);background:var(--surface)}
+.badge.err{color:var(--err);background:var(--surface)}
+.badge.skill{color:var(--purple);background:var(--surface)}
+.sech{font-size:11px;color:var(--primary);font-weight:600;margin-top:6px}
+.sech.err{color:var(--err)}
+pre{margin:4px 0 0;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  font-family:Consolas,"Courier New",monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;
+  max-height:300px;overflow:auto;color:var(--text)}
+pre.err{color:var(--err)}
+.empty{text-align:center;color:var(--muted);margin:auto 0;font-size:14px}
+.empty .ic2{font-size:44px}
+
+/* ---------- 运行提示 ---------- */
+.running{display:flex;align-items:center;gap:8px;justify-content:center;color:var(--muted);
+  font-size:12px;padding:6px}
+.spin{width:12px;height:12px;border:2px solid var(--primary);border-top-color:transparent;
+  border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none}
+
+/* ---------- 输入区 ---------- */
+footer{background:var(--surface);border-top:1px solid var(--border);padding:8px 10px;
+  padding-bottom:calc(8px + env(safe-area-inset-bottom));flex-shrink:0}
+textarea{width:100%;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);
+  padding:9px 11px;font-size:16px;font-family:inherit;resize:none;outline:none;line-height:1.5}
+textarea:focus{border-color:var(--primary)}
+.frow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.frow .tip{font-size:11px;color:var(--muted);flex:1}
+.btn{border:0;border-radius:8px;background:var(--primary);color:#fff;font-size:14px;padding:9px 22px;
+  cursor:pointer;font-family:inherit}
+.btn:disabled{opacity:.5}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:90px;background:rgba(0,0,0,.82);color:#fff;
+  padding:9px 16px;border-radius:8px;font-size:13px;z-index:99;max-width:86vw;text-align:center}
+
+/* ---------- markdown ---------- */
+.md-p{margin:6px 0}
+.md-h{margin:12px 0 6px;font-weight:600;line-height:1.4}
+.md-h1{font-size:18px}.md-h2{font-size:17px}.md-h3{font-size:16px}.md-h4{font-size:15px}
+.md-ul,.md-ol{padding-left:22px;margin:6px 0}
+.md-table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px;display:block;overflow-x:auto}
+.md-table th,.md-table td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+.md-table th{background:var(--surface2);font-weight:600}
+.md-quote{border-left:3px solid var(--border);padding-left:12px;color:var(--muted);margin:8px 0}
+.md-hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.md-code-inline{background:var(--surface2);padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:13px}
+.md-mermaid{text-align:center;margin:10px 0;overflow-x:auto}
+.md-mermaid svg{max-width:100%;height:auto}
+.md-mermaid-tip{font-size:12px;color:var(--muted)}
+.md a{color:var(--primary)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <span class="dot" id="dot"></span>
+    <b>AI Agent</b>
+    <span class="hmeta" id="meta">连接中…</span>
+    <span class="spacer"></span>
+    <button class="ic" id="btnNew" title="新建会话">＋</button>
+    <details class="menu" id="menu">
+      <summary class="ic" title="更多">⋯</summary>
+      <div class="menu-pop">
+        <div data-act="rename">重命名当前会话</div>
+        <div data-act="clear">清空当前会话</div>
+        <div data-act="delete" class="danger">删除当前会话</div>
+        <div data-act="refresh">刷新</div>
+      </div>
+    </details>
+  </div>
+  <select id="selSession"></select>
+</header>
+
+<main id="msgs"></main>
+
+<div class="running hidden" id="running"><span class="spin"></span><span id="runTip">Agent 运行中…（可切到桌面端查看实时过程）</span></div>
+
+<footer>
+  <textarea id="input" rows="2" placeholder="输入你的需求，Ctrl / ⌘ + Enter 发送"></textarea>
+  <div class="frow">
+    <span class="tip">与桌面端共享同一份会话记录</span>
+    <button class="btn" id="btnSend">发送</button>
+  </div>
+</footer>
+
+<script>
+// ---------------- 基础工具 ----------------
+const $ = s => document.querySelector(s);
+const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+let state = null;      // 服务端状态快照
+let sending = false;   // 本页是否有请求在飞
+let lastKey = '';      // 上次 ping 指纹
+
+function toast(msg) {
+  const t = el('div', 'toast', msg);
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+function nowStr() {
+  const d = new Date();
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* 非 JSON 响应 */ }
+  if (!res.ok) {
+    const msg = (data && data.error) || ('请求失败（HTTP ' + res.status + '）');
+    throw new Error(msg);
+  }
+  return data || {};
+}
+
+// ---------------- Markdown 渲染（规则与桌面端 markdown.js 一致） ----------------
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function inline(text) {
+  let t = escapeHtml(text);
+  t = t.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return t;
+}
+function renderMarkdown(md) {
+  if (!md) return '';
+  const all = String(md).replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  const isFence = l => /^```\s*(\w+)?\s*$/.test(l);
+  const isHR = l => /^\s*([-*_])\1{2,}\s*$/.test(l);
+  const isQuote = l => /^\s*>\s?/.test(l);
+  const isUL = l => /^\s*[-*+]\s+/.test(l);
+  const isOL = l => /^\s*\d+\.\s+/.test(l);
+  const isTableSep = l => /^\s*\|?[\s:|-]+\|?\s*$/.test(l) && /-/.test(l);
+  const splitRow = l => {
+    let s = l.trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (s.endsWith('|')) s = s.slice(0, -1);
+    return s.split('|').map(x => x.trim());
+  };
+  const blockStart = idx => {
+    const l = all[idx];
+    return isFence(l) || /^(#{1,6})\s/.test(l) || isHR(l) || isQuote(l) || isUL(l) || isOL(l) ||
+      (l.indexOf('|') >= 0 && idx + 1 < all.length && isTableSep(all[idx + 1]));
+  };
+  while (i < all.length) {
+    const line = all[i];
+    const fence = line.match(/^```\s*(\w+)?\s*$/);
+    if (fence) {
+      const lang = (fence[1] || '').toLowerCase();
+      const buf = []; i++;
+      while (i < all.length && !/^```\s*$/.test(all[i])) { buf.push(all[i]); i++; }
+      i++;
+      const code = buf.join('\n');
+      if (lang === 'mermaid') {
+        out.push('<div class="md-mermaid" data-src="' + encodeURIComponent(code) + '">图表渲染中…</div>');
+      } else {
+        out.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
+      }
+      continue;
+    }
+    if (line.indexOf('|') >= 0 && i + 1 < all.length && isTableSep(all[i + 1])) {
+      const header = splitRow(line); i += 2;
+      const rows = [];
+      while (i < all.length && all[i].indexOf('|') >= 0 && all[i].trim() !== '') { rows.push(splitRow(all[i])); i++; }
+      let h = '<table class="md-table"><thead><tr>';
+      header.forEach(x => h += '<th>' + inline(x) + '</th>');
+      h += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        h += '<tr>';
+        header.forEach((_, idx) h += '<td>' + inline(r[idx] || '') + '</td>');
+        h += '</tr>';
+      });
+      out.push(h + '</tbody></table>');
+      continue;
+    }
+    const hd = line.match(/^(#{1,6})\s+(.*)$/);
+    if (hd) {
+      const lv = hd[1].length;
+      out.push('<h' + lv + ' class="md-h md-h' + lv + '">' + inline(hd[2]) + '</h' + lv + '>');
+      i++; continue;
+    }
+    if (isHR(line)) { out.push('<hr class="md-hr" />'); i++; continue; }
+    if (isQuote(line)) {
+      const buf = [];
+      while (i < all.length && isQuote(all[i])) { buf.push(all[i].replace(/^\s*>\s?/, '')); i++; }
+      out.push('<blockquote class="md-quote">' + inline(buf.join('\n')).replace(/\n/g, '<br/>') + '</blockquote>');
+      continue;
+    }
+    if (isUL(line)) {
+      const buf = [];
+      while (i < all.length && isUL(all[i])) { buf.push('<li>' + inline(all[i].replace(/^\s*[-*+]\s+/, '')) + '</li>'); i++; }
+      out.push('<ul class="md-ul">' + buf.join('') + '</ul>');
+      continue;
+    }
+    if (isOL(line)) {
+      const buf = [];
+      while (i < all.length && isOL(all[i])) { buf.push('<li>' + inline(all[i].replace(/^\s*\d+\.\s+/, '')) + '</li>'); i++; }
+      out.push('<ol class="md-ol">' + buf.join('') + '</ol>');
+      continue;
+    }
+    if (line.trim() === '') { i++; continue; }
+    const buf = [line]; i++;
+    while (i < all.length && all[i].trim() !== '' && !blockStart(i)) { buf.push(all[i]); i++; }
+    out.push('<p class="md-p">' + inline(buf.join('\n')).replace(/\n/g, '<br/>') + '</p>');
+  }
+  return out.join('\n');
+}
+
+// mermaid 图表：CDN 加载失败时降级显示源码（离线环境仍可读）
+let mermaidPromise = null, mermaidSeq = 0;
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  if (mermaidPromise) return mermaidPromise;
+  mermaidPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+    s.onload = () => { try { window.mermaid.initialize({ startOnLoad: false, theme: 'default' }); resolve(window.mermaid); } catch (e) { reject(e); } };
+    s.onerror = () => reject(new Error('mermaid 加载失败'));
+    document.head.appendChild(s);
+  });
+  return mermaidPromise;
+}
+async function renderMermaid(root) {
+  const nodes = (root || document).querySelectorAll('.md-mermaid[data-src]:not([data-done])');
+  if (!nodes.length) return;
+  let mm;
+  try { mm = await loadMermaid(); } catch (e) {
+    nodes.forEach(n => {
+      n.setAttribute('data-done', '1');
+      n.innerHTML = '<pre><code>' + escapeHtml(decodeURIComponent(n.getAttribute('data-src'))) + '</code></pre>' +
+        '<div class="md-mermaid-tip">（图表渲染需要网络，已显示源码）</div>';
+    });
+    return;
+  }
+  for (const n of nodes) {
+    n.setAttribute('data-done', '1');
+    const src = decodeURIComponent(n.getAttribute('data-src'));
+    try { const r = await mm.render('mmd' + (++mermaidSeq), src); n.innerHTML = r.svg; }
+    catch (e) {
+      n.innerHTML = '<pre><code>' + escapeHtml(src) + '</code></pre><div class="md-mermaid-tip">图表语法有误</div>';
+    }
+  }
+}
+
+// ---------------- 渲染 ----------------
+const ICONS = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'tool-failed': '⚠️' };
+function escText(s) { return escapeHtml(s == null ? '' : s); }
+
+function stepNode(step) {
+  const failed = !!step.error || step.type === 'tool-failed';
+  const badge = failed ? ['失败', 'err'] : step.type === 'skill' ? ['技能', 'skill'] : step.type === 'plan' ? ['计划', 'ok'] : ['成功', 'ok'];
+  const d = el('details', 'step' + (failed ? ' err' : ''));
+  d.open = true;
+  const name = (ICONS[step.type] || '🔧') + ' ' + escText(step.name);
+  d.innerHTML = '<summary><span class="sname">' + name +
+    (step.server ? '<span class="srv">@' + escText(step.server) + '</span>' : '') +
+    '<span class="badge ' + badge[1] + '">' + badge[0] + '</span></span></summary>';
+  if (step.input) d.appendChild(el('div', 'sech', '执行参数'), el('pre', '', escText(step.input)));
+  if (step.error) d.appendChild(el('div', 'sech err', '错误信息'), el('pre', 'err', escText(step.error)));
+  else if (step.output) d.appendChild(el('div', 'sech', '返回结果'), el('pre', '', escText(step.output)));
+  return d;
+}
+
+function thinkNode(msg) {
+  const steps = (msg.steps || []).filter(x => x.type !== 'thought');
+  if (!msg.thinking && !steps.length) return null;
+  const d = el('details', 'think');
+  d.appendChild(el('summary', '', '💭 思考过程' + (steps.length ? '　·　' + steps.length + ' 个工具调用' : '')));
+  if (msg.thinking) d.appendChild(el('pre', '', escText(msg.thinking)));
+  steps.forEach(s => d.appendChild(stepNode(s)));
+  return d;
+}
+
+function msgNode(m) {
+  const isUser = m.role === 'user';
+  const wrap = el('div', 'msg ' + (isUser ? 'user' : 'assistant'));
+  wrap.appendChild(el('div', 'avatar', isUser ? '🧑' : '🤖'));
+  const bubble = el('div', 'bubble');
+  if (!isUser) { const t = thinkNode(m); if (t) bubble.appendChild(t); }
+  const body = el('div', 'md', renderMarkdown(m.content));
+  bubble.appendChild(body);
+  bubble.appendChild(el('div', 'mtime', escText(m.time || '')));
+  wrap.appendChild(bubble);
+  return wrap;
+}
+
+function render() {
+  const box = $('#msgs');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.innerHTML = '';
+  if (!state || !state.messages || !state.messages.length) {
+    box.appendChild(el('div', 'empty', '<div class="ic2">🤖</div>在下面输入你的需求<br>它会在桌面端同一份会话里回答'));
+  } else {
+    state.messages.forEach(m => box.appendChild(msgNode(m)));
+  }
+  renderSessionSelect();
+  renderMermaid(box);
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderSessionSelect() {
+  const sel = $('#selSession');
+  if (!state) return;
+  const keep = sel.value;
+  sel.innerHTML = '';
+  (state.sessions || []).forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = (s.title || '新会话') + '（' + (s.messageCount || 0) + ' 条）';
+    if (s.id === state.activeSession) o.selected = true;
+    sel.appendChild(o);
+  });
+  if (keep && (!state.sessions || !state.sessions.some(s => s.id === keep))) sel.value = state.activeSession || '';
+}
+
+function setRunning(on) {
+  $('#running').classList.toggle('hidden', !on);
+  $('#dot').classList.toggle('busy', !!on);
+}
+
+// ---------------- 数据加载 ----------------
+async function load() {
+  state = await api('/api/state');
+  const a = state.app || {};
+  const bits = [];
+  if (a.model) bits.push(a.model);
+  bits.push(a.mode === 'plan' ? 'Plan 模式' : 'ReAct 模式');
+  if (a.user) bits.push('用户 ' + a.user);
+  bits.push('技能 ' + (a.skills || 0) + ' · MCP ' + (a.servers || 0));
+  if (state.usage && state.usage.totalTokens) bits.push('累计 ' + state.usage.totalTokens + ' token');
+  $('#meta').textContent = bits.join(' · ');
+  render();
+}
+
+async function sessionOp(action, extra) {
+  const body = Object.assign({ action: action }, extra || {});
+  await api('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  await load();
+  toast('已' + ({ new: '新建会话', switch: '切换会话', delete: '删除会话', rename: '重命名', clear: '清空会话' }[action] || '完成'));
+}
+
+// ---------------- 交互 ----------------
+$('#btnSend').addEventListener('click', send);
+$('#input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+});
+$('#btnNew').addEventListener('click', async () => {
+  const t = prompt('新会话名称', '新会话');
+  if (t === null) return;
+  await sessionOp('new', { title: t });
+});
+$('#selSession').addEventListener('change', async e => {
+  await sessionOp('switch', { id: e.target.value });
+});
+$('#menu').addEventListener('toggle', e => {
+  if (!e.target.open) return;
+  // 点击菜单外部自动关闭
+  setTimeout(() => document.addEventListener('click', function h(ev) {
+    if (!$('#menu').contains(ev.target)) { $('#menu').open = false; document.removeEventListener('click', h); }
+  }), 0);
+});
+$('#menu').addEventListener('click', async e => {
+  const act = e.target && e.target.dataset && e.target.dataset.act;
+  if (!act) return;
+  $('#menu').open = false;
+  try {
+    if (act === 'rename') {
+      const cur = (state.sessions || []).find(s => s.id === state.activeSession);
+      const t = prompt('会话名称', cur ? cur.title : '');
+      if (t === null) return;
+      await sessionOp('rename', { id: state.activeSession, title: t });
+    } else if (act === 'clear') {
+      if (!confirm('确定清空当前会话的全部消息？')) return;
+      await sessionOp('clear');
+    } else if (act === 'delete') {
+      if (!confirm('确定删除当前会话？')) return;
+      await sessionOp('delete', { id: state.activeSession });
+    } else if (act === 'refresh') {
+      await load();
+    }
+  } catch (err) { toast(String(err.message || err)); }
+});
+
+async function send() {
+  const input = $('#input');
+  const text = input.value.trim();
+  if (!text || sending) return;
+  input.value = '';
+  sending = true;
+  $('#btnSend').disabled = true;
+  setRunning(true);
+  // 立即回显用户消息，随后由服务端状态刷新校正
+  state.messages.push({ id: 'u' + Date.now(), role: 'user', content: text, time: nowStr() });
+  render();
+  const box = $('#msgs');
+  box.scrollTop = box.scrollHeight;
+  try {
+    const r = await api('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: text, sessionId: state.activeSession })
+    });
+    if (r.error) toast(r.error);
+  } catch (err) {
+    toast(String(err.message || err));
+  } finally {
+    sending = false;
+    $('#btnSend').disabled = false;
+    setRunning(false);
+    try { await load(); } catch (e) { /* 忽略刷新失败 */ }
+  }
+}
+
+// 轮询：桌面端或另一台设备产生新消息时自动同步
+async function poll() {
+  try {
+    const p = await api('/api/ping');
+    const key = [p.running, p.messageCount, p.activeSession, p.sessionCount].join('|');
+    if (lastKey && key !== lastKey) await load();
+    lastKey = key;
+    setRunning(!!p.running);
+  } catch (e) { /* 网络抖动忽略 */ }
+}
+
+load().then(() => { lastKey = 'init'; setInterval(poll, 4000); }).catch(e => toast(String(e.message || e)));
+</script>
+</body>
+</html>

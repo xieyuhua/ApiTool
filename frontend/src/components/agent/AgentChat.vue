@@ -6,6 +6,7 @@ import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { AgentAPI, hasBridge } from './agentApi'
 import { renderMarkdown, renderMermaid } from './markdown'
 import AgentSettings from './AgentSettings.vue'
+import AgentWebChat from './AgentWebChat.vue'
 import AgentLogs from './AgentLogs.vue'
 import ToolCard from './ToolCard.vue'
 
@@ -25,6 +26,8 @@ const input = ref('')
 const running = ref(false)
 const settingsVisible = ref(false)
 const logsVisible = ref(false)
+const webChatVisible = ref(false)
+const exporting = ref(false)   // 导出中（避免重复点击）
 const showThinkMap = reactive({})  // 消息级思考展开
 const bodyRef = ref(null)
 
@@ -213,6 +216,25 @@ async function renameSession(id) {
   } catch (e) { ElMessage.error(String(e)) }
 }
 
+// 导出会话记录：format = 'pdf' | 'html'，id 为空时导出当前会话
+async function exportSession(id, format) {
+  const sid = id || activeSession.value
+  if (exporting.value) return
+  if (!sid) { ElMessage.warning('没有可导出的会话'); return }
+  const s = sessions.value.find(x => x.id === sid)
+  if (s && !(s.messages || []).length) { ElMessage.warning('当前会话还没有内容'); return }
+  exporting.value = true
+  try {
+    const path = await AgentAPI.exportSession(sid, format)
+    if (path) ElMessage.success('已导出：' + path)
+  } catch (e) {
+    ElMessage.error('导出失败：' + String(e))
+    if (format === 'pdf') ElMessage.warning('可改用「导出 HTML」，再用浏览器打开并打印为 PDF')
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function polish() {
   const text = input.value.trim()
   if (!text) return
@@ -282,6 +304,7 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
             <div class="ss-item-sub">{{ formatTime(s.updatedAt) }} · {{ (s.usage && s.usage.totalTokens) || 0 }} token</div>
           </div>
           <div class="ss-item-ops" @click.stop>
+            <span class="ss-op" title="导出该会话为 HTML" @click="exportSession(s.id, 'html')">⬇</span>
             <span class="ss-op" title="重命名" @click="renameSession(s.id)">✎</span>
             <span class="ss-op" title="删除" @click="deleteSession(s.id)">🗑</span>
           </div>
@@ -308,6 +331,16 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
         <el-tag v-if="currentUserName" size="small" type="info">👤 {{ currentUserName }}</el-tag>
       </div>
       <div class="right">
+        <el-dropdown trigger="click" @command="f => exportSession(activeSession, f)">
+          <el-button size="small" text :loading="exporting">📤 导出</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="pdf">导出为 PDF（不可再编辑）</el-dropdown-item>
+              <el-dropdown-item command="html">导出为 HTML（可分享/再打印）</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button size="small" text @click="webChatVisible = true">📱 局域网</el-button>
         <el-button size="small" text @click="logsVisible = true">📊 日志</el-button>
         <el-button size="small" text @click="settingsVisible = true">⚙ 设置</el-button>
         <el-button size="small" text @click="clearChat">🗑 清空</el-button>
@@ -380,6 +413,7 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
 
     <AgentSettings v-model:visible="settingsVisible" :config="config" :skills="skills" :servers="servers" :users="users" @saved="onSettingsSaved" />
     <AgentLogs v-model:visible="logsVisible" />
+    <AgentWebChat v-model:visible="webChatVisible" />
     </div>
   </div>
 </template>

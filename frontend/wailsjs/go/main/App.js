@@ -18,6 +18,10 @@ export function BuildReportHTMLContent(arg1) {
   return window['go']['main']['App']['BuildReportHTMLContent'](arg1);
 }
 
+export function BuildSessionHTML(arg1) {
+  return window['go']['main']['App']['BuildSessionHTML'](arg1);
+}
+
 export function BuildShareDoc(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildShareDoc'](arg1, arg2, arg3, arg4);
 }
@@ -120,6 +124,10 @@ export function DeleteTestCases(arg1) {
 
 export function Emit(arg1, arg2) {
   return window['go']['main']['App']['Emit'](arg1, arg2);
+}
+
+export function ExportAgentSession(arg1, arg2) {
+  return window['go']['main']['App']['ExportAgentSession'](arg1, arg2);
 }
 
 export function ExportCapturedOpenAPI(arg1, arg2) {
@@ -426,6 +434,10 @@ export function RenameAgentSession(arg1, arg2) {
   return window['go']['main']['App']['RenameAgentSession'](arg1, arg2);
 }
 
+export function ResetWebChatToken() {
+  return window['go']['main']['App']['ResetWebChatToken']();
+}
+
 export function RunAgent(arg1) {
   return window['go']['main']['App']['RunAgent'](arg1);
 }
@@ -594,6 +606,10 @@ export function StartSyncServer() {
   return window['go']['main']['App']['StartSyncServer']();
 }
 
+export function StartWebChat(arg1) {
+  return window['go']['main']['App']['StartWebChat'](arg1);
+}
+
 export function StopCaptureServer() {
   return window['go']['main']['App']['StopCaptureServer']();
 }
@@ -612,6 +628,10 @@ export function StopShareServer() {
 
 export function StopSyncServer() {
   return window['go']['main']['App']['StopSyncServer']();
+}
+
+export function StopWebChat() {
+  return window['go']['main']['App']['StopWebChat']();
 }
 
 export function Store() {
@@ -648,6 +668,10 @@ export function ToolHash(arg1, arg2) {
 
 export function ToolHmac(arg1, arg2, arg3) {
   return window['go']['main']['App']['ToolHmac'](arg1, arg2, arg3);
+}
+
+export function WebChatInfo() {
+  return window['go']['main']['App']['WebChatInfo']();
 }
 
 export function WindowCenter() {
