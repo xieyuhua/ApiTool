@@ -28,8 +28,23 @@ const settingsVisible = ref(false)
 const logsVisible = ref(false)
 const webChatVisible = ref(false)
 const exporting = ref(false)   // 导出中（避免重复点击）
+const ssOpen = ref(false)      // 小屏下会话抽屉是否展开（桌面端恒为 false，样式保证不生效）
+const isNarrow = ref(false)    // 窄屏（≤820px，移动端）标记：顶栏折叠为「⋯」、简化输入提示
 const showThinkMap = reactive({})  // 消息级思考展开
 const bodyRef = ref(null)
+
+// 窄屏判定：与样式中的 @media (max-width: 820px) 保持一致
+function updateNarrow() { isNarrow.value = window.innerWidth <= 820 }
+
+// 窄屏「⋯」菜单命令分发（桌面端按钮直显，无需此路径）
+function onNarrowCommand(cmd) {
+  if (cmd === 'export-pdf') exportSession(activeSession.value, 'pdf')
+  else if (cmd === 'export-html') exportSession(activeSession.value, 'html')
+  else if (cmd === 'webchat') webChatVisible.value = true
+  else if (cmd === 'logs') logsVisible.value = true
+  else if (cmd === 'settings') settingsVisible.value = true
+  else if (cmd === 'clear') clearChat()
+}
 
 // 实时运行态（当前轮次的临时展示）
 const live = reactive({ thinking: '', content: '', steps: [] })
@@ -184,12 +199,13 @@ async function createSession() {
 }
 
 async function switchSession(id) {
-  if (id === activeSession.value) return
+  if (id === activeSession.value) { ssOpen.value = false; return }
   try {
     await AgentAPI.switchSession(id)
     activeSession.value = id
     loadActiveMessages()
     await scrollBottom()
+    ssOpen.value = false   // 小屏：切换后自动收起抽屉
   } catch (e) { ElMessage.error(String(e)) }
 }
 
@@ -279,17 +295,30 @@ function keydown(e) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send() }
 }
 
-onMounted(() => { loadAll(); bindEvents() })
-onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(streamRAF) })
+onMounted(() => {
+  loadAll(); bindEvents()
+  updateNarrow()
+  window.addEventListener('resize', updateNarrow)
+})
+onBeforeUnmount(() => {
+  unbindEvents()
+  if (streamRAF) cancelAnimationFrame(streamRAF)
+  window.removeEventListener('resize', updateNarrow)
+})
 </script>
 
 <template>
   <div class="agent-wrap">
-    <!-- 会话侧边栏 -->
-    <div class="session-sidebar">
+    <!-- 小屏会话抽屉遮罩 -->
+    <div v-if="ssOpen" class="ss-mask" @click="ssOpen = false"></div>
+    <!-- 会话侧边栏（小屏变抽屉，见文末响应式样式） -->
+    <div class="session-sidebar" :class="{ open: ssOpen }">
       <div class="ss-head">
         <span class="ss-title">会话</span>
-        <el-button size="small" circle @click="createSession" title="新建会话">＋</el-button>
+        <div class="ss-head-ops">
+          <el-button size="small" circle @click="createSession" title="新建会话">＋</el-button>
+          <span class="ss-close" title="关闭" @click="ssOpen = false">✕</span>
+        </div>
       </div>
       <div class="ss-list">
         <div
@@ -323,6 +352,7 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
     <!-- 顶栏 -->
     <div class="agent-bar">
       <div class="left">
+        <span class="ss-toggle" title="会话列表" @click="ssOpen = !ssOpen">☰</span>
         <span class="brand">🤖 AI Agent</span>
         <el-tag size="small" :type="config.mode === 'plan' ? 'warning' : 'success'" @click="toggleMode" class="mode-tag">
           {{ config.mode === 'plan' ? 'Plan 模式' : 'ReAct 模式' }}
@@ -331,6 +361,7 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
         <el-tag v-if="currentUserName" size="small" type="info">👤 {{ currentUserName }}</el-tag>
       </div>
       <div class="right">
+        <template v-if="!isNarrow">
         <el-dropdown trigger="click" @command="f => exportSession(activeSession, f)">
           <el-button size="small" text :loading="exporting">📤 导出</el-button>
           <template #dropdown>
@@ -344,6 +375,21 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
         <el-button size="small" text @click="logsVisible = true">📊 日志</el-button>
         <el-button size="small" text @click="settingsVisible = true">⚙ 设置</el-button>
         <el-button size="small" text @click="clearChat">🗑 清空</el-button>
+        </template>
+        <!-- 窄屏：全部收进「⋯」，避免顶栏换行挤掉按钮 -->
+        <el-dropdown v-else trigger="click" @command="onNarrowCommand">
+          <el-button size="small" text :loading="exporting">⋯</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="export-pdf">📄 导出为 PDF</el-dropdown-item>
+              <el-dropdown-item command="export-html">📄 导出为 HTML</el-dropdown-item>
+              <el-dropdown-item command="webchat" divided>📱 局域网访问</el-dropdown-item>
+              <el-dropdown-item command="logs">📊 日志</el-dropdown-item>
+              <el-dropdown-item command="settings">⚙ 设置</el-dropdown-item>
+              <el-dropdown-item command="clear" divided>🗑 清空会话</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -398,8 +444,8 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
 
     <!-- 输入区 -->
     <div class="agent-input">
-      <el-input v-model="input" type="textarea" :rows="3" resize="none"
-        placeholder="输入你的需求，Ctrl+Enter 发送。可切换 ReAct/Plan，支持 MCP 工具与技能调用。" @keydown="keydown" />
+      <el-input v-model="input" type="textarea" :rows="isNarrow ? 2 : 3" resize="none"
+        :placeholder="isNarrow ? '输入你的需求…' : '输入你的需求，Ctrl+Enter 发送。可切换 ReAct/Plan，支持 MCP 工具与技能调用。'" @keydown="keydown" />
       <div class="input-actions">
         <div class="left-acts">
           <el-button size="small" text @click="toggleMode" title="切换 ReAct / Plan">
@@ -512,4 +558,67 @@ onBeforeUnmount(() => { unbindEvents(); if (streamRAF) cancelAnimationFrame(stre
 
 /* 主区域铺满剩余空间 */
 .agent-main { flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+
+/* ==========================================================================
+   移动端响应式（局域网 Agent 网页）
+   桌面端窗口最小 1080px，以下规则只在窄屏生效，桌面端布局与行为完全不变。
+   ========================================================================== */
+
+/* 会话抽屉开关与遮罩：宽屏隐藏 */
+.ss-toggle, .ss-close, .ss-mask { display: none; }
+
+@media (max-width: 820px) {
+  .agent-wrap { flex-direction: row; }
+  .agent-main { height: 100dvh; }
+
+  /* 会话侧栏 → 左侧抽屉 */
+  .session-sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; z-index: 1200;
+    width: 78vw; max-width: 300px; height: 100dvh;
+    transform: translateX(-102%); transition: transform .22s ease;
+    box-shadow: 2px 0 16px rgba(0,0,0,.18); padding-top: env(safe-area-inset-top);
+  }
+  .session-sidebar.open { transform: translateX(0); }
+  .ss-mask { display: block; position: fixed; inset: 0; z-index: 1100; background: rgba(0,0,0,.38); }
+  .ss-toggle { display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 8px; font-size: 17px;
+    background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; flex-shrink: 0; }
+  .ss-toggle:active { background: var(--el-color-primary-light-9); }
+  .ss-close { display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 6px; font-size: 14px; color: var(--text-muted); cursor: pointer; }
+  .ss-head-ops { display: flex; align-items: center; gap: 6px; }
+
+  /* 会话项在小屏常显操作按钮（无 hover） */
+  .ss-item-ops { opacity: 1; }
+  .ss-op { font-size: 15px; padding: 4px 6px; border-radius: 6px; }
+  .ss-op:active { background: var(--surface-2); }
+
+  /* 顶栏压缩 */
+  .agent-bar { padding: 6px 10px; gap: 6px; flex-wrap: nowrap; }
+  .agent-bar .left { gap: 6px; flex-wrap: nowrap; min-width: 0; }
+  .agent-bar .right { gap: 2px; flex-shrink: 0; }
+  .agent-bar :deep(.mode-tag) { flex-shrink: 0; }
+  .brand { font-size: 13px; }
+  .stat { display: none; }             /* 技能/MCP/上下文等统计在窄屏隐藏 */
+  .agent-bar :deep(.el-button) { padding: 6px 6px; font-size: 12px; }
+
+  /* 对话区 */
+  .agent-body { padding: 12px 10px; }
+  .msg { gap: 6px; margin-bottom: 14px; }
+  .avatar { width: 26px; height: 26px; font-size: 14px; }
+  .bubble { max-width: calc(100% - 32px); padding: 9px 11px; border-radius: 10px; }
+  .think-content { font-size: 12px; max-height: 40vh; overflow: auto; }
+  .md-body :deep(.md-pre) { font-size: 12px; padding: 8px; }
+  /* 表格 / 代码块在窄屏横向滚动，避免撑破布局 */
+  .md-body :deep(.md-table) { display: block; overflow-x: auto; white-space: nowrap; }
+  .md-body :deep(.md-mermaid) { overflow-x: auto; }
+
+  /* 输入区：适配刘海屏底部手势条 */
+  .agent-input { padding: 8px 10px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .input-actions { margin-top: 6px; }
+  .welcome { margin-top: 18vh; }
+  .wc-icon { font-size: 40px; }
+  .wc-title { font-size: 17px; }
+  .wc-sub { font-size: 12px; padding: 0 12px; }
+}
 </style>

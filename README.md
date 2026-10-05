@@ -448,25 +448,55 @@ Agent 内置 4 个**数据分析模板技能**（在「设置 → Agent → 技�
 
 > **为什么之前「说分析销售却不调工具」**：默认系统提示词对数据库分析的引导较弱，模型容易直接用文字作答。现已强化「数据分析请求强制流程」——凡涉及具体数据/统计/分析，必须**先 `db_schema` 探结构、再 `db_query` 取数、最后基于真实数据解读**，并配合上述模板技能引导，模型会主动且可见地调用工具。
 
-### 13.8 局域网访问（手机 / 其他电脑直接对话）
+### 13.8 局域网访问（手机 / 其他电脑远程对话）
 
-点击 Agent 页顶栏 **「📱 局域网」**，开启后本机会启动一个仅局域网可访问的网页服务，
+点击 Agent 页顶栏 **「📱 局域网」**，开启后本机启动一个仅局域网可访问的网页服务。
 手机、平板或另一台电脑用浏览器打开带令牌的地址，就能远程与 AI Agent 对话。
 
 - **访问地址**：`http://<本机局域网IP>:<端口>/?token=<令牌>`（默认端口 `8090`，可改；被占用时换个端口即可）。
-- **自动记住所址**：首次带 `token` 打开后会校验令牌并写入该浏览器的 Cookie，然后**重定向到不带 token 的干净地址**，
-  之后直接访问 `http://<局域网IP>:<端口>/` 即可，令牌不会长期残留在地址栏与浏览器历史里。
-- **网页端能力**（与桌面端同一份数据、同一套工具）：
-  - 完整对话：提问、看思考过程与工具/技能调用明细（入参、返回、错误）、Markdown 表格与图表；
-  - 会话管理：顶部下拉切换会话、＋新建、「⋯」重命名 / 清空 / 删除；
-  - **双向实时共享**：网页端提问，桌面端刷新即可看到；桌面端提问，网页端 4 秒内自动同步（含工具执行过程与 Token 统计）。
-- **安全**：Agent 具备**文件读写、执行命令、数据库查询**能力，因此**必须凭令牌访问**——没有任何令牌时接口返回 401、页面显示「需要有效的访问链接」。
-  点击「重置令牌」可让已分发出去的旧链接**立即失效**。请只在可信局域网内分享，切勿转发到公网。
+- **界面与功能完全一致**：多会话侧栏、流式打字机、思考过程折叠、工具/技能调用卡片（入参 / 返回 / 错误）、
+  Markdown 表格与图表、ReAct/Plan 切换、AI 润色、Token 统计、Agent 设置面板、日志面板……
+  因为网页端**直接复用桌面端的 `AgentChat.vue` 组件**（不是另写一套页面），后续桌面端改 UI，网页端同步生效。
+- **只做 Agent 这一件事**：网页端**只有 Agent 对话界面**，不提供主应用的其它页面
+  （接口调试 / 文档中心 / 测试中心 / 抓包 / 工具 / 设置均不存在，访问即 404）。
+- **移动端优先的响应式**（面向手机/平板，桌面浏览器打开也正常）：
+  - 会话侧栏在窄屏变为**左侧抽屉**，点顶栏 `☰` 展开、点遮罩或切换会话后自动收起；
+  - 顶栏按钮在窄屏收进 **`⋯` 菜单**（导出 / 局域网 / 日志 / 设置 / 清空），避免挤成两行；
+  - 气泡自适应全宽、头像缩小、表格与代码块横向滚动，输入区适配刘海屏手势条（`safe-area`）；
+  - 弹窗（设置 / 日志 / 局域网）近乎满屏、输入框字号 ≥16px（避免 iOS 聚焦时自动放大）、
+    按钮满足手指点击尺寸；顶栏统计信息在窄屏隐藏。
+  - 以上均在 `AgentChat.vue` 的 `@media (max-width: 820px)` 与 `frontend/src/agent-mobile.css`
+    （仅网页端引入）中实现，**桌面端布局与行为完全不受影响**。
+- **实时双向同步**：网页端与桌面端操作**同一份会话数据**，流式输出、思考过程、工具卡片通过事件流实时推送，
+  两边同时打开时看到的过程完全同步（无需手动刷新）。
+- **数据最小化**：网页端启动只取「设置（AI 接口配置）+ 数据库连接列表」，
+  **不加载**接口文档、测试用例等业务数据。
+- **自动记住所址**：首次带 `token` 打开会校验令牌并写入 Cookie，然后**重定向到不带 token 的干净地址**，
+  之后直接访问 `http://<局域网IP>:<端口>/` 即可，令牌不会残留在地址栏与浏览器历史里。
+- **安全**：Agent 具备**文件读写、执行命令、数据库查询**能力，因此**必须凭令牌访问**——无令牌时接口返回 401、
+  页面显示「需要有效的访问链接」。点击「重置令牌」可让已分发的旧链接**立即失效**。请只在可信局域网内分享。
 - **端口打不开时**：检查 Windows 防火墙是否弹窗放行了该端口（首次开启会询问，勾选「专用网络」即可）。
+- **网页端的限制**（仅这几项依赖桌面窗口，界面会给出明确提示，其余功能不受影响）：
+  系统保存 / 打开文件对话框、剪贴板读写（改用浏览器剪贴板）、托盘与窗口控制（置顶 / 隐藏 / 退出）。
 
-内部实现：`internal/agent/webchat.go`（HTTP 服务、令牌鉴权、接口）+ `internal/agent/webchat_page.html`（单文件页面，随二进制内嵌），
-沿用项目既有的局域网服务范式（`internal/share`、`internal/capture`）；`util.LocalIP()` 会自动挑选私有网段地址并跳过虚拟网卡，
-避免生成手机连不上的 `169.254.x.x` 地址。
+#### 实现方式（为什么能"一模一样"）
+
+不是维护两套页面，而是**让同一套组件换个入口 + 换条 IPC 通道**：
+
+| 桌面端（Wails） | 局域网网页端 |
+| --- | --- |
+| 入口 `index.html` → 挂载 `App.vue`（导航 + 全部模块） | 入口 `agent.html` → **只挂载 `AgentChat.vue`**（Vite 多页构建） |
+| `frontend/dist` 由 Wails AssetServer 加载 | 由内嵌 HTTP 服务托管（`go:embed`，只取 `agent.html` 与 `/assets/*`） |
+| `window.go.main.App.X(args)` 走 WebSocket RPC | 走 `POST /rpc/{Method}`（Go 反射调用 `App` 的导出方法） |
+| `window.runtime.EventsOn*` 走 WebSocket 推送 | 走 `SSE /events`（`App.Emit` 同时广播给网页端） |
+| 系统对话框 / 窗口控制 | 前端本地实现或返回明确提示 |
+
+因此**界面与交互完全复用**，而数据与页面范围被严格限制在 Agent 之内。
+
+涉及文件：`frontend/agent.html` + `frontend/src/agent-main.js`（独立入口）、
+`webui.go`（只托管 Agent 页 + RPC 桥 + 事件流）、`internal/agent/webchat.go`（服务、令牌、对话互斥）、
+`frontend/src/httpBridge.js`（Wails 兼容桥接）、`app.go` 的 `GetAgentBootstrap`（最小数据集）。
+`util.LocalIP()` 会自动挑选私有网段并跳过虚拟网卡，避免生成手机连不上的 `169.254.x.x` 地址。
 
 
 ---
@@ -872,6 +902,15 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1                # 前端 + �
 powershell -ExecutionPolicy Bypass -File .\build.ps1 -SkipFrontend  # 仅改后端时，秒级出包
 ```
 
+> ⚠️ **`vendor/` 被 `.gitignore` 忽略，且 `go mod vendor` 会先删除旧 vendor 再重建**——
+> 网络中断时它会把 vendor 删掉却建不回来，而 git 里没有副本，只能靠模块缓存恢复：
+> ```powershell
+> $env:GOFLAGS="-mod=mod"; $env:GOPROXY="off"; go mod vendor   # 完全离线，用 module cache 重建
+> ```
+> 重建后 `go build ./...`（vendor 模式）即可正常工作。**因此：网络不稳时不要执行 `go mod tidy` / `go mod vendor`**，
+> 确需同步依赖请先备份 `vendor\` 目录。另外 `go mod tidy` 对 vendored 项目本身就有害——
+> 它会重算 `go.mod` 的间接依赖，而 `vendor/modules.txt` 不含测试依赖，容易造成 *inconsistent vendoring*。
+
 **Q：桌面端仍然报 `reading 'main'` 错误？**
 A：说明 Wails 桥接未正确注入。请确认用 `wails build` / `wails dev` 启动，而非直接打开
 `npm run build` 产出的 `dist`。如仍异常，尝试删除 `frontend/dist` 与 `build/bin` 后重新 `wails build`。
@@ -885,6 +924,7 @@ apitool/
 ├── main.go                # Wails 应用入口
 ├── build.ps1              # 一键构建（vendor 离线模式，产物 build/bin/apitool.exe）
 ├── app.go                 # App 结构体：嵌入各内部模块，暴露 Wails 绑定（数据读写、剪贴板、升级检测等）
+├── webui.go               # 局域网 Agent 网页：只托管 agent.html + /rpc 反射桥 + /events 事件流(SSE)
 ├── tray.go                # 系统托盘菜单（含「剪贴板历史…」入口）
 ├── internal/              # 业务逻辑（不再平铺于根目录）
 │   ├── model/             # 数据模型（AppData、项目/接口/环境/用例/计划/报告/设置/插件/剪贴板等）
@@ -914,6 +954,9 @@ apitool/
     └── src/
         ├── App.vue
         ├── store.js       # 全局状态（含剪贴板历史加载/复制/删除）
+        ├── httpBridge.js  # 局域网 Agent 网页的 Wails 兼容桥（window.go / window.runtime over HTTP+SSE）
+        ├── agent-main.js  # 局域网 Agent 对话页入口（只挂载 AgentChat，独立于主应用）
+        ├── agent-mobile.css # 移动端适配（仅网页端引入：弹窗满屏、输入框字号、触摸优化等）
         ├── main.js / script.js / cli.js / style.css
         └── components/    # 按功能分组的组件
             ├── clipboard/   # 剪贴板历史相关

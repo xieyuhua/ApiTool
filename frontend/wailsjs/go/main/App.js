@@ -50,6 +50,10 @@ export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
+export function CheckWebToken(arg1) {
+  return window['go']['main']['App']['CheckWebToken'](arg1);
+}
+
 export function ClearAgentLogs() {
   return window['go']['main']['App']['ClearAgentLogs']();
 }
@@ -172,6 +176,10 @@ export function GenerateTestCasesAsync(arg1) {
 
 export function GenerateTestCasesForApis(arg1) {
   return window['go']['main']['App']['GenerateTestCasesForApis'](arg1);
+}
+
+export function GetAgentBootstrap() {
+  return window['go']['main']['App']['GetAgentBootstrap']();
 }
 
 export function GetBuiltinTools() {
@@ -430,6 +438,10 @@ export function RefreshShareDoc(arg1, arg2, arg3) {
   return window['go']['main']['App']['RefreshShareDoc'](arg1, arg2, arg3);
 }
 
+export function RegisterWebUI(arg1) {
+  return window['go']['main']['App']['RegisterWebUI'](arg1);
+}
+
 export function RenameAgentSession(arg1, arg2) {
   return window['go']['main']['App']['RenameAgentSession'](arg1, arg2);
 }
@@ -672,6 +684,14 @@ export function ToolHmac(arg1, arg2, arg3) {
 
 export function WebChatInfo() {
   return window['go']['main']['App']['WebChatInfo']();
+}
+
+export function WebReleaseBusy() {
+  return window['go']['main']['App']['WebReleaseBusy']();
+}
+
+export function WebTryBusy() {
+  return window['go']['main']['App']['WebTryBusy']();
 }
 
 export function WindowCenter() {

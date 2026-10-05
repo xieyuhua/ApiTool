@@ -421,6 +421,22 @@ async function loadInto() {
   captureSnapshots() // 基线快照 = 已加载（=已保存）的数据，文档预览从此开始即为保存态
 }
 
+// 局域网「Agent 对话网页」的初始化：只取 Agent 需要的最小数据集
+// （全局设置 + 数据库连接列表），不加载接口文档 / 测试用例等业务数据。
+// 主题等全局行为由调用方（agent-main.js）随后套用 applyScheme()。
+export async function initAgentWebStore() {
+  try {
+    const d = await window.go.main.App.GetAgentBootstrap()
+    if (d && d.settings) store.data.settings = { ...store.data.settings, ...d.settings }
+    if (d && d.connections) store.data.plugins = { ...store.data.plugins, connections: d.connections }
+  } catch (e) {
+    console.error('加载 Agent 设置失败', e)
+  }
+  store.loaded = true
+}
+
+// Note: initStore（桌面端）比这个重得多 — it pulls the whole AppData and installs
+// the save/auto-sync watchers. The web entry must NOT call it.
 export async function initStore() {
   store.loading = true
   const ok = await waitForGo()

@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -45,6 +46,7 @@ type App struct {
 	syncDir         string
 	sniffMgr        *sniff.Manager // MITM 抓包管理器
 	mu              sync.Mutex
+	ctxReady        atomic.Bool // Wails 生命周期 ctx 是否已就绪（未就绪时调用 runtime.* 会终止进程）
 	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
 	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
 	quitting        bool // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
@@ -82,6 +84,7 @@ const DefaultUpdateURL = "http://127.0.0.1" + syncsrv.DefaultSyncAddr
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.ctxReady.Store(true)
 	// 数据目录使用「程序可执行文件所在目录」下的 apitool 子目录，
 	// 便于随程序整体迁移/打包，不再依赖系统用户配置目录（%APPDATA% 等）。
 	dir := "."
@@ -99,6 +102,8 @@ func (a *App) startup(ctx context.Context) {
 	a.Engine = testing.NewEngine(a, ctx)
 	// 初始化通用工具服务（Hash/HMAC/Cipher），嵌入 App 供 Wails 绑定
 	a.Service = &tool.Service{}
+	// 注册局域网 Web UI（复用本份前端 + HTTP/SSE 桥），使手机/其他电脑打开网页即与桌面端一致
+	a.RegisterWebUI(a.webUIHandler())
 	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
 	if _, err := os.Stat(a.dataFile); err != nil {
 		_ = a.SaveData(a.store.GetData())
@@ -141,7 +146,7 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 	if a.clipWinVisible {
 		a.clipWinVisible = false
 		a.WindowSetAlwaysOnTop(false)
-		runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
+		a.Emit("apitool:hide-clipboard-history")
 	}
 	a.WindowHide()
 	a.windowVisible = false
@@ -166,6 +171,17 @@ func (a *App) readData() model.AppData {
 // LoadData 加载全部数据（上次保存的接口信息）
 func (a *App) LoadData() model.AppData {
 	return a.readData()
+}
+
+// GetAgentBootstrap 返回局域网「Agent 对话网页」启动所需的**最小**数据集：
+// 仅全局设置（AI 接口配置等）与数据库连接列表，供 Agent 的模型/插件设置使用。
+// 刻意不返回接口文档、测试用例等业务数据——网页端只需要能对话。
+func (a *App) GetAgentBootstrap() map[string]interface{} {
+	d := a.store.GetData()
+	return map[string]interface{}{
+		"settings":    d.Settings,
+		"connections": d.Plugins.Connections,
+	}
 }
 
 // ParseFields 将 JSON 文本解析为字段树（转发到 jsonutil）
@@ -440,7 +456,15 @@ func atoiSafe(s string) int {
 var _ bus.Bus = (*App)(nil)
 
 // Emit 向前端发送事件。
+// 除桌面窗口（Wails WebView）外，同时推送给局域网网页端（SSE），
+// 使手机/其他电脑打开的网页与桌面端看到完全相同的实时过程。
 func (a *App) Emit(event string, data ...interface{}) {
+	// 局域网网页端不依赖 Wails 上下文，始终可推送
+	webBroadcast(event, data...)
+	// 桌面窗口：生命周期 ctx 未就绪时跳过（Wails 对无效 ctx 会直接终止进程）
+	if !a.ctxReady.Load() {
+		return
+	}
 	runtime.EventsEmit(a.ctx, event, data...)
 }
 
@@ -1042,7 +1066,7 @@ func (a *App) SaveClipImage(pngData []byte, w, h int, sig string) error {
 
 // NotifyUpdated 通知前端剪贴板历史已更新（ClipSink 回调）。
 func (a *App) NotifyUpdated() {
-	runtime.EventsEmit(a.ctx, "apitool:clipboard-updated")
+	a.Emit("apitool:clipboard-updated")
 }
 
 // pushClip 将条目插入历史最前，并按上限裁剪（上限来自设置）。
@@ -1158,14 +1182,14 @@ func (a *App) ShowClipboardWindow() {
 	a.WindowUnminimise()
 	a.WindowSetAlwaysOnTop(true)
 	a.WindowCenter()
-	runtime.EventsEmit(a.ctx, "apitool:show-clipboard-history")
+	a.Emit("apitool:show-clipboard-history")
 }
 
 // CloseClipboardWindow 关闭剪贴板历史浮层（取消置顶并隐藏窗口回托盘）。
 func (a *App) CloseClipboardWindow() {
 	a.clipWinVisible = false
 	a.WindowSetAlwaysOnTop(false)
-	runtime.EventsEmit(a.ctx, "apitool:hide-clipboard-history")
+	a.Emit("apitool:hide-clipboard-history")
 	a.WindowHide()
 }
 
