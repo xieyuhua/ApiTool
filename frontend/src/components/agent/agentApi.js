@@ -30,6 +30,8 @@ export const AgentAPI = {
   testServer(srv) { return app().TestMCPServer(srv) },
   queryLogs(args) { return app().QueryAgentLogs(args) },
   clearLogs() { return app().ClearAgentLogs() },
+  getAgentLog(id) { return app().GetAgentLog(id) },
+  logFacets() { return app().GetAgentLogFacets() },
 }
 
 export function hasBridge() {

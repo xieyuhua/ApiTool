@@ -78,6 +78,7 @@ export namespace agent {
 	    maxLoops: number;
 	    contextLimit: number;
 	    showThinking: boolean;
+	    showUsage: boolean;
 	    enablePolish: boolean;
 	    enableChart: boolean;
 	    enableDBAnalysis: boolean;
@@ -103,6 +104,7 @@ export namespace agent {
 	        this.maxLoops = source["maxLoops"];
 	        this.contextLimit = source["contextLimit"];
 	        this.showThinking = source["showThinking"];
+	        this.showUsage = source["showUsage"];
 	        this.enablePolish = source["enablePolish"];
 	        this.enableChart = source["enableChart"];
 	        this.enableDBAnalysis = source["enableDBAnalysis"];
@@ -144,6 +146,7 @@ export namespace agent {
 	    category: string;
 	    title: string;
 	    detail: string;
+	    summary?: string;
 	    durationMs: number;
 	    userId: string;
 	
@@ -160,6 +163,7 @@ export namespace agent {
 	        this.category = source["category"];
 	        this.title = source["title"];
 	        this.detail = source["detail"];
+	        this.summary = source["summary"];
 	        this.durationMs = source["durationMs"];
 	        this.userId = source["userId"];
 	    }
@@ -209,6 +213,7 @@ export namespace agent {
 	    thinking?: string;
 	    steps?: AgentStep[];
 	    time: string;
+	    usage?: TokenUsage;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentMsg(source);
@@ -222,6 +227,7 @@ export namespace agent {
 	        this.thinking = source["thinking"];
 	        this.steps = this.convertValues(source["steps"], AgentStep);
 	        this.time = source["time"];
+	        this.usage = this.convertValues(source["usage"], TokenUsage);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -427,6 +433,7 @@ export namespace agent {
 	    level: string;
 	    category: string;
 	    limit: number;
+	    withDetail: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueryAgentLogsArgs(source);
@@ -438,6 +445,7 @@ export namespace agent {
 	        this.level = source["level"];
 	        this.category = source["category"];
 	        this.limit = source["limit"];
+	        this.withDetail = source["withDetail"];
 	    }
 	}
 	export class RunAgentArgs {

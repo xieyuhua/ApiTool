@@ -25,13 +25,41 @@ const cats = [
 async function reload() {
   loading.value = true
   try {
-    logs.value = await AgentAPI.queryLogs({ keyword: keyword.value, level: level.value, category: category.value, limit: 500 }) || []
+    logs.value = await AgentAPI.queryLogs({ keyword: keyword.value, level: level.value, category: category.value, limit: 500, withDetail: false }) || []
   } catch (e) {
     ElMessage.error(String(e))
   } finally { loading.value = false }
 }
 
-function toggle(id) { expanded.value[id] = !expanded.value[id] }
+// 详情按需加载：列表接口不返回 detail（可能很长），点开时再取完整内容
+const details = reactive({})
+const loadingDetail = reactive({})
+
+function toggle(id) {
+  expanded.value[id] = !expanded.value[id]
+  if (expanded.value[id] && details.value[id] === undefined) {
+    loadingDetail.value[id] = true
+    AgentAPI.getAgentLog(id).then(l => {
+      details.value[id] = l && l.detail ? l.detail : '(无详情)'
+    }).catch(e => {
+      details.value[id] = '加载失败：' + String(e)
+    }).finally(() => { loadingDetail.value[id] = false })
+  }
+}
+
+// 复制单条日志的完整详情（便于贴到别处分析）
+async function copyDetail(l, ev) {
+  if (ev) ev.stopPropagation()
+  try {
+    if (details.value[l.id] === undefined) await toggle(l.id)
+    const text = details.value[l.id] || l.detail
+    if (!text) { ElMessage.warning('该条没有可复制的详情'); return }
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制完整详情')
+  } catch (e) {
+    ElMessage.error('复制失败，请手动选中复制')
+  }
+}
 
 async function clearAll() {
   try {
@@ -79,7 +107,16 @@ function levelClass(l) { return 'lv lv-' + l }
           <span class="dur" v-if="l.durationMs">{{ l.durationMs }}ms</span>
           <span class="time">{{ l.time }}</span>
         </div>
-        <pre v-if="expanded[l.id] && l.detail" class="detail">{{ l.detail }}</pre>
+        <div v-if="expanded[l.id]" class="detail-wrap">
+          <div class="detail-bar">
+            <span class="detail-tip">{{ loadingDetail[l.id] ? '正在加载完整内容…' : '完整内容' }}</span>
+            <span class="detail-ops" @click.stop>
+              <el-button size="small" text type="primary" @click="copyDetail(l, $event)">复制</el-button>
+              <el-button size="small" text @click="expanded[l.id] = false">收起</el-button>
+            </span>
+          </div>
+          <pre class="detail">{{ loadingDetail[l.id] ? '加载中…' : (details[l.id] !== undefined ? details[l.id] : l.detail) }}</pre>
+        </div>
       </div>
     </div>
   </el-drawer>
@@ -103,5 +140,16 @@ function levelClass(l) { return 'lv lv-' + l }
 .lv-tool { background: #f59e0b; }
 .lv-plan { background: #6366f1; }
 .lv-error { background: #ef4444; }
-.detail { margin: 6px 0 0; padding: 8px; background: var(--surface-2); border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow: auto; }
+.detail-wrap { margin: 6px 0 2px; }
+.detail-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.detail-tip { font-size: 11px; color: var(--text-muted); }
+.detail-ops { display: flex; gap: 2px; }
+/* 完整内容可能很长（整份请求体），给足高度并支持双向滚动 */
+.detail {
+  margin: 0; padding: 10px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 12px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 60vh; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 </style>

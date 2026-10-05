@@ -182,6 +182,14 @@ export function GetAgentBootstrap() {
   return window['go']['main']['App']['GetAgentBootstrap']();
 }
 
+export function GetAgentLog(arg1) {
+  return window['go']['main']['App']['GetAgentLog'](arg1);
+}
+
+export function GetAgentLogFacets() {
+  return window['go']['main']['App']['GetAgentLogFacets']();
+}
+
 export function GetBuiltinTools() {
   return window['go']['main']['App']['GetBuiltinTools']();
 }

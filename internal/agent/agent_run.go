@@ -36,10 +36,10 @@ type RunAgentResult struct {
 	Usage    TokenUsage  `json:"usage"`
 }
 
-// llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
 // messagesLogText 把发往模型的请求消息序列化为可读文本，写入 request 级日志，
-// 便于在「日志」面板直接核对「到底把什么发给了模型」：系统提示词、历史上下文、
-// 本轮输入、以及工具结果回灌的内容都在内。单条与整体都做截断，避免超长提示词把日志撑爆。
+// 用于核对「到底把什么发给了模型」：系统提示词、历史上下文、本轮输入、
+// 工具结果回灌的内容全部原样保留，不做静默截断；仅在整体超过 logDetailHardLimit
+// （极端的超长工具结果）时才截断，并在末尾明确标注原始长度，避免"看着完整其实被截了"。
 func messagesLogText(msgs []ai.ChatMessage) string {
 	var sb strings.Builder
 	for i, m := range msgs {
@@ -52,17 +52,51 @@ func messagesLogText(msgs []ai.ChatMessage) string {
 		case "system":
 			label = "system（系统提示词）"
 		case "assistant":
-			label = "assistant（模型上一轮输出）"
+			label = "assistant（模型上一轮输出 / 工具调用）"
 		case "user":
 			label = "user（用户输入 / 工具结果回灌）"
 		}
-		sb.WriteString("── [" + strconv.Itoa(i+1) + "] " + label + " ──" + "\n")
-		sb.WriteString(util.Truncate(m.Content, 3000))
+		head := "【" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(msgs)) + "】" + label
+		sb.WriteString(head + "\n")
+		sb.WriteString(strings.Repeat("─", runeCount(head)+4) + "\n")
+		if strings.TrimSpace(m.Content) == "" {
+			sb.WriteString("(空内容)")
+		} else {
+			sb.WriteString(m.Content)
+		}
 		sb.WriteString("\n\n")
 	}
-	// 整体上限 12000 字符：既能看清上下文，又不会让单条日志过大
-	return util.Truncate(sb.String(), 12000)
+	out := sb.String()
+	if n := runeCount(out); n > logDetailHardLimit {
+		r := []rune(out)
+		out = string(r[:logDetailHardLimit]) +
+			"\n\n…（内容过长已截断，完整长度 " + strconv.Itoa(n) + " 字符）"
+	}
+	return out
 }
+
+// requestLogHeader 生成 request 日志的参数摘要行，让「完整请求」具备上下文。
+func requestLogHeader(model string, temperature float64, maxTokens int, stream bool, msgCount int) string {
+	mt := "模型默认"
+	if maxTokens > 0 {
+		mt = strconv.Itoa(maxTokens)
+	}
+	streamTxt := "否"
+	if stream {
+		streamTxt = "是"
+	}
+	head := "请求参数　model=" + model +
+		"　temperature=" + strconv.FormatFloat(temperature, 'f', -1, 64) +
+		"　max_tokens=" + mt +
+		"　stream=" + streamTxt +
+		"　消息数=" + strconv.Itoa(msgCount) +
+		"　总字符=" + "见下方正文"
+	return head + "\n" + strings.Repeat("═", 60) + "\n\n"
+}
+// runeCount 按 Unicode 字符数统计（避免中文按字节被算成两倍）。
+func runeCount(s string) int { return len([]rune(s)) }
+
+// llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
 func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, maxTokens int) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
@@ -94,7 +128,7 @@ func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperat
 	req.Header.Set("Authorization", "Bearer "+args.APIKey)
 
 	start := time.Now()
-	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: "模型: " + model + "  消息数: " + fmt.Sprint(len(messages)) + "\n\n" + messagesLogText(messages)})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 请求: " + tag, Detail: requestLogHeader(model, temperature, maxTokens, false, len(messages)) + messagesLogText(messages)})
 	resp, err := client.Do(req)
 	if err != nil {
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 请求失败: " + tag, Detail: err.Error()})
@@ -167,7 +201,7 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 	req.Header.Set("Accept", "text/event-stream")
 
 	start := time.Now()
-	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: "模型: " + model + "  消息数: " + fmt.Sprint(len(messages)) + "\n\n" + messagesLogText(messages)})
+	m.appendLog(AgentLog{Level: "request", Category: "llm", Title: "LLM 流式请求: " + tag, Detail: requestLogHeader(model, temperature, args.MaxTokens, true, len(messages)) + messagesLogText(messages)})
 	resp, err := client.Do(req)
 	if err != nil {
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式请求失败: " + tag, Detail: err.Error()})
@@ -1031,7 +1065,9 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	}
 	sess.Messages = append(sess.Messages,
 		AgentMsg{ID: agentID("msg"), Role: "user", Content: args.Input, Time: now},
-		AgentMsg{ID: agentID("msg"), Role: "assistant", Content: result.Content, Thinking: result.Thinking, Steps: result.Steps, Time: now},
+		AgentMsg{ID: agentID("msg"), Role: "assistant", Content: result.Content, Thinking: result.Thinking, Steps: result.Steps, Time: now,
+			// 记录本轮消耗，供前端在气泡上展示「本次 token」
+			Usage: &TokenUsage{PromptTokens: accUsage.PromptTokens, CompletionTokens: accUsage.CompletionTokens, TotalTokens: accUsage.TotalTokens}},
 	)
 	if sess.Title == "" || sess.Title == "新会话" || sess.Title == "默认会话" {
 		sess.Title = util.Truncate(args.Input, 30)

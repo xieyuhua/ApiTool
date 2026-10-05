@@ -55,6 +55,17 @@ const currentUserName = computed(() => {
   return u ? u.name : ''
 })
 const enabledSkillCount = computed(() => skills.value.filter(s => s.enabled).length)
+// 是否在每条回复上显示该轮 token 消耗（设置里开关；旧数据无该字段时默认开启）
+const showUsage = computed(() => config.showUsage !== false)
+
+// token 明细（悬停提示）：输入 / 输出 / 合计
+function usageTitle(u) {
+  if (!u) return ''
+  return '本轮消耗　合计 ' + fmtTokens(u.totalTokens) + ' token' + '\n输入 ' + fmtTokens(u.promptTokens) + ' · 输出 ' + fmtTokens(u.completionTokens)
+}
+
+// 数字千分位，便于快速核对
+function fmtTokens(n) { return Number(n || 0).toLocaleString('zh-CN') }
 const enabledServerCount = computed(() => servers.value.filter(s => s.enabled).length)
 
 async function loadAll() {
@@ -155,19 +166,14 @@ async function send() {
       messages.value.push({
         id: 'a_' + Date.now(), role: 'assistant',
         content: res.content, thinking: res.thinking, steps: res.steps || [], time: nowStr(),
+        usage: res.usage || null,
       })
     }
     await nextTick(); renderMermaid(bodyRef.value)
     await scrollBottom()
     // 刷新会话列表（标题/更新时间）与全局 token 统计
     await refreshSessions()
-    if (res.usage) {
-      globalUsage.value = {
-        promptTokens: globalUsage.value.promptTokens + (res.usage.promptTokens || 0),
-        completionTokens: globalUsage.value.completionTokens + (res.usage.completionTokens || 0),
-        totalTokens: globalUsage.value.totalTokens + (res.usage.totalTokens || 0),
-      }
-    }
+
   } catch (e) {
     ElMessage.error(String(e))
     messages.value.push({ id: 'e_' + Date.now(), role: 'assistant', content: '⚠️ ' + String(e), time: nowStr() })
@@ -417,7 +423,10 @@ onBeforeUnmount(() => {
           </div>
           <!-- 正文（markdown + 图表） -->
           <div class="md-body" v-html="md(m.content)"></div>
-          <div class="msg-time">{{ m.time }}</div>
+          <div class="msg-foot">
+            <span class="msg-usage" v-if="showUsage && m.usage && m.usage.totalTokens" :title="usageTitle(m.usage)">🔢 {{ m.usage.totalTokens }} token</span>
+            <span class="msg-time">{{ m.time }}</span>
+          </div>
         </div>
       </div>
 
@@ -483,7 +492,13 @@ onBeforeUnmount(() => {
 .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
 .bubble { max-width: 78%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
 .role-user .bubble { background: var(--el-color-primary-light-9); }
-.msg-time { font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: right; }
+.msg-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.msg-usage {
+  font-size: 11px; color: var(--primary); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; cursor: help;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.msg-time { font-size: 11px; color: var(--text-muted); text-align: right; }
 
 .think-box { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; border-left: 3px solid #8b5cf6; }
 .think-head { font-size: 12px; color: #8b5cf6; cursor: pointer; display: flex; justify-content: space-between; }

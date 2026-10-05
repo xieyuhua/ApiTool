@@ -105,6 +105,10 @@ export function GenerateTestCasesForApis(arg1:Array<string>):Promise<Array<model
 
 export function GetAgentBootstrap():Promise<Record<string, any>>;
 
+export function GetAgentLog(arg1:string):Promise<agent.AgentLog>;
+
+export function GetAgentLogFacets():Promise<Record<string, Array<Record<string, any>>>>;
+
 export function GetBuiltinTools():Promise<Array<agent.BuiltinToolDef>>;
 
 export function GetCapturedRequests():Promise<Array<capture.CapturedRequest>>;

@@ -141,6 +141,7 @@ type AgentConfig struct {
 	MaxLoops       int    `json:"maxLoops"`       // agent loop 最大轮数
 	ContextLimit   int    `json:"contextLimit"`   // 加载最近多少条上下文记录
 	ShowThinking   bool   `json:"showThinking"`   // 输出思考过程
+	ShowUsage      bool   `json:"showUsage"`      // 在每条回复上显示该轮消耗的 token
 	EnablePolish   bool   `json:"enablePolish"`   // AI 润色
 	EnableChart    bool   `json:"enableChart"`    // 图表输出（mermaid）
 	EnableDBAnalysis bool `json:"enableDBAnalysis"` // 数据库连接分析（同步表结构 / 字段语义维护）
@@ -167,6 +168,8 @@ type AgentMsg struct {
 	Thinking string `json:"thinking,omitempty"` // 思考过程
 	Steps    []AgentStep `json:"steps,omitempty"` // 使用的 skill/tool
 	Time     string `json:"time"`
+	// Usage 本条 assistant 消息对应的那一轮消耗的 token（历史消息可能没有）。
+	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
 // TokenUsage 累计 token 消耗。
@@ -205,10 +208,15 @@ type AgentLog struct {
 	Category  string `json:"category"` // llm | mcp | agent | skill
 	Title     string `json:"title"`
 	Detail    string `json:"detail"`
+	// Summary 列表模式下的内容摘要（详情被清空时用于展示，也让关键词命中可见）
+	Summary   string `json:"summary,omitempty"`
 	DurationMs int64 `json:"durationMs"`
 	UserID    string `json:"userId"`
 }
 
+// logDetailHardLimit 单条日志详情的硬上限（字符）。正常请求远小于此；
+// 超过说明工具结果异常庞大，截断时会在正文末尾标注原始长度。
+const logDetailHardLimit = 200000
 // AgentData Agent 模块全部持久化数据（独立于主 data.json）。
 type AgentData struct {
 	Config         AgentConfig   `json:"config"`
@@ -585,6 +593,9 @@ func (m *Manager) SaveAgentConfig(cfg AgentConfig) error {
 	if cfg.ShowThinking {
 		d.Config.ShowThinking = cfg.ShowThinking
 	}
+	if cfg.ShowUsage {
+		d.Config.ShowUsage = cfg.ShowUsage
+	}
 	if cfg.EnablePolish {
 		d.Config.EnablePolish = cfg.EnablePolish
 	}
@@ -758,9 +769,13 @@ type QueryAgentLogsArgs struct {
 	Level    string `json:"level"`
 	Category string `json:"category"`
 	Limit    int    `json:"limit"`
+	// WithDetail 是否在列表里一并返回详情。默认 false：
+	// 单条请求内容可能很长（系统提示词 + 上下文 + 工具结果），500 条一起返回会拖垮界面，
+	// 因此列表只返回摘要，点击某条时再用 GetAgentLog 取完整详情。
+	WithDetail bool `json:"withDetail"`
 }
 
-// QueryAgentLogs 按关键词/级别/分类搜索日志，返回最新在前。
+// QueryAgentLogs 按关键词/级别/分类搜索日志，返回最新在前（默认不含详情）。
 func (m *Manager) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
 	d := m.readAgentData()
 	kw := strings.ToLower(strings.TrimSpace(args.Keyword))
@@ -780,7 +795,9 @@ func (m *Manager) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
 		}
 		out = append(out, l)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
+	// 稳定排序：一次对话常在同一毫秒内产生多条日志（info/request/response/tool），
+	// 用 Slice 会出现顺序随机跳动；SliceStable 保持写入顺序（新的在后 → 同毫秒时更晚的在前）
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
 	limit := args.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 500
@@ -788,7 +805,77 @@ func (m *Manager) QueryAgentLogs(args QueryAgentLogsArgs) []AgentLog {
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	if !args.WithDetail {
+		// 列表模式：详情清空（点开时再按需取全文），但保留一段摘要，
+		// 否则「按关键词搜到的日志」在列表里看不到任何内容线索，会误以为筛选没生效。
+		for i := range out {
+			out[i].Summary = logSummary(out[i].Detail)
+			out[i].Detail = ""
+		}
+	}
 	return out
+}
+
+// logSummary 取详情开头作为列表摘要（压掉参数行与分隔线）。
+func logSummary(detail string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(detail, "\r\n", "\n"))
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "请求参数") {
+		if i := strings.Index(s, "\n\n"); i > 0 {
+			s = strings.TrimSpace(s[i+2:])
+		}
+	}
+	if n := len([]rune(s)); n > 160 {
+		return strings.Join(strings.Fields(string([]rune(s)[:160])), " ") + "…"
+	}
+	return s
+}
+
+// GetAgentLogFacets 返回当前日志中实际存在的级别与分类（含条数）。
+// 前端据此动态生成筛选项，避免出现「选项存在但永远查不到数据」的情况
+// （例如历史上提供的 plan 级别、skill 分类实际从未产生过）。
+func (m *Manager) GetAgentLogFacets() map[string][]map[string]interface{} {
+	d := m.readAgentData()
+	levels := map[string]int{}
+	cats := map[string]int{}
+	for _, l := range d.Logs {
+		levels[l.Level]++
+		cats[l.Category]++
+	}
+	toArr := func(mp map[string]int) []map[string]interface{} {
+		keys := make([]string, 0, len(mp))
+		for k := range mp {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if mp[keys[i]] != mp[keys[j]] {
+				return mp[keys[i]] > mp[keys[j]]
+			}
+			return keys[i] < keys[j]
+		})
+		arr := make([]map[string]interface{}, 0, len(keys))
+		for _, k := range keys {
+			arr = append(arr, map[string]interface{}{"value": k, "count": mp[k]})
+		}
+		return arr
+	}
+	return map[string][]map[string]interface{}{
+		"levels":     toArr(levels),
+		"categories": toArr(cats),
+	}
+}
+
+// GetAgentLog 按 ID 返回单条日志的完整详情（列表默认不带 detail，用于点击展开时按需加载）。
+func (m *Manager) GetAgentLog(id string) (AgentLog, error) {
+	d := m.readAgentData()
+	for _, l := range d.Logs {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return AgentLog{}, fmt.Errorf("日志不存在或已过期")
 }
 
 // ClearAgentLogs 清空日志。

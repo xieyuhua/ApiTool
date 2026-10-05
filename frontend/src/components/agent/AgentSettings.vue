@@ -243,6 +243,7 @@ function call(fn, ...args) {
         </div>
         <div class="form-row switches">
           <el-switch v-model="local.config.showThinking" active-text="输出思考过程" />
+          <el-switch v-model="local.config.showUsage" active-text="显示每轮 Token 消耗" />
           <el-switch v-model="local.config.enableChart" active-text="图表输出" />
           <el-switch v-model="local.config.enablePolish" active-text="回答 AI 润色" />
         </div>
