@@ -160,6 +160,14 @@
         <div v-if="agentCfg.activeDBConn === selected.id" class="pm-active-banner">
           ✓ 当前分析连接：Agent 执行 db_schema / db_query 时将使用此连接（同一时间仅一个）
         </div>
+        <div v-else-if="agentCfg.activeDBConn === ''" class="pm-active-banner warn">
+          ⚠️ 尚未启用任何分析连接：Agent 需要你在「插件 / 数据库连接」里打开某个连接的「启用此连接做数据分析」开关。
+          存在多个连接时必须明确启用其中一个，否则 Agent 无法确定该连哪个库。
+        </div>
+        <div v-else class="pm-active-banner muted">
+          当前分析连接是「{{ connOf(agentCfg.activeDBConn) ? connOf(agentCfg.activeDBConn).name : agentCfg.activeDBConn }}」，
+          如需改用本连接，请打开上方开关。
+        </div>
 
         <el-card class="db-mgr-card" shadow="never">
           <template #header>
@@ -1430,6 +1438,10 @@ async function pruneAgentDBAnalysis(connId) {
 .pm-card-badge { margin-left: 6px; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #e8f5e9; color: #2e7d32; }
 /* 详情：当前分析连接横幅 */
 .pm-active-banner { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #e8f5e9; color: #2e7d32; font-size: 12px; font-weight: 600; }
+/* 未启用任何分析连接：醒目提示，避免用户以为已生效 */
+.pm-active-banner.warn { background: #fff7e6; color: #ad6800; font-weight: 500; }
+/* 分析连接指向其他连接：弱提示 */
+.pm-active-banner.muted { background: var(--surface-2); color: var(--text-muted); font-weight: 400; }
 
 /* 数据库连接管理（同步表结构 / 字段语义维护）—— 后台系统风格 */
 .db-mgr-card { margin-top: 10px; border-radius: 8px; }

@@ -533,6 +533,9 @@ func buildToolsPrompt(tools []MCPTool, skills []AgentSkill, mode string) string 
 		sb.WriteString("\n正确示例：\n")
 		sb.WriteString("<tool_call>\n<function>db_query</function>\n<parameter name=\"database\">diygw</parameter>\n<parameter name=\"sql\">SELECT * FROM orders WHERE ROWNUM <= 10</parameter>\n</tool_call>\n")
 		sb.WriteString("注意：Oracle 没有 LIMIT 子句，行数限制请用 ROWNUM 或 FETCH FIRST n ROWS ONLY。\n")
+		sb.WriteString("\n表格导出：当你给出的回答中包含数据表格（db_query 查询结果、统计汇总、明细清单等）时，" +
+			"如用户可能需要表格数据，请调用 export_table 把该表格导出为文件（xlsx 默认，Excel 可直接打开），" +
+			"并把生成的文件路径告知用户。data 参数可直接复制你刚输出的 Markdown 表格原文。\n")
 		sb.WriteString("工具列表：\n")
 		for _, t := range tools {
 			sb.WriteString(fmt.Sprintf("- server=%s tool=%s: %s\n", t.Server, t.Name, t.Description))
@@ -618,6 +621,35 @@ var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*["']([^"
 var toolCallParamRe = regexp.MustCompile(`(?s)<parameter\s+name\s*=\s*"([^"]*)"(?:\s+[^>]*)?>(.*?)</parameter>`)
 // 外层可能包 <function_calls> ... </function_calls>
 var funcCallsRe = regexp.MustCompile(`(?s)<function_calls>(.*?)</function_calls>`)
+
+// normalizeLooseCalls 宽松收敛工具调用外层标签并补齐缺失的闭合标签。
+// 单独抽成函数，避免在调用点直接书写带零宽字符的标签字面量。
+func normalizeLooseCalls(text string) string {
+	text = looseCallsCloseRe.ReplaceAllString(text, "</\u200btool_call>")
+	text = looseCallsOpenRe.ReplaceAllString(text, "<\u200btool_call>")
+	return closeUnclosedToolCall2(text)
+}
+
+// looseCallsOpenRe / looseCallsCloseRe 宽松匹配工具调用外层标签的各种畸形变体：
+//
+//	<tool_calls>  <function_calls>  < calls>  <｜｜DSML｜｜ calls>  <tool_call >
+//
+// 允许残留的 DSML 片段与任意空白，统一收敛为标准的单数形式。
+// 模型输出这类变体时若不能识别，会导致整个工具调用被当成正文丢弃。
+var looseCallsOpenRe = regexp.MustCompile(`(?is)<\s*[｜|]*\s*(?:dsml)?[\s|｜]*\s*(?:tool_calls|function_calls|tool_call|calls)\s*>`)
+var looseCallsCloseRe = regexp.MustCompile(`(?is)<\s*/\s*[｜|]*\s*(?:dsml)?[\s|｜]*\s*(?:tool_calls|function_calls|tool_call|calls)\s*>`)
+
+// closeUnclosedToolCall2 为未闭合的外层标签补上收尾。
+// 模型常常只写开标签就结束输出（流式截断尤其常见），缺闭合会让后续参数被当成正文。
+func closeUnclosedToolCall2(text string) string {
+	const open = "<\u200btool_call>"
+	const close = "</\u200btool_call>"
+	o, c := strings.Count(text, open), strings.Count(text, close)
+	if o <= c {
+		return text
+	}
+	return text + strings.Repeat(close, o-c)
+}
 
 // toolCallMarkers 流式输出中可能出现的「工具调用起始标记」。
 // hit=true 表示命中即确认为工具调用（标签形式，最终必被 stripTags 剥除）；
@@ -927,6 +959,14 @@ func parseToolFromToolCall(text string) (*toolAction, bool) {
 		funcBody = block
 	}
 	if name == "" {
+		// 模型有时整个漏掉函数名标签，只给出一串 <parameter name="...">。
+		// 各工具的参数签名区分度很高，按参数推断比直接判失败可靠得多
+		//（否则整轮工具调用作废，用户白等一轮还得重试）。
+		if args := extractTagParams(block); len(args) > 0 {
+			if tool := inferToolFromArgs(args); tool != "" {
+				return &toolAction{Action: "tool", Server: "builtin", Tool: tool, Arguments: args}, true
+			}
+		}
 		return nil, false
 	}
 
@@ -945,6 +985,65 @@ func parseToolFromToolCall(text string) (*toolAction, bool) {
 	}
 	act := &toolAction{Action: "tool", Server: "builtin", Tool: name, Arguments: args}
 	return act, true
+}
+
+// inferToolFromArgs 在缺失函数名标签时，按参数签名推断工具名。
+//
+// 各内置工具的参数组合区分度很高（如 sql+database 只会是 db_query），
+// 因此推断的可靠性较高。判定顺序即特异性由高到低，命中即返回；
+// 无法判定时返回空，由调用方按解析失败处理。
+func inferToolFromArgs(args map[string]interface{}) string {
+	if len(args) == 0 {
+		return ""
+	}
+	has := func(keys ...string) bool {
+		for _, k := range keys {
+			if _, ok := args[k]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	// hasAny：任一参数存在即可（用于同一概念的多种别名，如 data/rows/csv）
+	hasAny := func(keys ...string) bool {
+		for _, k := range keys {
+			if _, ok := args[k]; !ok {
+				continue
+			}
+			// 参数存在但值为空时不算命中，避免空标签误判
+			if s, isStr := args[k].(string); !isStr || strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	// 数据库：sql 是 db_query 的强特征；tables 是 db_schema 的强特征
+	case has("sql"):
+		return "db_query"
+	case has("tables"):
+		return "db_schema"
+	// 导出表格（data/rows/csv/markdown 互为别名，任一即可）
+	case hasAny("data", "rows", "csv", "markdown"):
+		return "export_table"
+	// 文件类：content+path 是写文件；仅 path 先按读文件
+	case has("path", "content"):
+		return "write_file"
+	case has("src", "dst"):
+		return "rename_path"
+	case has("path"):
+		return "read_file"
+	case has("query"):
+		return "web_search"
+	case has("expr"):
+		return "calc"
+	case has("command"):
+		return "run_command"
+	case has("timezone"):
+		return "get_time"
+	}
+	// 无参数工具无法从参数区分，交由上层按名称匹配，这里不猜
+	return ""
 }
 
 // applyArg 将单个参数值按 JSON 解析后写入 args。
@@ -989,8 +1088,17 @@ func isContainerArg(name string) bool {
 //  3. <tool_call><function>name</function><parameter name="x">v</parameter></tool_call> 标签（OpenAI 风格）
 func parseToolAction(text string) (*toolAction, bool) {
 	text = normalizeToolTags(text)
-	// 仅当文本确实包含工具调用标签时才走标签解析，避免普通文本误判
-	if strings.Contains(text, "<tool_call") || strings.Contains(text, "<function") {
+	// 仅当文本确实包含工具调用标签时才走标签解析，避免普通文本误判。
+	//
+	// 这里必须用正则而非 strings.Contains("<tool_call")：标准标签里含零宽字符
+	//（U+200B），字面量匹配永远不成立，会导致所有标签形式的调用都被跳过，
+	// 进而误报「检测到工具调用标记但未能解析」。
+	if paramOpenRe.MatchString(text) ||
+		toolCallTagRe.MatchString(text) ||
+		funcCallsRe.MatchString(text) ||
+		funcLooseNameRe.MatchString(text) ||
+		strings.Contains(text, "<function") ||
+		strings.Contains(text, "<tool_call") {
 		if act, ok := parseToolFromToolCall(text); ok {
 			return act, true
 		}
@@ -1036,8 +1144,12 @@ var dsmlFuncCloseRe = regexp.MustCompile(`(?s)<function\b([^>]*)>([\s\S]*?)</par
 var dsmlDupCloseRe = regexp.MustCompile(`(?s)</function>\s*</function>`)
 
 func normalizeToolTags(text string) string {
+	// 先宽松收敛外层标签：<｜｜DSML｜｜ calls> / < calls> / <function_calls> 等
+	// 一律规范为标准单数形式，后续规则才能正确识别。
+	text = normalizeLooseCalls(text)
 	if !strings.Contains(text, "DSML") &&
 		!strings.Contains(text, "tool_calls") &&
+		!strings.Contains(text, "tool_call") &&
 		!strings.Contains(text, "<invoke") {
 		return text
 	}
@@ -1052,6 +1164,7 @@ func normalizeToolTags(text string) string {
 }
 func stripTags(text string) string {
 	text = normalizeToolTags(text)
+	text = closeUnclosedToolCall2(text)
 	text = thinkingRe.ReplaceAllString(text, "")
 	text = planRe.ReplaceAllString(text, "")
 	text = toolJSONRe.ReplaceAllString(text, "")

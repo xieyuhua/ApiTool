@@ -141,6 +141,10 @@ export function NotifyUpdated():Promise<void>;
 
 export function OpenDirectoryDialog(arg1:frontend.OpenDialogOptions):Promise<string>;
 
+export function OpenExportFile(arg1:string):Promise<void>;
+
+export function OpenExportFolder(arg1:string):Promise<void>;
+
 export function OpenFileDialog(arg1:frontend.OpenDialogOptions):Promise<string>;
 
 export function OpenInBrowser(arg1:string):Promise<void>;

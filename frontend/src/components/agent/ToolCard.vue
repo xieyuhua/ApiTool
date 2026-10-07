@@ -8,10 +8,21 @@
       <span v-if="step.error || step.type === 'tool-failed'" class="tc-badge err">失败</span>
       <span v-else-if="step.type === 'skill' && step.name === '技能匹配'" class="tc-badge skill-none">未匹配</span>
       <span v-else-if="step.type === 'skill' && step.output" class="tc-badge skill">已运用</span>
+      <span v-else-if="exportPath" class="tc-badge export">已导出</span>
       <span v-else-if="running" class="tc-badge run">运行中</span>
       <span v-else class="tc-badge ok">成功</span>
       <span v-if="running" class="tc-spin"></span>
       <span v-if="canToggle" class="tc-toggle">{{ expanded ? '▾' : '▸' }}</span>
+    </div>
+
+    <!-- 导出结果：提供一键打开文件 / 打开所在目录 -->
+    <div v-if="exportPath" class="tc-export">
+      <span class="tc-export-path" :title="exportPath">{{ exportPath }}</span>
+      <span class="tc-export-ops" @click.stop>
+        <el-button size="small" text type="primary" @click="openFile">打开文件</el-button>
+        <el-button size="small" text @click="openFolder">打开目录</el-button>
+        <el-button size="small" text @click="copyPath">复制路径</el-button>
+      </span>
     </div>
 
     <!-- 展开详情：执行参数与返回结果 -->
@@ -32,6 +43,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 
 const props = defineProps({ step: { type: Object, required: true } })
 
@@ -39,6 +51,16 @@ const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'to
 // 用 computed 而非普通 const：step 是响应式对象，同一次调用的开始/结束事件
 // 会替换整条数据（合并），computed 才能保证图标随类型变化而更新。
 const icon = computed(() => iconMap[props.step.type] || '🔧')
+
+// 导出结果识别：export_table 成功后，输出里带有生成的绝对路径。
+// 从中取出路径，让用户可以一键打开文件 / 打开目录 / 复制路径。
+const exportPath = computed(() => {
+  const s = props.step
+  if (!s || s.type !== 'tool' || s.name !== 'export_table' || s.error) return ''
+  const out = String(s.output || '')
+  const m = out.match(/[A-Za-z]:\\[^\s，。；]+\.[A-Za-z0-9]+/) || out.match(/\/[^\s，。；]+\.[A-Za-z0-9]+/)
+  return m ? m[0] : ''
+})
 
 // 由 step 自身推断「是否运行中」：已有入参、但还没有结果/错误 → 仍在进行中。
 // 注意：skill 类型不是实时工具调用（是 system prompt 注入），不应视为「运行中」，始终可展开查看。
@@ -59,6 +81,35 @@ watch(running, (v) => { expanded.value = v }, { immediate: true })
 function toggle() {
   // 运行中不允许折叠，仅手动（运行结束）可切换
   if (!running.value && hasDetail.value) expanded.value = !expanded.value
+}
+
+// ---------------- 导出文件操作 ----------------
+
+// 走 window.go 而非 wailsjs 绑定：网页端由 httpBridge 代理，桌面端由 Wails 注入，
+// 两种环境都可用（局域网网页端无法调起本机程序，后端会返回明确提示）。
+async function callApp(name, path) {
+  const app = window.go && window.go.main && window.go.main.App
+  if (!app || typeof app[name] !== 'function') {
+    ElMessage.warning('当前环境不支持打开本地文件，请手动到该路径查看')
+    return
+  }
+  try {
+    await app[name](path)
+  } catch (e) {
+    ElMessage.error(String(e && e.message ? e.message : e))
+  }
+}
+
+function openFile() { callApp('OpenExportFile', exportPath.value) }
+function openFolder() { callApp('OpenExportFolder', exportPath.value) }
+
+async function copyPath() {
+  try {
+    await navigator.clipboard.writeText(exportPath.value)
+    ElMessage.success('路径已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选中复制')
+  }
 }
 </script>
 
@@ -90,6 +141,19 @@ function toggle() {
 .tc-badge.run { color: var(--primary); background: var(--el-color-primary-light-9); }
 .tc-badge.skill { color: #8e44ad; background: #f5eef8; border: 1px solid #8e44ad; }
 .tc-badge.skill-none { color: #8a8a8a; background: #f0f0f0; border: 1px solid #cfcfcf; }
+.tc-badge.export { color: #0f766e; background: #e6fffb; border: 1px solid #0f766e; }
+/* 导出结果条：路径 + 快捷操作 */
+.tc-export {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 4px 0 2px; padding: 4px 8px; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.tc-export-path {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tc-export-ops { display: flex; gap: 2px; flex-shrink: 0; }
 .tc-toggle { color: var(--text-muted); margin-left: 2px; font-size: 11px; }
 /* 运行中旋转的加载小圈 */
 .tc-spin { width: 11px; height: 11px; margin-left: 2px; border: 2px solid var(--primary); border-top-color: transparent; border-radius: 50%; animation: tc-spin 0.8s linear infinite; }

@@ -503,6 +503,45 @@ func (a *App) BrowserOpenURL(url string) {
 	runtime.BrowserOpenURL(a.ctx, url)
 }
 
+// OpenExportFile 用系统默认程序打开导出的文件（xlsx/csv/html/md）。
+// 供 AI Agent 导出表格后，用户在「导出结果」中一键打开。
+func (a *App) OpenExportFile(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("路径为空")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("文件不存在: %s", path)
+	}
+	// 网页端无法调起本机程序，交由前端给出提示
+	if a.ctx == nil {
+		return fmt.Errorf("当前环境无法打开本地文件，请手动到该路径查看：%s", path)
+	}
+	runtime.BrowserOpenURL(a.ctx, "file:///"+strings.ReplaceAll(filepath.ToSlash(path), " ", "%20"))
+	return nil
+}
+
+// OpenExportFolder 在文件管理器中打开导出文件所在目录。
+func (a *App) OpenExportFolder(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("路径为空")
+	}
+	st, err := os.Stat(path)
+	dir := path
+	if err == nil && !st.IsDir() {
+		dir = filepath.Dir(path)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("目录不存在: %s", dir)
+	}
+	if a.ctx == nil {
+		return fmt.Errorf("当前环境无法打开本地目录，请手动到该路径查看：%s", dir)
+	}
+	runtime.BrowserOpenURL(a.ctx, "file:///"+strings.ReplaceAll(filepath.ToSlash(dir), " ", "%20"))
+	return nil
+}
+
 // ClipboardGetText 读取系统剪贴板文本（实现 bus.Bus）。
 func (a *App) ClipboardGetText() (string, error) {
 	return runtime.ClipboardGetText(a.ctx)

@@ -254,6 +254,14 @@ export function OpenDirectoryDialog(arg1) {
   return window['go']['main']['App']['OpenDirectoryDialog'](arg1);
 }
 
+export function OpenExportFile(arg1) {
+  return window['go']['main']['App']['OpenExportFile'](arg1);
+}
+
+export function OpenExportFolder(arg1) {
+  return window['go']['main']['App']['OpenExportFolder'](arg1);
+}
+
 export function OpenFileDialog(arg1) {
   return window['go']['main']['App']['OpenFileDialog'](arg1);
 }

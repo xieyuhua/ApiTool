@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -87,6 +88,12 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 			"sql":      map[string]interface{}{"type": "string", "description": "要执行的只读查询语句，必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；尽量使用明确的列名与 LIMIT，避免 SELECT * 与全表扫描"},
 			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200；如结果过大请适当调小或补充 WHERE 条件"},
 		}, []string{"connId", "database", "sql"}},
+		"export_table": {map[string]interface{}{
+			"title":  map[string]interface{}{"type": "string", "description": "表格标题，同时作为导出文件名的一部分，例如「近7天销售汇总」"},
+			"data":   map[string]interface{}{"type": "string", "description": "要导出的表格数据。支持三种写法：① Markdown 表格（含 |---| 分隔行，直接复制回答里的表格即可）；② CSV/TSV 文本；③ JSON 数组（二维数组 [[...]] 或对象数组 [{...}]）。"},
+			"format": map[string]interface{}{"type": "string", "description": "导出格式：xlsx（默认，Excel 可直接打开，数字列可求和排序）、csv（带 BOM，Excel 打开不乱码）、html（浏览器可打印为 PDF）、md（Markdown）。"},
+			"dir":    map[string]interface{}{"type": "string", "description": "可选，导出目录绝对路径。省略则存到应用数据目录下的 exports 子目录。"},
+		}, []string{"data"}},
 	}
 	var out []MCPTool
 	for _, t := range BuiltinToolMeta() {
@@ -134,9 +141,99 @@ func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, file
 		return builtinDBSchema(m, args)
 	case "db_query":
 		return builtinDBQuery(m, args)
+	case "export_table":
+		return builtinExportTable(m, args)
 	default:
 		return "", fmt.Errorf("未知内置工具: %s", name)
 	}
+}
+
+// exportDirName 导出文件存放子目录名（位于应用数据目录下，便于集中查找与清理）。
+const exportDirName = "exports"
+
+// builtinExportTable 把表格数据导出为文件。
+// data 支持 Markdown 表格、CSV 文本、JSON 二维/对象数组，
+// format 支持 xlsx（默认）/ csv / html / md。
+func builtinExportTable(m *Manager, args map[string]interface{}) (string, error) {
+	title, _ := args["title"].(string)
+	format, _ := args["format"].(string)
+	dirArg, _ := args["dir"].(string)
+
+	data := tableDataArg(args)
+	if strings.TrimSpace(data) == "" {
+		return "", fmt.Errorf("缺少 data 参数：请把要导出的表格内容传入 data（支持 Markdown 表格、CSV 文本或 JSON 数组）")
+	}
+
+	tbl, err := parseTableData(title, data)
+	if err != nil {
+		return "", err
+	}
+	if len(tbl.Rows) == 0 {
+		return "", fmt.Errorf("表格没有数据行：data 解析成功但未取到任何数据行，请确认内容包含表头与至少一行数据")
+	}
+
+	dir := strings.TrimSpace(dirArg)
+	if dir == "" {
+		base := ""
+		if m != nil && m.host != nil && m.host.Store() != nil {
+			base = m.host.Store().Dir()
+		}
+		if base == "" {
+			base, _ = os.Getwd()
+		}
+		dir = filepath.Join(base, exportDirName)
+	}
+
+	path, err := exportTable(tbl, format, dir, tbl.Title)
+	if err != nil {
+		return "", fmt.Errorf("导出失败：%w", err)
+	}
+	st, _ := os.Stat(path)
+	size := int64(0)
+	if st != nil {
+		size = st.Size()
+	}
+	return fmt.Sprintf("已导出 %d 行 × %d 列 → %s（%s，%s）\n用户可在工具卡片中直接打开该文件，或到目录 %s 下取用。",
+		len(tbl.Rows), len(tbl.Headers), strings.ToUpper(exportExt(format)), path,
+		humanSize(size), dir), nil
+}
+
+func exportExt(format string) string {
+	f := strings.ToLower(strings.TrimSpace(format))
+	if f == "" {
+		return "xlsx"
+	}
+	return f
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/1024/1024)
+	}
+}
+
+// tableDataArg 兼容模型把表格放在 data / rows / csv / markdown 等参数名下的情况。
+func tableDataArg(args map[string]interface{}) string {
+	for _, k := range []string{"data", "rows", "table", "csv", "markdown", "content"} {
+		if v, ok := args[k]; ok {
+			switch x := v.(type) {
+			case string:
+				if strings.TrimSpace(x) != "" {
+					return x
+				}
+			default:
+				if b, err := json.Marshal(x); err == nil && string(b) != "null" && string(b) != "[]" {
+					return string(b)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // findDBConn 从应用数据中按 connId 找到 db 分类的连接配置
@@ -179,19 +276,26 @@ func connLabel(c model.PluginConn) string {
 }
 
 // resolveActiveDBConn 解析用于数据库分析的 connId / database。
-// 优先使用用户显式激活的分析连接；否则自动选用第一个 db 类型插件连接；
-// database 缺失时依次取该连接自带的 database、或已同步表结构中该连接对应的第一个 database。
-// 这样即使未手动"启用分析连接"，只要配置过数据库连接即可直接使用工具，避免无意义报错。
+// 优先使用用户显式激活的分析连接；
+// 未启用时回退到「唯一的一个」db 连接 —— 只有确实只有一个时才自动采用，
+// 存在多个时返回空，交由模型在工具参数里显式指定 connId。
+//
+// 之所以不取「第一个」：连接顺序取决于插入顺序，多连接并存时「第一个」可能
+// 完全不是用户想要的那个（曾导致用户选中 MySQL 却实际连到 Oracle），
+// 静默挑一个会直接产生错误结果。宁可让模型明确指定。
 func resolveActiveDBConn(m *Manager) (connID, database string) {
 	cfg := m.LoadAgentData().Config
 	if cfg.ActiveDBConn != "" {
 		connID = cfg.ActiveDBConn
 	} else {
+		var dbConns []model.PluginConn
 		for _, c := range m.host.Store().GetData().Plugins.Connections {
 			if c.Category == "db" {
-				connID = c.ID
-				break
+				dbConns = append(dbConns, c)
 			}
+		}
+		if len(dbConns) == 1 {
+			connID = dbConns[0].ID
 		}
 	}
 	if connID == "" {
@@ -425,7 +529,8 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 		}
 	}
 	if connID == "" || database == "" || sql == "" {
-		return "", fmt.Errorf("缺少 connId / database / sql 参数（当前未配置任何数据库连接，请先在「插件 / 数据库连接」中添加一个 db 类型连接并同步表结构）")
+		return "", fmt.Errorf("缺少 connId / database / sql 参数。请在工具参数中显式指定 connId（可在「插件 / 数据库连接」中查看各连接的 connId）；" +
+			"若只有一个数据库连接可省略，但存在多个连接时必须明确指定，否则无法确定连哪个库。也请确认该连接下已同步表结构。")
 	}
 	upper := strings.ToUpper(strings.TrimSpace(sql))
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {

@@ -106,6 +106,7 @@ func BuiltinToolMeta() []BuiltinToolDef {
 		{Name: "run_command", Icon: "⌨️", Group: "常用工具", Default: "当用户需要执行一条本机 shell 命令（如 git、npm、系统命令）并获取其输出时使用。传入 command 字符串。⚠️ 会真实执行命令，请仅在确定安全时使用。"},
 		{Name: "db_schema", Icon: "🗄️", Group: "数据库连接分析", Default: "返回用户在「插件/数据库连接」中已同步配置的表结构（库/表/字段名/类型/可空/默认值/注释），把数据库结构交给大模型用于生成 SQL 与数据分析。注意：本工具只返回你已同步的表，不会实时读取数据库全部表；大模型应严格只基于返回的这些表与字段编写 SQL，不得臆测或使用未列出的表/字段。返回的字段注释会叠加用户维护的表级与字段级语义。connId 与 database 为必填；tables 留空则返回该库下所有已同步的表。connId 可省略，省略时自动使用当前激活的分析连接。"},
 		{Name: "db_query", Icon: "🔎", Group: "数据库连接分析", Default: "在已配置的连接上执行只读 SELECT 查询并返回结果（限制行数），用于采样数据、核对数值或验证假设。支持 MySQL、PostgreSQL、Oracle。必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；connId 可省略（省略时用当前激活连接），但 database 与 sql 必填。结果过大时请补充 WHERE/LIMIT 条件。"},
+		{Name: "export_table", Icon: "📊", Group: "数据导出", Default: "把表格数据导出为文件，便于用户用 Excel 打开或进一步处理。当你的回答中包含数据表格（尤其是数据库查询结果、统计汇总、明细清单）时，如果用户可能需要表格数据，就调用本工具把它导出成文件。data 支持三种写法：①直接复制你刚输出的 Markdown 表格（含 |---| 分隔行）；②CSV 文本；③JSON 数组（二维数组或对象数组）。format 默认 xlsx（Excel 可直接打开，数字列可求和排序），也可选 csv / html / md。导出后把文件路径告知用户。"},
 	}
 }
 
@@ -563,19 +564,15 @@ func (m *Manager) pruneOrphanDBAnalysis(cfg AgentConfig, conns []model.PluginCon
 			changed = true
 		}
 	}
-	// 分析连接校准：指向已删除的连接时回退到第一个有效 db 连接
+	// 分析连接校准：仅在其指向已删除的连接时清空。
+	//
+	// 刻意**不**自动回退到「第一个 db 连接」：连接顺序取决于插入顺序，用户看到的
+	// 「第一个」可能是任意一个（实测就曾把 Oracle 当成 MySQL 显示），
+	// 静默替用户挑选会导致「我明明选了 MySQL，怎么变成 Oracle 了」。
+	// 清空后由用户在「插件 / 数据库连接」里显式启用，符合「连接选择权归用户」。
 	if cfg.ActiveDBConn != "" && !live[cfg.ActiveDBConn] {
 		cfg.ActiveDBConn = ""
 		changed = true
-	}
-	if cfg.ActiveDBConn == "" {
-		for _, c := range conns {
-			if c.Category == "db" {
-				cfg.ActiveDBConn = c.ID
-				changed = true
-				break
-			}
-		}
 	}
 	if changed {
 		// 清理结果落库，避免每次启动都重复剔除
