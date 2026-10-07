@@ -202,6 +202,11 @@ type AgentStep struct {
 	Input  string `json:"input,omitempty"`
 	Output string `json:"output,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// CallID 本次「调用实例」标识。同一次调用的「开始」与「结束」两次事件共用一个
+	// CallID，前端据此把后者合并进前者（只显示一张卡片，且带上最终结果）；
+	// 而模型多次调用同一个工具时每次 CallID 不同，因此会**逐条展示**，
+	// 不会出现「调了 5 次只看到 1 条」的情况。
+	CallID string `json:"callId,omitempty"`
 }
 
 // AgentLog 请求与调度日志（可查看、搜索）。
@@ -338,6 +343,14 @@ func (m *Manager) readAgentData() AgentData {
 	if data.Config.DBLastDB == nil {
 		data.Config.DBLastDB = map[string]string{}
 	}
+	// 清理「连接已删除但快照仍残留」的脏数据，并校准分析连接。
+	//
+	// 表结构快照以 connId|database|table 为键存放在独立表里，删除连接时不会级联清除。
+	// 于是：已删除连接的快照会继续出现在 Agent 提示词中，模型据此填出一个
+	// 根本不存在的 connId，调用时才发现失败；更麻烦的是新连接的 id 与旧 id
+	// 往往只差几位数字（如 db_1788254096769 与 db_1788254178513），
+	// 极易被误认为同一个连接，出现「我选的是 MySQL，报错却来自 Oracle」这类困惑。
+	data.Config = m.pruneOrphanDBAnalysis(data.Config, m.host.ReadData().Plugins.Connections)
 	if data.Servers == nil {
 		data.Servers = []MCPServer{}
 	}
@@ -481,6 +494,106 @@ func migrateToolFlags(old ToolFlags) ToolFlags {
 		desc[t.Name] = t.Default
 	}
 	return ToolFlags{Enabled: enabled, Desc: desc}
+}
+
+// pruneOrphanDBAnalysis 剔除已删除连接遗留的表结构 / 语义 / 记忆库，并校准分析连接。
+//
+// 背景：db_schemas / db_semantics / db_last_db 三张表以 connId 为键，
+// 但删除数据库连接时不会级联清除，于是孤立快照会长期残留并混入
+// Agent 提示词的可用表结构列表，模型据此填出并不存在的 connId；
+// 又因新旧连接 id 常常只差几位数字，人眼极难分辨，
+// 最终表现为「明明选了 MySQL，报错却来自 Oracle」。
+//
+// 同时把 activeDBConn 校准为真实存在的 db 连接：
+// 指向已删除连接时应回退到某个有效连接，避免工具全盘失败。
+func (m *Manager) pruneOrphanDBAnalysis(cfg AgentConfig, conns []model.PluginConn) AgentConfig {
+	if len(cfg.DBSchemas) == 0 && len(cfg.DBSemantics) == 0 && len(cfg.DBLastDB) == 0 && cfg.ActiveDBConn == "" {
+		return cfg
+	}
+	// 现有 db 连接及其 id
+	live := make(map[string]bool, len(conns))
+	for _, c := range conns {
+		if c.Category == "db" {
+			live[c.ID] = true
+		}
+	}
+	changed := false
+	if len(cfg.DBSchemas) > 0 {
+		kept := make(map[string]DBSyncedTable, len(cfg.DBSchemas))
+		for k, v := range cfg.DBSchemas {
+			id := v.ConnID
+			if id == "" {
+				id = dbAnalysisKeyConnID(k)
+			}
+			if id != "" && !live[id] {
+				continue // 孤立快照，丢弃
+			}
+			kept[k] = v
+		}
+		if len(kept) != len(cfg.DBSchemas) {
+			cfg.DBSchemas = kept
+			changed = true
+		}
+	}
+	if len(cfg.DBLastDB) > 0 {
+		kept := make(map[string]string, len(cfg.DBLastDB))
+		for id, v := range cfg.DBLastDB {
+			if !live[id] {
+				continue
+			}
+			kept[id] = v
+		}
+		if len(kept) != len(cfg.DBLastDB) {
+			cfg.DBLastDB = kept
+			changed = true
+		}
+	}
+	// 字段语义键：connId|database|table 或 connId|database|field
+	if len(cfg.DBSemantics) > 0 {
+		kept := make(map[string]string, len(cfg.DBSemantics))
+		for k, v := range cfg.DBSemantics {
+			id := dbAnalysisKeyConnID(k)
+			if id != "" && !live[id] {
+				continue
+			}
+			kept[k] = v
+		}
+		if len(kept) != len(cfg.DBSemantics) {
+			cfg.DBSemantics = kept
+			changed = true
+		}
+	}
+	// 分析连接校准：指向已删除的连接时回退到第一个有效 db 连接
+	if cfg.ActiveDBConn != "" && !live[cfg.ActiveDBConn] {
+		cfg.ActiveDBConn = ""
+		changed = true
+	}
+	if cfg.ActiveDBConn == "" {
+		for _, c := range conns {
+			if c.Category == "db" {
+				cfg.ActiveDBConn = c.ID
+				changed = true
+				break
+			}
+		}
+	}
+	if changed {
+		// 清理结果落库，避免每次启动都重复剔除
+		_ = m.host.Store().SaveDBAnalysis(&db.DBAnalysisSnapshot{
+			Schemas:  schemasToJSONMap(cfg.DBSchemas),
+			Semantics: cfg.DBSemantics,
+			LastDB:   cfg.DBLastDB,
+		})
+	}
+	return cfg
+}
+
+// dbAnalysisKeyConnID 从 "connId|database|table" 形式的键里取出 connId。
+func dbAnalysisKeyConnID(key string) string {
+	if i := strings.Index(key, "|"); i > 0 {
+		return key[:i]
+	}
+	return ""
 }
 
 // schemasToJSONMap 将表结构快照 map 转为 value 为 JSON 的通用 map，便于跨包存独立表。

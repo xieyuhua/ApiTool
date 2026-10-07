@@ -45,6 +45,18 @@ function onNarrowCommand(cmd) {
   else if (cmd === 'clear') clearChat()
 }
 
+// stepSameCall 判断两个 step 是否属于同一次调用实例。
+// 有 callId 时以它为准（后端为每次调用生成唯一值）；
+// 缺失时（历史数据）退回按 类型+名称+服务器 归并，宁可少展示也不重复刷屏。
+function stepSameCall(a, b) {
+  if (!a || !b) return false
+  if (a.callId && b.callId) return a.callId === b.callId
+  if (a.callId || b.callId) return false
+  if (a.type !== b.type) return false
+  if (a.name !== b.name) return false
+  return (a.server || '') === (b.server || '')
+}
+
 // 实时运行态（当前轮次的临时展示）
 const live = reactive({ thinking: '', content: '', steps: [] })
 const polishing = ref(false) // 是否处于「回答润色」阶段（此时不重打正文，只显示状态）
@@ -176,14 +188,14 @@ function bindEvents() {
   offFns.push(EventsOn('agent:thinking', () => { scheduleScroll() }))
   offFns.push(EventsOn('agent:plan', (t) => { live.steps.push({ type: 'plan', name: '计划', output: t }); scheduleScroll() }))
   offFns.push(EventsOn('agent:step', (s) => {
-    // 同一工具（按 name+server）仅保留一条，运行中更新入参，结束更新结果；避免重复卡片
-    if (s && (s.type === 'tool' || s.type === 'skill')) {
-      const idx = live.steps.findIndex(x => x && (x.type === 'tool' || x.type === 'skill') && x.name === s.name && (x.server || '') === (s.server || ''))
-      if (idx >= 0) live.steps[idx] = s
-      else live.steps.push(s)
-    } else {
-      live.steps.push(s)
-    }
+    // 同一次工具调用会发两次事件（开始=仅入参 / 结束=带结果），
+    // 依据 callId 合并为一条，避免出现两张一样的卡片；
+    // 而模型多次调用同一个工具时 callId 各不相同，会逐条保留，
+    // 不会发生「调了 5 次只看到 1 条」的情况。
+    // 老数据没有 callId 时回退到「按名称归并」，仅影响历史消息的展示。
+    const s0 = live.steps.findIndex(x => x && stepSameCall(x, s))
+    if (s0 >= 0) live.steps[s0] = s
+    else live.steps.push(s)
     scheduleScroll()
   }))
 }
@@ -209,7 +221,7 @@ async function send() {
   try {
     const res = await AgentAPI.run({
       input: text,
-      baseUrl: s.aiBaseUrl, apiKey: s.aiKey, model: s.aiModel, timeoutSec: s.timeoutSec || 60,
+      baseUrl: s.aiBaseUrl, apiKey: s.aiKey, model: s.aiModel, timeoutSec: s.timeoutSec || 180,
       clientId: MY_CLIENT_ID,
       sessionId: activeSession.value,
     })
@@ -487,7 +499,7 @@ onBeforeUnmount(() => {
             <pre v-show="showThinkMap[m.id]" class="think-content">{{ m.thinking }}</pre>
             <!-- 使用的 skill / tool：作为思考过程的一部分展示 -->
             <div v-show="showThinkMap[m.id]" v-if="m.steps && m.steps.length" class="steps-cards">
-              <ToolCard v-for="(s, i) in m.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+              <ToolCard v-for="(s, i) in m.steps.filter(x => x.type !== 'thought')" :key="s.callId || ('k' + i)" :step="s" />
             </div>
           </div>
           <!-- 正文（markdown + 图表） -->
@@ -516,7 +528,7 @@ onBeforeUnmount(() => {
             <div class="think-head">💭 思考中…</div>
             <pre v-if="live.thinking && config.showThinking" class="think-content">{{ live.thinking }}</pre>
             <div v-if="live.steps.length" class="steps-cards">
-              <ToolCard v-for="(s, i) in live.steps.filter(x => x.type !== 'thought')" :key="i" :step="s" />
+              <ToolCard v-for="(s, i) in live.steps.filter(x => x.type !== 'thought')" :key="s.callId || ('k' + i)" :step="s" />
             </div>
           </div>
           <!-- 流式正文（打字机）；润色阶段不再重打全文，只显示状态 -->

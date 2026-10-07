@@ -211,6 +211,7 @@ export namespace agent {
 	    input?: string;
 	    output?: string;
 	    error?: string;
+	    callId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentStep(source);
@@ -224,6 +225,7 @@ export namespace agent {
 	        this.input = source["input"];
 	        this.output = source["output"];
 	        this.error = source["error"];
+	        this.callId = source["callId"];
 	    }
 	}
 	export class AgentMsg {

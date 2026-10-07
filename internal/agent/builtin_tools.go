@@ -152,7 +152,30 @@ func findDBConn(m *Manager, connID string) (model.PluginConn, error) {
 			return c, nil
 		}
 	}
-	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（请先在「插件 / 数据库连接」中配置）", connID)
+	return model.PluginConn{}, fmt.Errorf("未找到数据库连接 %s（该连接可能已被删除，请到「插件 / 数据库连接」重新选择）", connID)
+}
+
+// connLabel 返回连接的可读标识：「名称(类型 host:port)」。
+// 只给 connId 的话，id 是 db_1788xxxx 这类时间戳串，
+// 用户根本无法判断实际连的是哪个库 —— 多连接并存时尤其容易误判，
+// 例如把 Oracle 的连接当成 MySQL。
+func connLabel(c model.PluginConn) string {
+	t := strings.ToUpper(strings.TrimSpace(c.DbType))
+	if t == "" {
+		t = "MYSQL"
+	}
+	name := strings.TrimSpace(c.Name)
+	if name == "" {
+		name = c.ID
+	}
+	s := name + "(" + t
+	if c.Host != "" {
+		s += " " + c.Host
+		if c.Port > 0 {
+			s += fmt.Sprintf(":%d", c.Port)
+		}
+	}
+	return s + ")"
 }
 
 // resolveActiveDBConn 解析用于数据库分析的 connId / database。
@@ -424,7 +447,8 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 	}
 	res, err := plugins.PluginDBQuery(conn, plugins.DBQueryReq{Database: database, SQL: sql, Limit: limit})
 	if err != nil {
-		return "", err
+		// 带上连接身份：否则用户只看到一堆驱动报错，无法判断实际连的是哪个库
+		return "", fmt.Errorf("在连接 %s 的库 %s 上查询失败：%w", connLabel(conn), database, err)
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("查询返回 %d 行 %d 列：\n", len(res.Rows), len(res.Columns)))

@@ -36,7 +36,9 @@ import { ref, computed, watch } from 'vue'
 const props = defineProps({ step: { type: Object, required: true } })
 
 const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'tool-failed': '⚠️' }
-const icon = iconMap[props.step.type] || '🔧'
+// 用 computed 而非普通 const：step 是响应式对象，同一次调用的开始/结束事件
+// 会替换整条数据（合并），computed 才能保证图标随类型变化而更新。
+const icon = computed(() => iconMap[props.step.type] || '🔧')
 
 // 由 step 自身推断「是否运行中」：已有入参、但还没有结果/错误 → 仍在进行中。
 // 注意：skill 类型不是实时工具调用（是 system prompt 注入），不应视为「运行中」，始终可展开查看。

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -122,6 +124,30 @@ func usageLine(u TokenUsage) string {
 	return fmt.Sprintf("Token 用量　输入 %d　输出 %d　合计 %d", u.PromptTokens, u.CompletionTokens, u.TotalTokens)
 }
 
+// streamReadErrHint 把流式读取的中断原因翻译成可操作的提示。
+func streamReadErrHint(err error, timeout int) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errStreamIdle) {
+		return fmt.Sprintf("连接在 %d 秒内没有收到任何数据，判定为中断。请检查网络/代理是否稳定，或在「设置 → AI 配置」把超时调大。", timeout)
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "context deadline exceeded"),
+		strings.Contains(msg, "Client.Timeout"),
+		strings.Contains(msg, "timeout awaiting response headers"):
+		return fmt.Sprintf("等待 AI 接口响应超时（%d 秒）。请检查接口地址是否可达、代理是否正常，或在「设置 → AI 配置」把超时调大。", timeout)
+	case strings.Contains(msg, "unexpected EOF"),
+		strings.Contains(msg, "connection reset by peer"),
+		strings.Contains(msg, "broken pipe"):
+		return "与 AI 接口的连接被中断（网络不稳定或服务端提前断开），请重试。"
+	case strings.Contains(msg, "EOF"):
+		return "AI 接口提前关闭了连接（服务端可能拒绝了该请求或发生错误），请查看日志中的响应内容。"
+	}
+	return msg
+}
+
 // llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
 func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, maxTokens int) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
@@ -204,6 +230,52 @@ type streamDelta struct {
 // llmCallStream 以流式（SSE）方式请求 LLM。
 // onDelta 会在收到每个增量文本时被调用（已根据 <thinking> 标签拆分区段），
 // 返回累计的完整原始文本（含标签），供上层解析工具调用/思考/正文。
+// idleTimeoutBody 给流式响应体套一层「空闲超时」。
+//
+// 为什么不能用 http.Client.Timeout：它的计时覆盖「发请求 → 读完响应体」全过程。
+// LLM 流式输出是持续很久的（模型思考 + 逐 token 输出长回答），
+// 用它做总时限就必然报
+//
+//	context deadline exceeded (Client.Timeout or context cancellation while reading body)
+//
+// 而此时模型其实一切正常、正在输出。该错误只在「一段时间内一个字节都没收到」
+// （服务端卡住、代理挂起、网络中断）时才有意义 —— 即空闲超时。
+//
+// 实现上每次 Read 都起一个带超时的等待；超时时主动 Close 底层 body，
+// 让阻塞中的 goroutine 立刻返回，避免泄漏。
+type idleTimeoutBody struct {
+	r    io.ReadCloser
+	idle time.Duration
+}
+
+// errStreamIdle 表示流式响应空闲超时。
+var errStreamIdle = errors.New("流式响应空闲超时")
+
+func (b *idleTimeoutBody) Read(p []byte) (int, error) {
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, err := b.r.Read(p)
+		ch <- result{n, err}
+	}()
+	timer := time.NewTimer(b.idle)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.n, r.err
+	case <-timer.C:
+		// 关闭底层连接，使阻塞中的 Read 立刻返回，goroutine 得以退出
+		_ = b.r.Close()
+		return 0, fmt.Errorf("%w（%d 秒内未收到任何数据；可在「设置 → AI 配置」调大超时）",
+			errStreamIdle, int(b.idle.Seconds()))
+	}
+}
+
+func (b *idleTimeoutBody) Close() error { return b.r.Close() }
+
 func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, onDelta func(streamDelta), onUsage func(TokenUsage)) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
 	if base == "" {
@@ -234,9 +306,20 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 	})
 	timeout := args.Timeout
 	if timeout <= 0 {
-		timeout = 120
+		timeout = 180
 	}
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	// 流式请求不能用 http.Client.Timeout 限制总时长（它计时到读完响应体为止，
+	// 而模型输出本来就可能持续好几分钟），否则正常输出也会被判超时。
+	// 改为：Timeout=0 不限总时长，用 ResponseHeaderTimeout 限制「等待首字节」，
+	// 再由 idleTimeoutBody 限制「两个数据块之间的静默间隔」。
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 15 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: time.Duration(timeout) * time.Second,
+		},
+	}
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+args.APIKey)
@@ -250,6 +333,9 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 		return "", fmt.Errorf("AI 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
+	// 套上空闲超时：只要模型还在持续输出就一直正常，卡住（服务端无响应 /
+	// 代理挂起 / 网络中断）超过 timeout 秒才报错，且报错带上可操作提示。
+	resp.Body = &idleTimeoutBody{r: resp.Body, idle: time.Duration(timeout) * time.Second}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式响应异常: " + tag, Detail: fmt.Sprintf("%d: %s", resp.StatusCode, util.Truncate(string(body), 2000))})
@@ -380,10 +466,18 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 	// 补发过滤器中残留的正文（未闭合的 ```json 等），避免丢失内容
 	bf.Flush()
 	if err := scanner.Err(); err != nil {
-		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式读取中断: " + tag, Detail: err.Error()})
+		// 原文 "context deadline exceeded (Client.Timeout or context cancellation
+		// while reading body)" 对用户毫无意义，这里翻译成能据以行动的提示。
+		hint := streamReadErrHint(err, timeout)
+		m.appendLog(AgentLog{Level: "error", Category: "llm", Title: "LLM 流式读取中断: " + tag,
+			Detail: fmt.Sprintf("%v\n已收到 %d 字符", err, full.Len()), DurationMs: time.Since(start).Milliseconds()})
 		if full.Len() == 0 {
-			return "", fmt.Errorf("AI 流式读取失败: %w", err)
+			return "", fmt.Errorf("AI 流式读取失败: %s", hint)
 		}
+		// 已输出部分内容：保留它继续走完本轮（用户至少拿到半截答案，
+		// 思考与工具链也不被丢弃），中断原因记入日志。
+		m.appendLog(AgentLog{Level: "info", Category: "llm", Title: "LLM 流式提前结束: " + tag,
+			Detail: "已保留中断前生成的内容继续处理。原因：" + hint})
 	}
 	out := full.String()
 	dur := time.Since(start).Milliseconds()
@@ -431,6 +525,14 @@ func buildToolsPrompt(tools []MCPTool, skills []AgentSkill, mode string) string 
 		sb.WriteString("格式B（JSON）：\n")
 		sb.WriteString("```json\n{\"action\":\"tool\",\"server\":\"<服务器ID>\",\"tool\":\"<工具名>\",\"arguments\":{...}}\n```\n")
 		sb.WriteString("说明：内置工具 server 固定为 \"builtin\"（无需 MCP 服务器，本地直接执行）。参数值如需为对象/数组，请写成 JSON 字符串。\n")
+		sb.WriteString("\n严格遵守格式（下列写法都会导致调用失败）：\n")
+		sb.WriteString("- 函数名只能写成 <function>工具名</function>，不要用 <function=工具名>、<function name=工具名>（不加引号）等变体。\n")
+		sb.WriteString("- 每个 <parameter> 都必须有对应的 </parameter> 闭合。\n")
+		sb.WriteString("- 一个工具调用的所有内容必须放在同一个 <tool_call>...</tool_call> 内，不要提前闭合。\n")
+		sb.WriteString("- 每个需要的参数都必须给全，缺参数会直接失败（如 db_query 必须同时给 database 与 sql）。\n")
+		sb.WriteString("\n正确示例：\n")
+		sb.WriteString("<tool_call>\n<function>db_query</function>\n<parameter name=\"database\">diygw</parameter>\n<parameter name=\"sql\">SELECT * FROM orders WHERE ROWNUM <= 10</parameter>\n</tool_call>\n")
+		sb.WriteString("注意：Oracle 没有 LIMIT 子句，行数限制请用 ROWNUM 或 FETCH FIRST n ROWS ONLY。\n")
 		sb.WriteString("工具列表：\n")
 		for _, t := range tools {
 			sb.WriteString(fmt.Sprintf("- server=%s tool=%s: %s\n", t.Server, t.Name, t.Description))
@@ -512,7 +614,7 @@ var toolCallTagRe = regexp.MustCompile(`(?s)<tool_call>(.*?)</tool_call>`)
 // 函数名在标签体内：<function>name</function>
 var toolCallFuncRe = regexp.MustCompile(`(?s)<function\s*>\s*(.*?)\s*</function>`)
 // 函数名在属性里：<function name="name">...</function>
-var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*"([^"]*)"(?:\s+[^>]*)?>(.*?)</function>`)
+var toolCallFuncAttrRe = regexp.MustCompile(`(?s)<function\s+name\s*=\s*["']([^"']*)["'](?:\s+[^>]*)?>(.*?)</function>`)
 var toolCallParamRe = regexp.MustCompile(`(?s)<parameter\s+name\s*=\s*"([^"]*)"(?:\s+[^>]*)?>(.*?)</parameter>`)
 // 外层可能包 <function_calls> ... </function_calls>
 var funcCallsRe = regexp.MustCompile(`(?s)<function_calls>(.*?)</function_calls>`)
@@ -671,6 +773,125 @@ type toolAction struct {
 	Arguments map[string]interface{} `json:"arguments"`
 }
 
+// UnmarshalJSON 兼容 arguments 被写成「JSON 字符串」的畸形形态。
+//
+// 提示词里「参数值如需为对象/数组，请写成 JSON 字符串」常被模型误解成把整个
+// arguments 序列化成一个字符串：
+//
+//	"arguments":"{\"database\":\"diygw\",\"sql\":\"SELECT 1 FROM dual\"}"
+//
+// 标准反序列化会直接失败（字符串不能解到 map），于是一个参数都取不到，
+// 最终报「缺少 connId / database / sql 参数」。这里做二次解析。
+func (a *toolAction) UnmarshalJSON(b []byte) error {
+	// 先按原始结构解析 arguments 之外的字段，避免递归
+	var raw struct {
+		Action    string          `json:"action"`
+		Server    string          `json:"server"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a.Action, a.Server, a.Tool = raw.Action, raw.Server, raw.Tool
+	a.Arguments = map[string]interface{}{}
+
+	argStr := strings.TrimSpace(string(raw.Arguments))
+	if argStr == "" || argStr == "null" {
+		return nil
+	}
+	// 形态一：正常对象
+	if argStr[0] == '{' {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(argStr), &m); err == nil {
+			a.Arguments = m
+		}
+		return nil
+	}
+	// 形态二：被序列化成字符串
+	var s string
+	if err := json.Unmarshal([]byte(argStr), &s); err == nil {
+		s = strings.TrimSpace(s)
+		if strings.HasPrefix(s, "{") {
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(s), &m); err == nil {
+				a.Arguments = m
+			}
+		}
+	}
+	return nil
+}
+
+// ---------------- 畸形标签工具调用的容错解析 ----------------
+//
+// 实测模型（Qwen / DeepSeek / GLM 等）对工具调用的输出极不稳定，常见破坏形式：
+//  1. 函数名用等号或冒号：<function=db_query>（无引号、无 name= 属性）
+//  2. 参数标签不闭合：<parameter name="connId">pl_1
+//     <parameter name="database">diygw     —— 没有 </parameter>
+//  3. 参数值里混入后续标签残片，例如 connId 的值变成
+//     "pl_1</function>\n<parameter name=\"database\">diygw"
+//  4. 参数写成自闭合：<parameter name="limit"/>
+//
+// 这些都会被原先「严格闭合」的正则漏掉，结果是参数串味 + 关键参数（sql）丢失，
+// 最终报「缺少 connId / database / sql 参数」——而模型其实已经给出了。
+// 下面按「起始标签定位 + 值遇到任意标签即截断」的思路解析，可救回绝大部分。
+
+// funcLooseNameRe 匹配 <function=NAME> / <function:NAME> / <function NAME>。
+var funcLooseNameRe = regexp.MustCompile(`(?is)<\s*function\s*[=:]\s*["']?([A-Za-z0-9_.\-]+)["']?\s*>`)
+
+// funcNameLooseRes 是「不依赖闭合标签」的函数名提取规则，按优先级排列：
+// 模型经常只闭合 <parameter> 与 <tool_call> 而漏掉 </function>，
+// 依赖闭合的正则会整体失配，导致工具名取不到、参数全部丢失。
+var funcNameLooseRes = []*regexp.Regexp{
+	// <function name="x"> / <function name='x'> / <function name=x>
+	regexp.MustCompile(`(?is)<\s*function\s+name\s*=\s*["']?([A-Za-z0-9_.\-]+)["']?[^>]*>`),
+	// <function=x> / <function:x>
+	regexp.MustCompile(`(?is)<\s*function\s*[=:]\s*["']?([A-Za-z0-9_.\-]+)["']?[^>]*>`),
+	// <function>x</function>，以及未闭合的 <function>x
+	regexp.MustCompile(`(?is)<\s*function\s*>\s*([A-Za-z0-9_.\-]+)\s*(?:</\s*function\s*>|[\r\n]|$)`),
+}
+
+// paramOpenRe 只匹配参数**起始**标签（含自闭合形式），参数值另行按边界截断。
+var paramOpenRe = regexp.MustCompile(`(?is)<\s*parameter\s+name\s*=\s*["']([^"']+)["'][^>]*>`)
+
+// paramBoundaryRe 标识参数值的结束边界：下一个参数起始、任何闭合或起始标签。
+var paramBoundaryRe = regexp.MustCompile(`(?is)<\s*/?\s*(parameter|function|tool_call|tool_calls|invoke)\b`)
+
+// looseTagRe 清理参数值里残留的孤立标签（如 </function>、<parameter name="x">）。
+var looseTagRe = regexp.MustCompile(`(?is)<\s*/?\s*(parameter|function|tool_call|tool_calls|invoke)\b[^>]*>`)
+
+// stripLooseTags 去掉字符串中残留的工具调用标签，返回干净的值。
+func stripLooseTags(s string) string {
+	if !strings.Contains(s, "<") {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(looseTagRe.ReplaceAllString(s, ""))
+}
+
+// extractTagParams 从工具调用标签体中提取参数。
+// 与「必须匹配 </parameter>」的严格写法不同，这里只依赖起始标签 + 边界截断，
+// 因此能兼容参数标签未闭合、自闭合、以及值里混入后续标签残片等情况。
+func extractTagParams(block string) map[string]interface{} {
+	args := map[string]interface{}{}
+	locs := paramOpenRe.FindAllStringSubmatchIndex(block, -1)
+	for i, loc := range locs {
+		name := strings.TrimSpace(block[loc[2]:loc[3]])
+		if name == "" {
+			continue
+		}
+		valStart := loc[1]
+		valEnd := len(block)
+		if i+1 < len(locs) {
+			// 下一个参数标签即为本次值的边界
+			valEnd = locs[i+1][0]
+		} else if m := paramBoundaryRe.FindStringIndex(block[valStart:]); m != nil {
+			valEnd = valStart + m[0]
+		}
+		applyArg(args, name, stripLooseTags(block[valStart:valEnd]))
+	}
+	return args
+}
+
 // parseToolFromToolCall 解析 <tool_call>/<function>/<parameter> 标签格式。
 func parseToolFromToolCall(text string) (*toolAction, bool) {
 	// 先定位最内层可解析块：优先 <tool_call>，其次 <function_calls>，再次整段
@@ -681,7 +902,7 @@ func parseToolFromToolCall(text string) (*toolAction, bool) {
 		block = m[1]
 	}
 
-	// 提取函数名（兼容 name 在属性内 与 在标签体内两种写法）
+	// 提取函数名（兼容 name 在属性内、在标签体内、以及 <function=NAME> 等号/冒号形式）
 	name := ""
 	var funcBody string
 	if m := toolCallFuncAttrRe.FindStringSubmatch(block); len(m) >= 3 {
@@ -690,27 +911,35 @@ func parseToolFromToolCall(text string) (*toolAction, bool) {
 	} else if m := toolCallFuncRe.FindStringSubmatch(block); len(m) >= 2 {
 		name = strings.TrimSpace(m[1])
 		funcBody = block
+	} else if m := funcLooseNameRe.FindStringSubmatch(block); len(m) >= 2 {
+		// <function=db_query> / <function:db_query>：等号/冒号形式，函数名不带引号
+		name = strings.TrimSpace(m[1])
+		funcBody = block
+	} else {
+		// 兜底：模型常常不闭合 </function>（只闭合 parameter 与 tool_call），
+		// 上面几个依赖 </function> 的写法会全部失配，这里按「起始标签即取名」解析。
+		for _, re := range funcNameLooseRes {
+			if m := re.FindStringSubmatch(block); len(m) >= 2 {
+				name = strings.TrimSpace(m[1])
+				break
+			}
+		}
+		funcBody = block
 	}
 	if name == "" {
 		return nil, false
 	}
 
-	// 提取参数。优先从 <parameter> 标签解析；若无 parameter 标签但函数体里有
-	// 类似 JSON 的内容，则直接解析函数体。
-	args := map[string]interface{}{}
-	params := toolCallParamRe.FindAllStringSubmatch(block, -1)
-	if len(params) > 0 {
-		for _, pm := range params {
-			pname := strings.TrimSpace(pm[1])
-			pval := strings.TrimSpace(pm[2])
-			applyArg(args, pname, pval)
-		}
-	} else if fb := strings.TrimSpace(funcBody); fb != "" {
-		// 函数体本身可能是 JSON 对象（如 <function>{"path":"/x"}</function>）
-		var jv map[string]interface{}
-		if err := json.Unmarshal([]byte(fb), &jv); err == nil {
-			for k, v := range jv {
-				args[k] = v
+	// 提取参数：容错解析（起始标签 + 边界截断），能救回未闭合 / 串味的参数。
+	args := extractTagParams(block)
+	if len(args) == 0 {
+		// 无 parameter 标签时，函数体本身可能是 JSON 对象（如 <function>{"path":"/x"}</function>）
+		if fb := strings.TrimSpace(funcBody); fb != "" {
+			var jv map[string]interface{}
+			if err := json.Unmarshal([]byte(fb), &jv); err == nil {
+				for k, v := range jv {
+					args[k] = v
+				}
 			}
 		}
 	}
@@ -718,15 +947,21 @@ func parseToolFromToolCall(text string) (*toolAction, bool) {
 	return act, true
 }
 
-// applyArg 将单个参数值按 JSON 解析后写入 args；若解析为对象则展开合并，否则标量。
+// applyArg 将单个参数值按 JSON 解析后写入 args。
+//
+// 关于对象值的处理：模型有时会把整包参数塞进一个容器型参数里
+// （如 <parameter name="arguments">{"path":"/x"}</parameter>），需要展开合并。
+// 但若对**所有**对象值都展开，正常传对象的参数会被拆散——
+// 例如 <parameter name="content">{"k":1}</parameter> 会变成 args["k"]=1 而丢掉 content。
+// 因此只对容器型参数名展开，其余保持原样。
 func applyArg(args map[string]interface{}, pname, pval string) {
 	if pname == "" {
 		return
 	}
 	var jv interface{}
 	if err := json.Unmarshal([]byte(pval), &jv); err == nil {
-		if m, ok := jv.(map[string]interface{}); ok {
-			// 参数整体是 JSON 对象（如 arguments={...}）时展开合并
+		if m, ok := jv.(map[string]interface{}); ok && isContainerArg(pname) {
+			// 容器参数（arguments/args）整体是 JSON 对象时展开合并
 			for k, v := range m {
 				args[k] = v
 			}
@@ -736,6 +971,15 @@ func applyArg(args map[string]interface{}, pname, pval string) {
 		return
 	}
 	args[pname] = pval
+}
+
+// isContainerArg 判断参数名是否是「整包参数容器」。
+func isContainerArg(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "arguments", "args", "参数", "arguments_json":
+		return true
+	}
+	return false
 }
 
 // parseToolAction 从模型输出中提取工具调用。
@@ -761,6 +1005,7 @@ func parseToolAction(text string) (*toolAction, bool) {
 		if err := json.Unmarshal([]byte(c), &act); err != nil {
 			continue
 		}
+		// arguments 为字符串形态的兼容已由 toolAction.UnmarshalJSON 处理
 		if act.Action != "tool" || act.Tool == "" {
 			continue
 		}
@@ -960,11 +1205,12 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 					desc = "(无描述)"
 				}
 				step := AgentStep{
-								Type:   "skill",
-								Name:   s.Name,
-								Input:  "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt,
-								Output: "模型在思考中运用了该技能",
-							}
+									Type:   "skill",
+									Name:   s.Name,
+									Input:  "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt,
+									Output: "模型在思考中运用了该技能",
+									CallID: "skill_" + agentID(""),
+								}
 							result.Steps = append(result.Steps, step)
 							m.b.Emit("agent:step", step)
 							// 写入 skill 分类日志：否则日志面板里「skill」分类永远查不到数据
@@ -1020,6 +1266,7 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 				result.Steps = append(result.Steps, AgentStep{
 					Type:   "tool-failed",
 					Name:   "工具调用未解析",
+					CallID: "failed_" + agentID(""),
 					Output: "检测到工具调用标记但未能解析为可执行的工具动作。原始片段：\n" + diag + "\n常见原因：标签被截断/转义、参数未闭合、或使用了不被识别的格式（需 <tool_call><function>名</function><parameter name=\"k\">v</parameter></tool_call>）。",
 				})
 				m.b.Emit("agent:step", result.Steps[len(result.Steps)-1])
@@ -1029,9 +1276,11 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 			result.Thinking = strings.TrimSpace(thinkingAll.String())
 			break
 		}
-		// 执行工具
-		step := AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: toJSON(act.Arguments)}
-		m.b.Emit("agent:step", AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: step.Input})
+		// 执行工具。callID 标识本次调用实例：同一次调用的开始/结束事件共用它，
+		// 前端据此合并为一张卡片；而重复调用同一工具时各自持有不同 callID，会逐条展示。
+		callID := "call_" + agentID("") + strconv.Itoa(i)
+			step := AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: toJSON(act.Arguments), CallID: callID}
+			m.b.Emit("agent:step", AgentStep{Type: "tool", Name: act.Tool, Server: act.Server, Input: step.Input, CallID: callID})
 		var toolOut string
 		var terr error
 		if act.Server == "builtin" {

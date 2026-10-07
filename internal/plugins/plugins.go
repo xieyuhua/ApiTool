@@ -235,13 +235,9 @@ func PluginTest(conn model.PluginConn) PluginOpResult {
 		var n int
 		err := withConn(connKey(conn)+"|", dbFactory(conn, ""), func(v interface{}) error {
 			s := v.(*dbSession)
-			var res *DBRow
-			var e error
-			if s.dbType == "postgres" {
-				res, e = s.pg.query("SELECT 1")
-			} else {
-				res, e = s.mysql.query("SELECT 1")
-			}
+			// 探活语句按方言取（Oracle 需要 SELECT 1 FROM DUAL），
+			// 并统一走 s.query 分发，避免 Oracle 落到 s.mysql 上导致 nil panic。
+			res, e := s.query(s.probeSQL())
 			if e != nil {
 				return e
 			}

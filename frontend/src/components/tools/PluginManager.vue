@@ -291,7 +291,7 @@
         </el-form-item>
         <el-form-item label="主机"><el-input v-model="form.host" /></el-form-item>
         <el-form-item label="端口"><el-input v-model="form.port" /></el-form-item>
-        <el-form-item label="默认库/Schema" v-if="form.category === 'db'"><el-input v-model="form.database" placeholder="mysql: 库名；pg/oracle: schema" /></el-form-item>
+        <el-form-item label="默认库/Schema" v-if="form.category === 'db'"><el-input v-model="form.database" :placeholder="dbPlaceholder" /></el-form-item>
         <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
@@ -406,6 +406,15 @@ const testResult = ref(null)
 
 // 表单状态（新增/编辑连接）
 const form = reactive({ name: '', category: 'ssh', dbType: 'mysql', host: '', port: 0, username: '', password: '', database: '', remark: '', encoding: 'utf-8' })
+
+// 各数据库类型「默认库/Schema」的填写说明。Oracle 最容易填错：
+// 连不上时最常见的原因是服务名填成了 SID（或反之），故明确提示两种写法。
+const DB_PLACEHOLDER = {
+  mysql: '库名，如 mydb',
+  postgres: 'schema，如 public',
+  oracle: '服务名 SERVICE_NAME，如 ORCLPDB1（不是 schema 名）；若用 SID 请写 sid:ORCL',
+}
+const dbPlaceholder = computed(() => DB_PLACEHOLDER[form.dbType] || '库名 / Schema')
 
 // ===================== 多标签（类浏览器标签） =====================
 const openTabs = ref([])          // 已打开的标签（连接 id 数组，可跨分类）
@@ -1257,9 +1266,43 @@ async function confirmSz() {
 }
 
 function removeConn(id) {
+  // 删除连接时同步清理 Agent 侧的表结构快照 / 字段语义 / 记忆库，
+  // 否则这些以 connId 为键的数据会长期残留，混入 Agent 提示词，
+  // 让模型填出已不存在的 connId（新旧连接 id 常只差几位数字，极易混淆）。
+  pruneAgentDBAnalysis(id)
   removePluginConn(id)
   if (openTabs.value.includes(id)) closeConnTab(id)
   ElMessage.success('已删除')
+}
+
+// pruneAgentDBAnalysis 清除指定连接在 agent 配置中的所有痕迹。
+async function pruneAgentDBAnalysis(connId) {
+  try {
+    const d = await AgentAPI.load()
+    const cfg = d.config || {}
+    let dirty = false
+    const pre = k => k.split('|')[0] === connId
+    if (cfg.dbSchemas) {
+      for (const k of Object.keys(cfg.dbSchemas)) {
+        if (pre(k)) { delete cfg.dbSchemas[k]; dirty = true }
+      }
+    }
+    if (cfg.dbSemantics) {
+      for (const k of Object.keys(cfg.dbSemantics)) {
+        if (pre(k)) { delete cfg.dbSemantics[k]; dirty = true }
+      }
+    }
+    if (cfg.dbLastDB && cfg.dbLastDB[connId]) { delete cfg.dbLastDB[connId]; dirty = true }
+    if (cfg.activeDBConn === connId) { cfg.activeDBConn = ''; dirty = true }
+    if (dirty) {
+      await AgentAPI.saveConfig({
+        activeDBConn: cfg.activeDBConn || '',
+        dbSchemas: cfg.dbSchemas || {},
+        dbSemantics: cfg.dbSemantics || {},
+        dbLastDB: cfg.dbLastDB || {},
+      })
+    }
+  } catch (e) { /* 清理失败不影响删除主流程 */ }
 }
 </script>
 
