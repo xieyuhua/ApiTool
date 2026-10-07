@@ -11,13 +11,6 @@ function escapeHtml(s) {
 
 function inline(text) {
   let t = escapeHtml(text)
-  // 导出的表格文件：把绝对路径变成可点击的下载/打开入口。
-  // 桌面端点击用系统默认程序打开，局域网网页端点击直接下载（见 AgentChat 的事件委托）。
-  t = t.replace(exportFileRe, (m0, p1, p2) => {
-    const full = (p1 || '') + p2
-    const name = full.split(/[\\/]/).pop() || full
-    return `<a class="md-file" data-file-path="${full.replace(/"/g, '&quot;')}" title="${full.replace(/"/g, '&quot;')}">📎 ${name}</a>`
-  })
   // 行内代码
   t = t.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>')
   // 粗体
@@ -31,7 +24,11 @@ function inline(text) {
 
 // exportFileRe 匹配导出文件的绝对路径（Windows 与 POSIX 两种形式），
 // 限定在常见导出格式上，避免把普通文本误判成文件链接。
-const exportFileRe = /((?:[A-Za-z]:[\\/]|\\\\|\/)[^\s<>"'|]*?\.(?:xlsx|xls|csv|html|md|json|txt|zip|pdf))\b/gi
+//
+// 注意结尾不能加 \b：路径后常紧跟中文（如「…xlsx5 个城市」），
+// \b 在中英文混排处判定不可靠，会把后面的字符一起吞进文件名。
+// 这里用「扩展名后不再跟字母数字/点」作为边界。
+const exportFileRe = /((?:[A-Za-z]:[\\/]|\\\\|\/)[^\s<>"'|]*?\.(?:xlsx|xls|csv|html|md|json|txt|zip|pdf))(?![A-Za-z0-9._])/gi
 
 let mermaidPromise = null
 let mermaidSeq = 0
@@ -191,5 +188,40 @@ export function renderMarkdown(md) {
     }
     out.push('<p class="md-p">' + inline(buf.join('\n')).replace(/\n/g, '<br/>') + '</p>')
   }
-  return out.join('\n')
+  return linkifyExportFiles(out.join('\n'))
+}
+
+// linkifyExportFiles 在渲染结果上统一把导出文件路径转成可点击链接。
+//
+// 为什么放在最后统一处理：模型常把导出路径包在代码块里（```），
+// 而代码块走 escapeHtml 直接输出、根本不经过 inline()，
+// 只在inline 里替换会漏掉这类（表现为「网页端仍是纯文本路径」）。
+// 这里对最终 HTML 做一次处理，并跳过已有标签内部，避免破坏已生成的标签。
+//
+// 分段处理：以 HTML 标签为界，只在标签之外替换，
+// 因此不会动到 <pre>/<code>/<a> 等已有标签的内部文本。
+function linkifyExportFiles(html) {
+  if (!html || html.indexOf('.xlsx') < 0 && html.indexOf('.csv') < 0 &&
+    html.indexOf('.html') < 0 && html.indexOf('.md') < 0 &&
+    html.indexOf('.pdf') < 0 && html.indexOf('.csv') < 0) {
+    return html
+  }
+  // 按标签切分：偶数段是标签内部（不动），奇数段是文本（替换）
+  const parts = String(html).split(/(<[^>]*>)/g)
+  for (let i = 0; i < parts.length; i += 2) {
+    const chunk = parts[i]
+    if (!chunk) continue
+    parts[i] = chunk.replace(exportFileRe, (m0, p1) => {
+      // 正则只有一个捕获组，p1 即完整路径。
+      // 注意：replace 的回调参数依次为 (match, p1, offset, string)，
+      // 若按 (m0, p1, p2) 取第三个参数拿到的是「偏移量数字」，
+      // 会被误拼到路径末尾（表现为文件名多出一串数字）。
+      const full = p1 || m0
+      const name = full.split(/[\\/]/).pop() || full
+      const esc = full.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      const label = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      return `<a class="md-file" data-file-path="${esc}" title="${esc}">📎 ${label}</a>`
+    })
+  }
+  return parts.join('')
 }
