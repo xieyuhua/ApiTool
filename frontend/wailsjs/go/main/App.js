@@ -138,8 +138,16 @@ export function ExportCapturedOpenAPI(arg1, arg2) {
   return window['go']['main']['App']['ExportCapturedOpenAPI'](arg1, arg2);
 }
 
+export function ExportDirPath() {
+  return window['go']['main']['App']['ExportDirPath']();
+}
+
 export function ExportDoc(arg1, arg2, arg3) {
   return window['go']['main']['App']['ExportDoc'](arg1, arg2, arg3);
+}
+
+export function ExportFileInDir(arg1) {
+  return window['go']['main']['App']['ExportFileInDir'](arg1);
 }
 
 export function ExportStressReport(arg1, arg2) {

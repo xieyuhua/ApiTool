@@ -521,6 +521,47 @@ func (a *App) OpenExportFile(path string) error {
 	return nil
 }
 
+// ExportFileInDir 判断 path 是否位于应用数据目录的 exports 子目录内。
+//
+// 局域网网页端下载导出文件时必须做此校验：Agent 具备文件读写与命令执行能力，
+// 若不限制目录，网页端就能通过 ?path= 下载任意文件（数据库、配置等）。
+func (a *App) ExportFileInDir(path string) bool {
+	if a == nil || a.store == nil {
+		return false
+	}
+	return exportPathAllowed(a.store.Dir(), path)
+}
+
+// ExportDirPath 返回导出目录的绝对路径（供前端提示用户去哪取文件）。
+func (a *App) ExportDirPath() string {
+	if a == nil || a.store == nil {
+		return ""
+	}
+	return filepath.Join(a.store.Dir(), agent.ExportDirName)
+}
+
+// exportPathAllowed 校验目标文件是否位于导出目录内。
+func exportPathAllowed(base, path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || base == "" {
+		return false
+	}
+	absBase, err := filepath.Abs(filepath.Join(base, agent.ExportDirName))
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absBase, absPath)
+	if err != nil {
+		return false
+	}
+	// 必须位于导出目录内部（不允许 ../ 逃逸，也不允许就是目录本身）
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // OpenExportFolder 在文件管理器中打开导出文件所在目录。
 func (a *App) OpenExportFolder(path string) error {
 	path = strings.TrimSpace(path)

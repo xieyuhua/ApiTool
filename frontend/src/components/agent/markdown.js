@@ -11,6 +11,13 @@ function escapeHtml(s) {
 
 function inline(text) {
   let t = escapeHtml(text)
+  // 导出的表格文件：把绝对路径变成可点击的下载/打开入口。
+  // 桌面端点击用系统默认程序打开，局域网网页端点击直接下载（见 AgentChat 的事件委托）。
+  t = t.replace(exportFileRe, (m0, p1, p2) => {
+    const full = (p1 || '') + p2
+    const name = full.split(/[\\/]/).pop() || full
+    return `<a class="md-file" data-file-path="${full.replace(/"/g, '&quot;')}" title="${full.replace(/"/g, '&quot;')}">📎 ${name}</a>`
+  })
   // 行内代码
   t = t.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>')
   // 粗体
@@ -21,6 +28,10 @@ function inline(text) {
   t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
   return t
 }
+
+// exportFileRe 匹配导出文件的绝对路径（Windows 与 POSIX 两种形式），
+// 限定在常见导出格式上，避免把普通文本误判成文件链接。
+const exportFileRe = /((?:[A-Za-z]:[\\/]|\\\\|\/)[^\s<>"'|]*?\.(?:xlsx|xls|csv|html|md|json|txt|zip|pdf))\b/gi
 
 let mermaidPromise = null
 let mermaidSeq = 0

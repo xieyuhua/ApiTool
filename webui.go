@@ -77,6 +77,8 @@ func (a *App) webUIHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rpc/", a.webRPCHandler)
 	mux.HandleFunc("/events", a.webEventsHandler)
+	// 导出文件下载（局域网网页端点击导出结果时使用；桌面端走本地打开）
+	mux.HandleFunc("/export/download", a.webExportDownload)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if sub == nil {
 			http.Error(w, "frontend assets missing", http.StatusInternalServerError)

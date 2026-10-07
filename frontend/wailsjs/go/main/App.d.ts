@@ -83,7 +83,11 @@ export function ExportAgentSession(arg1:string,arg2:string):Promise<string>;
 
 export function ExportCapturedOpenAPI(arg1:Array<string>,arg2:string):Promise<string>;
 
+export function ExportDirPath():Promise<string>;
+
 export function ExportDoc(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function ExportFileInDir(arg1:string):Promise<boolean>;
 
 export function ExportStressReport(arg1:string,arg2:string):Promise<string>;
 

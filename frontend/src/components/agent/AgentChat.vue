@@ -91,6 +91,45 @@ const enabledServerCount = computed(() => servers.value.filter(s => s.enabled).l
 // 运行在局域网网页端（此时「开启局域网访问」这类桌面专属入口不再展示）
 const webMode = isWebUI()
 
+// ---------------- 导出文件点击行为 ----------------
+//
+// 正文里的导出文件路径会被 markdown 渲染成 <a class="md-file" data-file-path="...">。
+// 点击时按运行环境分流：
+//   - 桌面端：用系统默认程序直接打开（Excel/WPS 打开 xlsx，浏览器打开 html/md）
+//   - 局域网网页端：无法访问本机文件系统，改走 HTTP 下载（/export/download）
+function onBodyClick(e) {
+  const a = e.target && e.target.closest ? e.target.closest('a.md-file') : null
+  if (!a) return
+  e.preventDefault()
+  const path = a.getAttribute('data-file-path') || ''
+  if (!path) return
+  if (webMode) {
+    // 网页端：交给浏览器下载
+    const url = '/export/download?path=' + encodeURIComponent(path)
+    const link = document.createElement('a')
+    link.href = url
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    ElMessage.success('已开始下载：' + (path.split(/[\\/]/).pop() || path))
+    return
+  }
+  // 桌面端：调用后端用系统程序打开
+  callApp('OpenExportFile', path).catch(() => {
+    ElMessage.warning('无法自动打开，请手动到该路径查看：' + path)
+  })
+}
+
+// 统一的后端方法调用（走 window.go，桌面端与网页端都由桥接提供）
+function callApp(name, path) {
+  const app = window.go && window.go.main && window.go.main.App
+  if (!app || typeof app[name] !== 'function') {
+    return Promise.reject(new Error('当前环境不支持该操作'))
+  }
+  return app[name](path)
+}
+
 // 本端（桌面窗口或某个浏览器标签）的稳定标识。
 // 后端会把它随 agent:done / agent:sessions-changed 回传，用于区分这次对话是谁发起的：
 // 自己发起的走本地流程，不重复刷新；别的端（典型是局域网网页端）发起的才刷新会话并提示，
@@ -481,7 +520,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 对话区 -->
-    <div class="agent-body" ref="bodyRef">
+    <div class="agent-body" ref="bodyRef" @click="onBodyClick">
       <div v-if="!messages.length" class="welcome">
         <div class="wc-icon">🤖</div>
         <div class="wc-title">AI Agent 助手</div>
@@ -669,6 +708,16 @@ onBeforeUnmount(() => {
 .md-body :deep(.md-mermaid) { text-align: center; margin: 10px 0; background: var(--surface); }
 .md-body :deep(.md-mermaid-tip) { font-size: 12px; color: var(--text-muted); }
 .md-body :deep(a) { color: var(--primary); }
+/* 导出文件链接：桌面端可直接点开，网页端点击下载 */
+.md-body :deep(a.md-file) {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; margin: 2px 0;
+  border: 1px solid var(--primary); border-radius: 6px;
+  background: var(--el-color-primary-light-9);
+  color: var(--primary); text-decoration: none; cursor: pointer;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.md-body :deep(a.md-file:hover) { background: var(--primary); color: #fff; }
 
 /* 会话侧边栏 */
 .agent-wrap { flex: 1; display: flex; flex-direction: row; height: 100vh; background: var(--bg); overflow: hidden; }

@@ -19,7 +19,7 @@
     <div v-if="exportPath" class="tc-export">
       <span class="tc-export-path" :title="exportPath">{{ exportPath }}</span>
       <span class="tc-export-ops" @click.stop>
-        <el-button size="small" text type="primary" @click="openFile">打开文件</el-button>
+        <el-button size="small" text type="primary" @click="openOrDownload">{{ isWeb ? '下载' : '打开文件' }}</el-button>
         <el-button size="small" text @click="openFolder">打开目录</el-button>
         <el-button size="small" text @click="copyPath">复制路径</el-button>
       </span>
@@ -44,6 +44,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { isWebUI } from './agentApi'
 
 const props = defineProps({ step: { type: Object, required: true } })
 
@@ -51,6 +52,9 @@ const iconMap = { tool: '🔧', skill: '✨', thought: '💭', plan: '📋', 'to
 // 用 computed 而非普通 const：step 是响应式对象，同一次调用的开始/结束事件
 // 会替换整条数据（合并），computed 才能保证图标随类型变化而更新。
 const icon = computed(() => iconMap[props.step.type] || '🔧')
+
+// 运行在局域网网页端：无法访问本机文件系统，导出文件只能下载，不能本地打开。
+const isWeb = isWebUI()
 
 // 导出结果识别：export_table 成功后，输出里带有生成的绝对路径。
 // 从中取出路径，让用户可以一键打开文件 / 打开目录 / 复制路径。
@@ -110,6 +114,23 @@ async function copyPath() {
   } catch {
     ElMessage.warning('复制失败，请手动选中复制')
   }
+}
+
+// 局域网网页端无法访问本机文件系统，改为下载；
+// 与 AgentChat 正文中 md-file 链接的行为保持一致。
+function openOrDownload() {
+  if (isWebUI()) {
+    const url = '/export/download?path=' + encodeURIComponent(exportPath.value)
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    ElMessage.success('已开始下载')
+    return
+  }
+  openFile()
 }
 </script>
 

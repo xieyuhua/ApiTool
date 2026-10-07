@@ -148,8 +148,9 @@ func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, file
 	}
 }
 
-// exportDirName 导出文件存放子目录名（位于应用数据目录下，便于集中查找与清理）。
-const exportDirName = "exports"
+// ExportDirName 导出文件存放子目录名（位于应用数据目录下，便于集中查找与清理）。
+// 导出为公共常量：宿主包（App）需要它来校验「网页端下载的文件是否位于导出目录内」。
+const ExportDirName = "exports"
 
 // builtinExportTable 把表格数据导出为文件。
 // data 支持 Markdown 表格、CSV 文本、JSON 二维/对象数组，
@@ -181,7 +182,7 @@ func builtinExportTable(m *Manager, args map[string]interface{}) (string, error)
 		if base == "" {
 			base, _ = os.Getwd()
 		}
-		dir = filepath.Join(base, exportDirName)
+		dir = filepath.Join(base, ExportDirName)
 	}
 
 	path, err := exportTable(tbl, format, dir, tbl.Title)
