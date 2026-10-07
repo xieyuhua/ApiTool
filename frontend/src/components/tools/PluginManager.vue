@@ -420,7 +420,7 @@ const form = reactive({ name: '', category: 'ssh', dbType: 'mysql', host: '', po
 const DB_PLACEHOLDER = {
   mysql: '库名，如 mydb',
   postgres: 'schema，如 public',
-  oracle: '服务名 SERVICE_NAME，如 ORCLPDB1（不是 schema 名）；若用 SID 请写 sid:ORCL',
+  oracle: '服务名 SERVICE_NAME，如 ORCLPDB1（不是 schema）；查询时另选 schema。若用 SID 请写 sid:ORCL',
 }
 const dbPlaceholder = computed(() => DB_PLACEHOLDER[form.dbType] || '库名 / Schema')
 

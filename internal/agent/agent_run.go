@@ -1238,17 +1238,24 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 			if c.ID == active {
 				mark = "（当前激活分析连接）"
 			}
-			dbLabel := c.Database
+			// 库名以「该连接已同步过表结构的库」为准，而不是连接配置里的默认库：
+			// Oracle 的默认库填的是服务名（与 schema 不是一回事），MySQL/PG 的默认库
+			// 也未必是用户实际要分析的库。只列出真正可用于查询的库，避免模型填错。
+			dbs := m.syncedDBsOfConn(c.ID)
+			dbLabel := strings.Join(dbs, "、")
 			if dbLabel == "" {
-				dbLabel = "（未指定，工具会自动取已同步表结构中的库）"
+				dbLabel = "（该库尚未同步表结构，请先在「插件 / 数据库连接」中同步）"
 			}
-			connLines = append(connLines, fmt.Sprintf("- connId=%s 名称=%s 类型=%s 默认库=%s%s",
+			connLines = append(connLines, fmt.Sprintf("- connId=%s 名称=%s 类型=%s 可用库=%s%s",
 				c.ID, c.Name, c.DbType, dbLabel, mark))
 		}
 		if len(connLines) > 0 {
-			sysPrompt += "\n\n## 可用数据库连接（db 类型）\n调用 db_schema / db_query 时优先使用下列 connId" +
-				"（database 可省略，工具会自动补全）：\n" + strings.Join(connLines, "\n") +
-				"\n若未显式指定 connId，工具会自动使用当前激活的分析连接（或第一个 db 连接）。"
+			sysPrompt += "\n\n## 可用数据库连接（db 类型）\n调用 db_schema / db_query 时请使用下列 connId 与 database：" +
+				"\n" + strings.Join(connLines, "\n") +
+				"\n说明：database 必须是上面「可用库」中的值（已同步过表结构的库）。" +
+				"若未显式指定 connId，工具会使用当前激活的分析连接。" +
+				"\n注意：Oracle 连接配置里的「默认库」填的是**服务名**（用于建立连接），不是 schema；" +
+				"实际查询用的库（schema）必须取自上面的「可用库」。"
 		}
 	}
 

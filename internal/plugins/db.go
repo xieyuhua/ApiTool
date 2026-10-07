@@ -64,12 +64,11 @@ func dbFactory(conn model.PluginConn, database string) func() (interface{}, func
 		case "postgres":
 			dbType, db, err = openPostgres(dsn)
 		case "oracle":
-			// 服务名 / SID / 监听器默认服务依次回退尝试，避免用户反复手改配置
+			// 服务名 / SID 依次回退尝试，避免用户反复手改配置。
+			// 注意：服务名只取连接配置的 database，传入的 database 参数是 schema，
+			// 混用会导致「测试连接成功但工具执行报 ORA-12514」。
 			port := portOrDefault(conn.Port, 1521)
-			svc := strings.TrimSpace(database)
-			if svc == "" {
-				svc = strings.TrimSpace(conn.Database)
-			}
+			svc := strings.TrimSpace(conn.Database)
 			var odb *sql.DB
 			odb, err = tryOpenOracle(conn, port, svc)
 			db, dbType = odb, "oracle"
@@ -108,16 +107,13 @@ func buildDBDSN(conn model.PluginConn, database string) string {
 			host, port, user, pass, dbname)
 	case "oracle":
 		port := portOrDefault(conn.Port, 1521)
-		// database 优先（用户选中的服务名/SID/schema），否则回退连接上配置的默认库
-		svc := strings.TrimSpace(database)
-		if svc == "" {
-			svc = strings.TrimSpace(conn.Database)
-		}
-		if svc == "" {
-			// Oracle 没有「不指定服务名就能连」的用法，硬拼一个空路径只会得到
-			// 无意义的 ORA-12514，这里直接给出可操作的提示。
-			svc = "MISSING_SERVICE_NAME"
-		}
+		// Oracle 的「服务名」与「schema」是两个不同的概念，绝不能混用：
+		//   - 服务名（SERVICE_NAME/SID）：网络层，由监听器注册，决定能否连上；
+		//   - schema：登录后的命名空间，查询时才需要。
+		// database 参数在 Oracle 语义下是 schema（用户在「选择数据库/Schema」里选的），
+		// 若拿它当服务名就会把 HYDEE 之类的 schema 名发给监听器 → ORA-12514，
+		// 表现为「测试连接成功，但一执行工具就报错」。因此服务名只取连接配置本身。
+		svc := strings.TrimSpace(conn.Database)
 		return buildOracleDSN(conn, port, svc)
 	default: // mysql
 		port := portOrDefault(conn.Port, 3306)
@@ -383,7 +379,8 @@ func (s *dbSession) switchSchema(database string) error {
 		return nil
 	}
 	if s.dbType == "oracle" {
-		// 数据库字段填的可能是服务名或 SID 而非 schema，此时不做切换
+		// Oracle 的 database 参数是 schema（OWNER），用 ALTER SESSION 切换。
+		// 若它带 sid: 前缀说明填的是服务名而非 schema，此时不做切换。
 		sch := strings.TrimSpace(database)
 		if sch == "" || oracleServiceName(sch) == "" {
 			return nil

@@ -301,18 +301,75 @@ func resolveActiveDBConn(m *Manager) (connID, database string) {
 	if connID == "" {
 		return "", ""
 	}
-	if c, err := findDBConn(m, connID); err == nil {
-		database = c.Database
+	// 库的取值优先级（以「已同步的表结构」为准，而非连接配置里的默认库）：
+	//  1. 该连接上次选中的库（dbLastDB）—— 用户在「表结构同步」面板亲手选过的，最准确；
+	//  2. 该连接已同步表结构里出现过的任一库 —— 说明这些库确实有可分析的表；
+	//  3. 连接配置里的默认库 —— 仅兜底。
+	//
+	// 为什么不能优先用连接配置的 database：
+	//  - Oracle 下该字段填的是**服务名**（SERVICE_NAME）而非 schema，
+	//    拿它当库名去匹配已同步表结构永远匹配不上，
+	//    会报「未找到已同步的表（库 hydee）」—— hydee 是服务名，不是 schema。
+	//  - 即便 MySQL/PG，连接多个库时默认库也未必是用户要分析的那个。
+	if last, ok := cfg.DBLastDB[connID]; ok && strings.TrimSpace(last) != "" {
+		database = last
 	}
 	if database == "" {
 		for _, v := range cfg.DBSchemas {
-			if strings.EqualFold(v.ConnID, connID) && v.Database != "" {
+			if strings.EqualFold(v.ConnID, connID) && strings.TrimSpace(v.Database) != "" {
 				database = v.Database
 				break
 			}
 		}
 	}
+	if database == "" {
+		if c, err := findDBConn(m, connID); err == nil {
+			database = c.Database
+		}
+	}
 	return connID, database
+}
+
+// syncedDBList 返回该连接下已同步过表结构的库列表，供错误提示告知用户可选哪些库。
+func syncedDBList(cfg AgentConfig, connID string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(db string) {
+		db = strings.TrimSpace(db)
+		if db == "" {
+			return
+		}
+		k := strings.ToLower(db)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, db)
+	}
+	if last, ok := cfg.DBLastDB[connID]; ok {
+		add(last)
+	}
+	for _, v := range cfg.DBSchemas {
+		if strings.EqualFold(v.ConnID, connID) {
+			add(v.Database)
+		}
+	}
+	return out
+}
+
+// syncedDBsOfConn 返回该连接下已同步过表结构的库列表。
+//
+// 库以「已同步的表结构」为准，而非连接配置里的默认库：
+//   - Oracle 的默认库字段填的是服务名（SERVICE_NAME），与 schema 不是一回事；
+//   - MySQL/PG 的默认库也未必是用户实际要分析的那个库。
+//
+// 该列表同时用于提示词注入与错误提示，确保模型与用户看到的库是同一套。
+func (m *Manager) syncedDBsOfConn(connID string) []string {
+	if m == nil {
+		return nil
+	}
+	cfg := m.LoadAgentData().Config
+	return syncedDBList(cfg, connID)
 }
 
 // dbSemantic 读取用户在「插件 / 数据库连接」中维护的字段/表语义。
@@ -402,7 +459,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 		}
 	}
 	if len(picked) == 0 {
-		return fmt.Sprintf("未找到已同步的表（库 %s）。你当前仅可向模型提供已同步的表结构，请先在「插件 / 数据库连接」同步需要分析的表（如 %s）。",
+		return fmt.Sprintf("未找到已同步的表（库 %s）。%s",
 			database, exampleSyncedTables(cfg, connID, database)), nil
 	}
 	var sb strings.Builder
@@ -445,21 +502,51 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	return sb.String(), nil
 }
 
-// exampleSyncedTables 取该连接该库下已同步的若干表名，用于错误提示中给出示例
+// exampleSyncedTables 生成错误提示中的「可选范围」说明。
+//
+// 分两种情况给出可操作信息，避免用户只看到一句「未找到已同步的表」却不知该怎么办：
+//  1. 该连接下有别的库已同步表 → 直接列出那些库，让用户/模型知道该用哪个 database；
+//     （典型场景：Oracle 的连接配置里填的是服务名，与已同步的 schema 对不上）
+//  2. 该连接一个库都没同步 → 提示去连接管理里同步。
 func exampleSyncedTables(cfg AgentConfig, connID, database string) string {
+	// 当前库下已同步的表
 	var names []string
 	for _, v := range cfg.DBSchemas {
 		if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
 			names = append(names, v.Table)
 		}
-		if len(names) >= 3 {
+		if len(names) >= 5 {
 			break
 		}
 	}
-	if len(names) == 0 {
-		return "可在连接管理中同步"
+	// 该连接下所有已同步过表结构的库（可能不是当前 database）
+	dbs := syncedDBList(cfg, connID)
+
+	var sb strings.Builder
+	if len(names) > 0 {
+		sb.WriteString("当前库 " + database + " 已同步的表：" + strings.Join(names, "、"))
+	} else {
+		sb.WriteString("当前库 " + database + " 下没有已同步的表")
 	}
-	return "已同步的有：" + strings.Join(names, "、")
+	if len(dbs) > 0 {
+		sb.WriteString("；该连接下已同步表结构的库有：" + strings.Join(dbs, "、"))
+		if !containsFold(dbs, database) {
+			sb.WriteString("。请把 database 参数改为上面列出的库之一（或在「插件 / 数据库连接」中切换所选库）")
+		}
+	} else {
+		sb.WriteString("。请先在「插件 / 数据库连接」中选中该库并点「同步选中表结构」")
+	}
+	return sb.String()
+}
+
+// containsFold 判断列表中是否包含指定值（忽略大小写）。
+func containsFold(list []string, s string) bool {
+	for _, v := range list {
+		if strings.EqualFold(strings.TrimSpace(v), strings.TrimSpace(s)) {
+			return true
+		}
+	}
+	return false
 }
 
 // syncedTableSet 返回该连接该库下已同步表名（小写）的集合，用于 db_query 校验
