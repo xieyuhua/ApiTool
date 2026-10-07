@@ -227,16 +227,24 @@ func (a *App) callWebMethod(name string, args []json.RawMessage) (result interfa
 		defer a.WebReleaseBusy()
 	}
 	out := m.Call(in)
-	// 返回值：忽略末尾的非 nil error
-	res := make([]interface{}, 0, len(out))
-	for _, o := range out {
-		if e, ok := o.Interface().(error); ok {
-			if e != nil {
-				return nil, e
-			}
-			continue
+	// 返回值处理：剥离尾部的 error（Go 惯例 (T, error) / (T1, T2, error)），剩余按数量返回。
+	//
+	// 这里必须按「类型是否为 error」判断，而不能写 `o.Interface().(error)`：
+	// 当 error 返回值为 nil 时，o.Interface() 是一个 **nil interface**，
+	// 对它断言 error 得到 ok=false，于是 nil 会被当成正常返回值追加进去，
+	// (T, error) 变成 [T, nil] 两个元素，进而走多返回值分支返回数组 ——
+	// 前端拿到的就是数组（日志详情等场景表现为「无详情」），与桌面端行为不一致。
+	errType := reflect.TypeOf((*error)(nil)).Elem()
+	n := len(out)
+	for n > 0 && out[n-1].Type() == errType {
+		if !out[n-1].IsNil() {
+			return nil, out[n-1].Interface().(error)
 		}
-		res = append(res, o.Interface())
+		n--
+	}
+	res := make([]interface{}, 0, n)
+	for i := 0; i < n; i++ {
+		res = append(res, out[i].Interface())
 	}
 	switch len(res) {
 	case 0:

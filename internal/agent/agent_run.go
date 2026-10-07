@@ -24,6 +24,17 @@ type RunAgentArgs struct {
 	Model     string `json:"model"`
 	Timeout   int    `json:"timeoutSec"`
 	MaxTokens int    `json:"maxTokens"` // 模型回复长度上限（0=模型默认）
+	// ClientID 发起端标识（桌面端或局域网网页端各自随机生成并保持不变）。
+	// 后端会把它回传到 agent:done / agent:sessions-changed 等事件里，
+	// 前端据此判断「这次对话是不是我自己发起的」——
+	// 自己发起的不重复刷新，别人（如网页端）发起的才刷新会话并提示，
+	// 否则两端会互相覆盖对方正在展示的流式内容。
+	ClientID string `json:"clientId,omitempty"`
+	// SessionID 本次对话所属会话。桌面端与局域网网页端各自浏览不同会话时，
+	// 若仍依赖后端那个全局共享的 ActiveSession 游标，读到的历史与写入的结果
+	// 就会落到不同会话上（表现为「刚发的内容不见了」/「串到别的会话」）。
+	// 前端传自己正在浏览的会话 ID，为空时才回退到全局游标。
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // RunAgentResult 一次对话的最终结果。
@@ -96,6 +107,21 @@ func requestLogHeader(model string, temperature float64, maxTokens int, stream b
 // runeCount 按 Unicode 字符数统计（避免中文按字节被算成两倍）。
 func runeCount(s string) int { return len([]rune(s)) }
 
+// usagePtr 把本次调用的用量挂到日志上；全为 0（服务端未返回 usage）时返回 nil，
+// 以便前端区分「没有消耗」与「服务端没给数据」。
+func usagePtr(u TokenUsage) *TokenUsage {
+	if u.PromptTokens == 0 && u.CompletionTokens == 0 && u.TotalTokens == 0 {
+		return nil
+	}
+	c := u
+	return &c
+}
+
+// usageLine 生成日志详情里的用量摘要行。
+func usageLine(u TokenUsage) string {
+	return fmt.Sprintf("Token 用量　输入 %d　输出 %d　合计 %d", u.PromptTokens, u.CompletionTokens, u.TotalTokens)
+}
+
 // llmCall 复用底层 OpenAI 兼容请求，返回原始文本，并写日志。
 func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperature float64, tag string, maxTokens int) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(args.BaseURL), "/")
@@ -149,7 +175,23 @@ func (m *Manager) llmCall(args RunAgentArgs, messages []ai.ChatMessage, temperat
 		return "", fmt.Errorf("AI 返回内容为空")
 	}
 	out := r.Choices[0].Message.Content
-	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 响应: " + tag, Detail: util.Truncate(out, 3000), DurationMs: dur})
+	// 非流式响应同样带 usage，一并记入日志，保证「每次调用的输入/输出」都可查
+	var callUsage TokenUsage
+	var u struct {
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+			TotalTokens      int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(body, &u) == nil {
+		callUsage = TokenUsage{PromptTokens: u.Usage.PromptTokens, CompletionTokens: u.Usage.CompletionTokens, TotalTokens: u.Usage.TotalTokens}
+	}
+	detail := util.Truncate(out, 3000)
+	if p := usagePtr(callUsage); p != nil {
+		detail = usageLine(callUsage) + "\n\n" + detail
+	}
+	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 响应: " + tag, Detail: detail, DurationMs: dur, Usage: usagePtr(callUsage)})
 	return out, nil
 }
 
@@ -275,6 +317,8 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 		}
 	}
 
+	// callUsage 记录本次调用的用量（供日志展示）；跨分片时以最后一条有效 usage 为准。
+	var callUsage TokenUsage
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -306,12 +350,15 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 		}
 		// usage 可能出现在任意分片（OpenAI 通常放在最后一个带 choices/finish_reason 的事件里，
 		// 部分兼容服务则放在独立的空 choices 事件），只要解析到有效 usage 就回调。
-		if ev.Usage.TotalTokens > 0 && onUsage != nil {
-			onUsage(TokenUsage{
+		if ev.Usage.TotalTokens > 0 {
+			callUsage = TokenUsage{
 				PromptTokens:     ev.Usage.PromptTokens,
 				CompletionTokens: ev.Usage.CompletionTokens,
 				TotalTokens:      ev.Usage.TotalTokens,
-			})
+			}
+			if onUsage != nil {
+				onUsage(callUsage)
+			}
 		}
 		if len(ev.Choices) == 0 {
 			continue
@@ -340,7 +387,11 @@ func (m *Manager) llmCallStream(args RunAgentArgs, messages []ai.ChatMessage, te
 	}
 	out := full.String()
 	dur := time.Since(start).Milliseconds()
-	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 流式响应: " + tag, Detail: util.Truncate(out, 3000), DurationMs: dur})
+	detail := util.Truncate(out, 3000)
+	if p := usagePtr(callUsage); p != nil {
+		detail = usageLine(callUsage) + "\n\n" + detail
+	}
+	m.appendLog(AgentLog{Level: "response", Category: "llm", Title: "LLM 流式响应: " + tag, Detail: detail, DurationMs: dur, Usage: usagePtr(callUsage)})
 	return out, nil
 }
 
@@ -780,6 +831,13 @@ func (m *Manager) emitEvent(name string, payload interface{}) {
 
 // RunAgent 执行一次完整的 Agent 对话（ReAct / Plan loop）。
 func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
+	// 全局互斥：桌面端与局域网网页端共享同一份会话，并发执行会写坏数据。
+	// 用 TryLock 让第二端立刻拿到明确提示，而不是排队后与第一端交叉写入。
+	if !m.runMu.TryLock() {
+		return RunAgentResult{Error: "已有对话正在执行（桌面端或局域网网页端），请等它结束后再试"}
+	}
+	defer m.runMu.Unlock()
+
 	d := m.readAgentData()
 	cfg := d.Config
 	// 回复长度上限统一由配置决定（前端无需单独传），0 表示交给模型服务端默认值
@@ -837,10 +895,17 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	}
 
 	messages := []ai.ChatMessage{{Role: "system", Content: sysPrompt}}
-	// 加载当前激活会话的历史上下文（关键：必须用当前会话，而非顶层 Messages，否则会串到别的会话）
+	// 确定本次对话的目标会话：优先用前端传来的 SessionID（本端正在浏览的会话），
+	// 为空或不存在时回退到全局激活会话。
+	// 读历史与写结果必须用同一个会话，否则会出现「上下文来自 A、结果写进 B」。
+	targetSess := findSession(d, args.SessionID)
+	if targetSess == nil {
+		targetSess = d.activeSession()
+	}
+	// 加载该会话的历史上下文（关键：不能用顶层 Messages，否则会串到别的会话）
 	hist := []AgentMsg{}
-	if sess := d.activeSession(); sess != nil {
-		hist = sess.Messages
+	if targetSess != nil {
+		hist = targetSess.Messages
 	}
 	if cfg.ContextLimit > 0 && len(hist) > cfg.ContextLimit {
 		hist = hist[len(hist)-cfg.ContextLimit:]
@@ -865,6 +930,12 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		accUsage.CompletionTokens += u.CompletionTokens
 		accUsage.TotalTokens += u.TotalTokens
 		result.Usage = accUsage
+		// 实时推送本轮已累计的用量，桌面端与局域网网页端都能在流式过程中看到 token 增长
+		m.emitEvent("agent:usage", map[string]interface{}{
+			"promptTokens":     accUsage.PromptTokens,
+			"completionTokens": accUsage.CompletionTokens,
+			"totalTokens":      accUsage.TotalTokens,
+		})
 	}
 
 	// 技能匹配：仅展示被模型在思考中实际运用到的「已启用」技能（不展示未启用的）。
@@ -889,13 +960,17 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 					desc = "(无描述)"
 				}
 				step := AgentStep{
-					Type:   "skill",
-					Name:   s.Name,
-					Input:  "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt,
-					Output: "模型在思考中运用了该技能",
-				}
-				result.Steps = append(result.Steps, step)
-				m.b.Emit("agent:step", step)
+								Type:   "skill",
+								Name:   s.Name,
+								Input:  "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt,
+								Output: "模型在思考中运用了该技能",
+							}
+							result.Steps = append(result.Steps, step)
+							m.b.Emit("agent:step", step)
+							// 写入 skill 分类日志：否则日志面板里「skill」分类永远查不到数据
+							m.appendLog(AgentLog{Level: "info", Category: "skill",
+								Title: "命中技能: " + s.Name,
+								Detail: "描述：" + desc + "\n\n注入提示词：\n" + s.Prompt, UserID: cfg.CurrentUserID})
 			}
 		}
 	}
@@ -905,8 +980,8 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		loops = 6
 	}
 	for i := 0; i < loops; i++ {
-		// 通知前端：新一轮流式输出开始
-		m.b.Emit("agent:loop-start", map[string]interface{}{"loop": i + 1})
+		// 通知前端：新一轮流式输出开始（带 clientId，便于识别是不是自己发起的）
+		m.b.Emit("agent:loop-start", map[string]interface{}{"loop": i + 1, "clientId": args.ClientID})
 		out, err := m.llmCallStream(args, messages, cfg.Temperature, fmt.Sprintf("loop-%d", i+1), func(dc streamDelta) {
 			// 实时把增量推给前端（区分思考区/正文区），实现打字机效果
 			m.b.Emit("agent:delta", map[string]interface{}{"text": dc.Text, "thinking": dc.Thinking})
@@ -962,6 +1037,17 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 		if act.Server == "builtin" {
 			// 内置工具：本地执行
 			toolOut, terr = m.execBuiltinTool(act.Tool, act.Arguments, cfg.MaxFileRead)
+			// 内置工具此前完全没有日志，导致「按工具/级别筛选」时查不到任何记录，
+			// 这里补上：入参、成功结果、报错各一条，与 MCP 工具日志保持一致。
+			if terr != nil {
+				m.appendLog(AgentLog{Level: "error", Category: "agent",
+					Title: fmt.Sprintf("调用内置工具失败: %s", act.Tool),
+					Detail: "参数: " + toJSON(act.Arguments) + "\n错误: " + terr.Error(), UserID: cfg.CurrentUserID})
+			} else {
+				m.appendLog(AgentLog{Level: "tool", Category: "agent",
+					Title: fmt.Sprintf("调用内置工具: %s", act.Tool),
+					Detail: "参数: " + toJSON(act.Arguments) + "\n结果: " + util.Truncate(toolOut, 4000), UserID: cfg.CurrentUserID})
+			}
 		} else {
 			srv, ok := srvByID[act.Server]
 			if !ok {
@@ -1051,11 +1137,15 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 
 	result.Thinking = strings.TrimSpace(thinkingAll.String())
 
-	// 保存会话（写入当前激活会话）
+	// 保存会话（写入本次对话的目标会话）
 	now := time.Now().Format("2006-01-02 15:04:05")
 	m.mu.Lock()
 	d = m.readAgentData()
-	sess := d.activeSession()
+	// 重新按 ID 定位（对话期间该会话可能已被另一端删除），退化时回退到全局激活会话
+	sess := findSession(d, args.SessionID)
+	if sess == nil {
+		sess = d.activeSession()
+	}
 	if sess == nil {
 		// 兜底：新建
 		id := m.CreateAgentSession("默认会话")
@@ -1081,10 +1171,24 @@ func (m *Manager) RunAgent(args RunAgentArgs) RunAgentResult {
 	d.Usage.CompletionTokens += accUsage.CompletionTokens
 	d.Usage.TotalTokens += accUsage.TotalTokens
 	_ = m.writeAgentData(d)
+	sessID := sess.ID
 	m.mu.Unlock()
 
-	m.b.Emit("agent:done", map[string]interface{}{"content": result.Content, "thinking": result.Thinking, "usage": accUsage})
-	m.appendLog(AgentLog{Level: "info", Category: "agent", Title: "Agent 运行结束", Detail: fmt.Sprintf("步骤数=%d 输出长度=%d token=%d", len(result.Steps), len(result.Content), accUsage.TotalTokens), UserID: cfg.CurrentUserID})
+	m.b.Emit("agent:done", map[string]interface{}{
+		"content": result.Content, "thinking": result.Thinking, "usage": accUsage,
+		"clientId": args.ClientID, "sessionId": sessID,
+	})
+	// 结束日志里明确记录本轮「输入 / 输出 / 合计」，便于事后按 token 核对每一次对话的开销
+	m.appendLog(AgentLog{Level: "info", Category: "agent", Title: "Agent 运行结束",
+		Detail: fmt.Sprintf("%s\n步骤数=%d 输出长度=%d", usageLine(accUsage), len(result.Steps), len(result.Content)),
+		UserID: cfg.CurrentUserID, Usage: usagePtr(accUsage)})
+	// 通知所有端（含桌面窗口）会话数据已变更。
+	// 这是「局域网网页端提问后桌面端也能看到」的关键：桌面端没有轮询，
+	// 必须由后端主动推送，否则它的会话列表与消息永远停留在旧数据（需手动刷新页面）。
+	m.notifySessionsChanged("run", map[string]interface{}{
+		"clientId": args.ClientID, "sessionId": sessID,
+		"usage": accUsage, "input": util.Truncate(args.Input, 60),
+	})
 	return result
 }
 

@@ -149,6 +149,7 @@ export namespace agent {
 	    summary?: string;
 	    durationMs: number;
 	    userId: string;
+	    usage?: TokenUsage;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentLog(source);
@@ -166,7 +167,26 @@ export namespace agent {
 	        this.summary = source["summary"];
 	        this.durationMs = source["durationMs"];
 	        this.userId = source["userId"];
+	        this.usage = this.convertValues(source["usage"], TokenUsage);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class TokenUsage {
 	    promptTokens: number;
@@ -455,6 +475,8 @@ export namespace agent {
 	    model: string;
 	    timeoutSec: number;
 	    maxTokens: number;
+	    clientId?: string;
+	    sessionId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RunAgentArgs(source);
@@ -468,6 +490,8 @@ export namespace agent {
 	        this.model = source["model"];
 	        this.timeoutSec = source["timeoutSec"];
 	        this.maxTokens = source["maxTokens"];
+	        this.clientId = source["clientId"];
+	        this.sessionId = source["sessionId"];
 	    }
 	}
 	export class RunAgentResult {

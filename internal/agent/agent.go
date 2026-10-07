@@ -39,6 +39,11 @@ type Manager struct {
 	b    bus.Bus
 	ctx  context.Context
 	mu   sync.Mutex // 保护 AgentData 读写（数据最终落主库 meta.agent 列）
+	// runMu 保证同一时刻只有一次 Agent 对话在跑（桌面端与局域网网页端共用同一份会话）。
+	// mu 只保护单次读写，无法阻止两次 RunAgent 交叉执行 —— 那会导致
+	// 消息交错、会话标题/token 统计错乱，以及两端的流式事件互相污染。
+	// 这里用 TryLock：已有对话在跑时直接返回可读错误，而不是排队等待。
+	runMu sync.Mutex
 }
 
 // NewManager 创建 agent 管理器。host 提供数据与配置能力，b 用于事件推送。
@@ -212,6 +217,9 @@ type AgentLog struct {
 	Summary   string `json:"summary,omitempty"`
 	DurationMs int64 `json:"durationMs"`
 	UserID    string `json:"userId"`
+	// Usage 本条 LLM 调用实际消耗的 token（仅 llm 分类的响应日志有值，历史日志为空）。
+	// 日志面板据此在每条请求旁展示输入/输出/合计，并汇总当前筛选结果的用量。
+	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
 // logDetailHardLimit 单条日志详情的硬上限（字符）。正常请求远小于此；
@@ -370,6 +378,21 @@ func sessionExists(d AgentData, id string) bool {
 		}
 	}
 	return false
+}
+
+// findSession 按 ID 返回会话指针（找不到返回 nil）。
+// RunAgent 用它把「读历史」和「写结果」绑定到同一个会话：
+// 多端各自浏览不同会话时，后端那个全局 ActiveSession 游标不能作为依据。
+func findSession(d AgentData, id string) *AgentSession {
+	if id == "" {
+		return nil
+	}
+	for i := range d.Sessions {
+		if d.Sessions[i].ID == id {
+			return &d.Sessions[i]
+		}
+	}
+	return nil
 }
 
 // defaultToolFlags 返回内置工具默认开关与描述（全部开启，描述为默认值）。
@@ -661,18 +684,19 @@ func (m *Manager) SaveAgentUsers(users []AgentUser) error {
 // ClearAgentMessages 清空当前会话历史。
 func (m *Manager) ClearAgentMessages() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if s := d.activeSession(); s != nil {
 		s.Messages = []AgentMsg{}
 	}
-	return m.writeAgentData(d)
+	err := m.writeAgentData(d)
+	m.mu.Unlock()
+	m.notifySessionsChanged("clear", nil)
+	return err
 }
 
 // CreateAgentSession 新建会话，返回新会话 ID。
 func (m *Manager) CreateAgentSession(title string) string {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	d := m.readAgentData()
 	id := agentID("sess")
 	now := time.Now().Format(time.RFC3339)
@@ -682,29 +706,32 @@ func (m *Manager) CreateAgentSession(title string) string {
 	d.Sessions = append(d.Sessions, AgentSession{ID: id, Title: title, CreatedAt: now, UpdatedAt: now, Messages: []AgentMsg{}})
 	d.ActiveSession = id
 	_ = m.writeAgentData(d)
-	m.b.Emit("agent:session-created", map[string]interface{}{"id": id, "title": title})
+	m.mu.Unlock()
+	m.notifySessionsChanged("create", map[string]interface{}{"sessionId": id, "title": title})
 	return id
 }
 
 // SwitchAgentSession 切换当前激活会话。
 func (m *Manager) SwitchAgentSession(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if !sessionExists(d, id) {
+		m.mu.Unlock()
 		return fmt.Errorf("会话不存在")
 	}
 	d.ActiveSession = id
 	_ = m.writeAgentData(d)
+	m.mu.Unlock()
+	m.notifySessionsChanged("switch", map[string]interface{}{"sessionId": id})
 	return nil
 }
 
 // DeleteAgentSession 删除会话（至少保留一个）。
 func (m *Manager) DeleteAgentSession(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	d := m.readAgentData()
 	if len(d.Sessions) <= 1 {
+		m.mu.Unlock()
 		return fmt.Errorf("至少保留一个会话")
 	}
 	idx := -1
@@ -715,6 +742,7 @@ func (m *Manager) DeleteAgentSession(id string) error {
 		}
 	}
 	if idx < 0 {
+		m.mu.Unlock()
 		return fmt.Errorf("会话不存在")
 	}
 	d.Sessions = append(d.Sessions[:idx], d.Sessions[idx+1:]...)
@@ -722,13 +750,14 @@ func (m *Manager) DeleteAgentSession(id string) error {
 		d.ActiveSession = d.Sessions[0].ID
 	}
 	_ = m.writeAgentData(d)
+	m.mu.Unlock()
+	m.notifySessionsChanged("delete", map[string]interface{}{"sessionId": id})
 	return nil
 }
 
 // RenameAgentSession 重命名会话。
 func (m *Manager) RenameAgentSession(id, title string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	d := m.readAgentData()
 	for i := range d.Sessions {
 		if d.Sessions[i].ID == id {
@@ -737,7 +766,29 @@ func (m *Manager) RenameAgentSession(id, title string) error {
 		}
 	}
 	_ = m.writeAgentData(d)
+	m.mu.Unlock()
+	m.notifySessionsChanged("rename", map[string]interface{}{"sessionId": id, "title": title})
 	return nil
+}
+
+// ============================ 会话变更通知 ============================
+
+// notifySessionsChanged 广播「会话数据已变更」，所有端（桌面窗口 + 局域网网页端）收到后
+// 重新拉取会话列表与当前会话消息。
+//
+// 为什么必须有它：会话数据是多端共享的同一份（局域网网页与桌面端读写同一个 store），
+// 而前端不做轮询。若只靠发起端自己刷新，另一端（例如网页端提问、桌面端旁观）
+// 界面会一直停留在旧数据，必须手动刷新页面才能看到。桌面端尤其如此 ——
+// 它只在本地 send() 结束后才刷新，后端不推送就完全感知不到远端的变化。
+//
+// reason 用于区分来源：run（一次对话结束）/ create / delete / rename / switch / clear。
+// extra 可携带 clientId、sessionId 等，前端据此判断是否是自己引发的（避免重复刷新）。
+func (m *Manager) notifySessionsChanged(reason string, extra map[string]interface{}) {
+	p := map[string]interface{}{"reason": reason}
+	for k, v := range extra {
+		p[k] = v
+	}
+	m.emitEvent("agent:sessions-changed", p)
 }
 
 // ============================ 日志 ============================
@@ -861,9 +912,26 @@ func (m *Manager) GetAgentLogFacets() map[string][]map[string]interface{} {
 		}
 		return arr
 	}
+	// 汇总全部日志里记录的 LLM 用量（日志面板顶部展示「输入/输出/合计」）
+	var total TokenUsage
+	for _, l := range d.Logs {
+		if l.Usage == nil {
+			continue
+		}
+		total.PromptTokens += l.Usage.PromptTokens
+		total.CompletionTokens += l.Usage.CompletionTokens
+		total.TotalTokens += l.Usage.TotalTokens
+	}
 	return map[string][]map[string]interface{}{
 		"levels":     toArr(levels),
 		"categories": toArr(cats),
+		"tokenUsage": {{
+			"value":            "total",
+			"count":            total.TotalTokens,
+			"promptTokens":     total.PromptTokens,
+			"completionTokens": total.CompletionTokens,
+			"totalTokens":      total.TotalTokens,
+		}},
 	}
 }
 

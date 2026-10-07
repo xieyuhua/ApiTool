@@ -25,14 +25,27 @@ installWebBridge()
 // 标记为网页端：移动端样式（agent-mobile.css）以 body.web-agent 限定作用域
 document.body.classList.add('web-agent')
 
-const app = createApp(AgentChat)
-app.use(ElementPlus, { locale: zhCn })
-app.mount('#app')
+// 先拉取最小数据（AI 接口配置 / 数据库连接）再挂载：
+// AgentChat 发送消息时直接读 store.data.settings.aiBaseUrl/aiKey/aiModel，
+// 若先挂载再取数据，用户「秒发」第一条消息会带上空的接口配置而失败。
+// 这里只请求 GetAgentBootstrap 一个轻量接口，本机耗时可忽略。
+function mountApp() {
+  const app = createApp(AgentChat)
+  app.use(ElementPlus, { locale: zhCn })
+  app.mount('#app')
+}
 
-// 拉取最小数据后套用与桌面端一致的主题（明暗 / 主题方案 / 主色）
 initAgentWebStore()
-  .then(() => applyScheme())
-  .catch((e) => console.error('初始化 Agent 网页端数据失败', e))
+  .then(() => {
+    mountApp()
+    // 套用与桌面端一致的主题（明暗 / 主题方案 / 主色）
+    try { applyScheme() } catch (e) { console.error('应用主题失败', e) }
+  })
+  .catch((e) => {
+    console.error('初始化 Agent 网页端数据失败', e)
+    // 数据拉取失败也要把界面挂上，否则用户只看到空白页、无从下手
+    mountApp()
+  })
 
 // 主题为「跟随系统」时，系统切换深浅色要实时生效（与桌面端行为一致）
 try {

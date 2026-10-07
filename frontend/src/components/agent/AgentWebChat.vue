@@ -1,12 +1,17 @@
 <script setup>
 // AI Agent 局域网聊天：开启后可在手机 / 其他电脑的浏览器里访问同一份会话并远程提问。
 // 访问地址带随机 token（Agent 具备文件读写与命令执行能力，绝不能匿名暴露）。
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { AgentAPI } from './agentApi'
+import { AgentAPI, isWebUI } from './agentApi'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['update:visible'])
+
+// 兜底：当前已经运行在局域网网页端（本身就是被「局域网访问」打开的那一端），
+// 再展示「开启局域网访问」没有意义。顶栏按钮虽已隐藏，这里再拦一道，
+// 避免任何入口（含旧缓存的页面）漏出来。
+const webMode = computed(() => isWebUI())
 
 const info = ref(null)
 const port = ref('8090')
@@ -64,13 +69,25 @@ async function copyLink() {
   ElMessage.success('链接已复制：' + info.value.public)
 }
 
-watch(() => props.visible, (v) => { if (v) reload() })
+watch(() => props.visible, (v) => { if (v && !isWebUI()) reload() })
 </script>
 
 <template>
   <el-dialog :model-value="visible" @update:model-value="emit('update:visible', $event)"
     title="📱 局域网访问（手机 / 其他电脑）" width="560px">
-    <div v-if="info && info.running" class="on">
+    <!-- 网页端兜底提示：当前页面本身就是局域网网页，无需再次开启 -->
+    <div v-if="webMode">
+      <el-alert type="info" :closable="false" show-icon
+        title="当前已经是局域网网页端" />
+      <p class="desc" style="margin-top:12px">
+        你正在通过局域网网页访问 AI Agent，无需再次开启。如需更换访问地址、查看令牌或停止服务，请回到运行本程序的电脑上，在「📱 局域网」中操作。
+      </p>
+      <div class="ops">
+        <el-button size="small" type="primary" @click="emit('update:visible', false)">知道了</el-button>
+      </div>
+    </div>
+
+    <div v-else-if="info && info.running" class="on">
       <el-alert type="warning" :closable="false" show-icon
         title="Agent 具备文件读写、执行命令、数据库查询能力，请只在可信局域网内分享链接。" />
       <div class="field">
