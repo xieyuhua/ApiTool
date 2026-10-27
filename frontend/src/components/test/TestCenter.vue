@@ -958,8 +958,17 @@ async function runPressure() {
         <div class="report-bar">
           <el-button size="small" type="success" :loading="summaryLoading" @click="genSummary">✨ AI 分析摘要</el-button>
           <el-button size="small" @click="copyReport">复制 JSON</el-button>
-          <el-button size="small" @click="exportReport('markdown')">导出 Markdown</el-button>
-          <el-button size="small" @click="exportReport('html')">导出 HTML</el-button>
+          <el-dropdown size="small" @command="exportReport">
+            <el-button size="small">导出报告 ▾</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="markdown">Markdown (.md)</el-dropdown-item>
+                <el-dropdown-item command="html">HTML (.html)</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF (.pdf，带水印)</el-dropdown-item>
+                <el-dropdown-item command="word">Word (.docx，带水印)</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
 
         <div v-if="viewingReport.summary" class="report-summary">

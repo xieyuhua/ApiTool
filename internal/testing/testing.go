@@ -932,32 +932,65 @@ func (e *Engine) BuildReportHTMLContent(reportJSON string) (string, error) {
 	return doc.BuildTestReportHTML(r), nil
 }
 
-// ExportTestReport 将测试报告导出为 Markdown / HTML 文件，返回保存路径
+// ExportTestReport 将测试报告导出为 Markdown / HTML / Word / PDF 文件，返回保存路径。
+// Word / PDF 会按「文档中心 → 导出水印」配置加水印；PDF 由本机 Chromium 内核浏览器无头打印生成。
 func (e *Engine) ExportTestReport(reportJSON string, format string) (string, error) {
 	var r model.TestReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
 		return "", fmt.Errorf("报告解析失败: %v", err)
 	}
-	var content, ext, filter string
+	ext, filter := ".md", "Markdown (*.md)|*.md"
 	switch format {
 	case "html":
-		content = doc.BuildTestReportHTML(r)
 		ext, filter = ".html", "HTML (*.html)|*.html"
+	case "word", "docx":
+		ext, filter = ".docx", "Word 文档 (*.docx)|*.docx"
+	case "pdf":
+		ext, filter = ".pdf", "PDF 文件 (*.pdf)|*.pdf"
 	case "markdown", "":
-		content = doc.BuildTestReportMarkdown(r)
-		ext, filter = ".md", "Markdown (*.md)|*.md"
 	default:
-		return "", fmt.Errorf("不支持的格式: %s", format)
+		return "", fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf）", format)
 	}
 	path, err := e.host.SaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "导出测试报告",
-		DefaultFilename: "test-report-" + doc.SanitizeFilename(r.PlanName) + ext,
+		DefaultFilename: doc.ExportFileName("test-report-"+r.PlanName, ext),
 		Filters: []runtime.FileFilter{
 			{DisplayName: filter, Pattern: "*" + ext},
 		},
 	})
 	if err != nil || path == "" {
 		return "", err
+	}
+	// 需要水印的格式：水印文字中的 {{date}}/{{project}} 等占位符在此展开
+	if format == "pdf" || format == "word" || format == "docx" {
+		data := e.host.ReadData()
+		project := ""
+		if idx := store.ActiveProjectIndex(data); idx >= 0 {
+			project = data.Projects[idx].Name
+		}
+		wm := doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), project, time.Now())
+		// 报告沿用「文档结构」里的封面配置（其余章节不适用于报告）
+		cover := data.Settings.DocLayout.Cover
+		if format == "pdf" {
+			if err := doc.WriteHTMLToPDF(doc.BuildTestReportHTMLForExportWithCover(r, wm, cover), path); err != nil {
+				return "", err
+			}
+			return path, nil
+		}
+		b, err := doc.BuildTestReportDOCXWithCover(r, wm, cover)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, b, 0o644); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	var content string
+	if format == "html" {
+		content = doc.BuildTestReportHTML(r)
+	} else {
+		content = doc.BuildTestReportMarkdown(r)
 	}
 	// 大文件截断保护
 	if len(content) > 20<<20 {

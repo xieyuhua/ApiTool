@@ -4,6 +4,8 @@ import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
 import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab } from '../../store'
 import ShareDialog from './ShareDialog.vue'
+import DocWatermarkPanel from './DocWatermarkPanel.vue'
+import DocLayoutPanel from './DocLayoutPanel.vue'
 
 const scopeDirId = ref('')
 const busy = ref(false)
@@ -33,6 +35,7 @@ const scopeName = computed(() => {
 })
 
 async function doExport(format) {
+  if (busy.value) return // 避免连点重复导出（PDF 需冷启动浏览器，耗时 1-2 秒）
   if (!scopedApis.value.length) { ElMessage.warning('所选范围内没有接口'); return }
   busy.value = true
   try {
@@ -112,9 +115,9 @@ async function copyLink() {
     ElMessage.success('链接已复制到剪贴板')
   } catch (e) { ElMessage.error(String(e)) }
 }
-async function exportReportHtml(r) {
+async function exportReport(r, format) {
   try {
-    const path = await ExportTestReport(JSON.stringify(r), 'html')
+    const path = await ExportTestReport(JSON.stringify(r), format)
     if (path) ElMessage.success('已导出：' + path)
   } catch (e) { ElMessage.error(String(e)) }
 }
@@ -122,7 +125,8 @@ async function exportReportHtml(r) {
 const formats = [
   { key: 'markdown', name: 'Markdown', ext: '.md', desc: '通用文档格式，适合 Git 仓库、Wiki' },
   { key: 'html', name: 'HTML', ext: '.html', desc: '带目录导航的网页文档，可直接分享' },
-  { key: 'word', name: 'Word', ext: '.doc', desc: '可用 Office / WPS 打开编辑' },
+  { key: 'word', name: 'Word', ext: '.docx', desc: '原生排版文档，可用 Office / WPS 编辑，支持水印' },
+  { key: 'pdf', name: 'PDF', ext: '.pdf', desc: '固定版式，适合分发归档，支持水印' },
   { key: 'openapi', name: 'OpenAPI 3.0', ext: '.json', desc: '可导入 Swagger、Postman、Apifox' },
 ]
 </script>
@@ -159,18 +163,26 @@ const formats = [
 
       <div class="card">
         <div class="card-title">导出文档</div>
-        <div class="fmt-grid">
-          <div v-for="f in formats" :key="f.key" class="fmt-item" @click="doExport(f.key)">
+        <div class="fmt-grid" v-loading="busy" element-loading-text="正在导出…">
+          <div v-for="f in formats" :key="f.key" class="fmt-item" :class="{ disabled: busy }" @click="doExport(f.key)">
             <div class="fmt-name">{{ f.name }} <span class="fmt-ext">{{ f.ext }}</span></div>
             <div class="fmt-desc">{{ f.desc }}</div>
           </div>
         </div>
+        <div style="color:#86909c; font-size:12px; margin-top:10px">
+          PDF 由本机 Edge / Chrome 无头打印生成（约 1-2 秒），未安装时请改用「导出 HTML」后手动打印为 PDF。
+        </div>
       </div>
+
+      <DocLayoutPanel :dir-id="scopeDirId" />
+
+      <DocWatermarkPanel :dir-id="scopeDirId" />
 
       <div class="card">
         <div class="card-title">测试报告（{{ reports.length }}）</div>
         <div style="color:#86909c; font-size:13px; margin-bottom:10px">
-          在「接口测试」中运行用例或计划后生成的测试分析报告，可在此直接分享为网页链接或导出 HTML，与接口文档统一分发。
+          在「接口测试」中运行用例或计划后生成的测试分析报告，可在此直接分享为网页链接，
+          或导出 HTML / PDF / Word（PDF 与 Word 与接口文档共用同一套水印配置），与接口文档统一分发。
         </div>
         <div v-if="!reports.length" style="color:#c9cdd4; text-align:center; padding:18px">暂无测试报告，请先到「接口测试」运行</div>
         <div v-for="r in reports" :key="r.id" class="report-row">
@@ -180,7 +192,17 @@ const formats = [
           </div>
           <div class="rr-actions">
             <el-button size="small" type="primary" plain @click="openShareReport(r)">分享链接</el-button>
-            <el-button size="small" @click="exportReportHtml(r)">导出 HTML</el-button>
+            <el-dropdown size="small" @command="fmt => exportReport(r, fmt)">
+              <el-button size="small">导出 ▾</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="html">HTML (.html)</el-dropdown-item>
+                  <el-dropdown-item command="pdf">PDF (.pdf，带水印)</el-dropdown-item>
+                  <el-dropdown-item command="word">Word (.docx，带水印)</el-dropdown-item>
+                  <el-dropdown-item command="markdown">Markdown (.md)</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -225,6 +247,7 @@ const formats = [
   transition: all .15s;
 }
 .fmt-item:hover { border-color: #165dff; box-shadow: 0 2px 10px rgba(22, 93, 255, .12); }
+.fmt-item.disabled { opacity: .45; pointer-events: none; }
 .fmt-name { font-weight: 600; }
 .fmt-ext { color: #86909c; font-weight: 400; font-size: 12px; }
 .fmt-desc { color: #86909c; font-size: 12px; margin-top: 6px; }

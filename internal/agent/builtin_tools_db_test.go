@@ -28,6 +28,22 @@ func newTestManager(t *testing.T) *Manager {
 	return NewManager(&stubHost{st: st}, nil)
 }
 
+// newTestManagerWithDBConn 构造一个已存在指定 db 连接的 Manager。
+// 表结构快照按 connId 关联插件连接，保存时会剔除「连接已删除」的孤立快照
+// （见 Manager.pruneOrphanDBAnalysis），因此这类用例必须先建好连接。
+func newTestManagerWithDBConn(t *testing.T, connID string) *Manager {
+	t.Helper()
+	m := newTestManager(t)
+	data := m.host.ReadData()
+	data.Plugins.Connections = append(data.Plugins.Connections, model.PluginConn{
+		ID: connID, Category: "db", Name: "测试库", DbType: "mysql",
+	})
+	if err := m.host.SaveData(data); err != nil {
+		t.Fatalf("准备数据库连接失败: %v", err)
+	}
+	return m
+}
+
 func TestBuiltinDBSchemaNoConn(t *testing.T) {
 	m := newTestManager(t)
 	_, err := builtinDBSchema(m, map[string]interface{}{"connId": "nope", "database": "db1"})
@@ -136,8 +152,9 @@ func TestExtractBareToolJSON(t *testing.T) {
 // TestDBSchemasIndependentTableRoundtrip 验证同步的表结构经独立表存储后能正确读回，
 // 且 db_query 的未同步表校验能匹配到已同步的表（排查「明明同步了却提示未同步」）。
 func TestDBSchemasIndependentTableRoundtrip(t *testing.T) {
-	m := newTestManager(t)
 	connID := "db_1788254096769"
+	// 表结构快照按 connId 关联插件连接，保存时会剔除「连接已删除」的孤立快照，故先建好连接
+	m := newTestManagerWithDBConn(t, connID)
 	database := "diygw"
 	table := "diygw_days_erp"
 	cfg := m.LoadAgentData().Config
@@ -171,8 +188,9 @@ func TestDBSchemasIndependentTableRoundtrip(t *testing.T) {
 // TestDBSchemasPartialConfigSave 模拟前端 saveConfig 只传部分字段（dbSchemas 等），
 // 验证残缺 cfg 覆盖 Config 后仍保留已同步表结构（排查「同步了却提示未同步」）。
 func TestDBSchemasPartialConfigSave(t *testing.T) {
-	m := newTestManager(t)
 	connID := "db_1788254096769"
+	// 同上：先建连接，避免保存时把快照当作「已删除连接的孤立数据」剔除
+	m := newTestManagerWithDBConn(t, connID)
 	database := "diygw"
 	table := "diygw_days_erp"
 	// 前端只传这 4 个字段，其余为默认零值

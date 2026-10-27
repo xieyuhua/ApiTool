@@ -240,6 +240,71 @@ type Settings struct {
 	// 详情代码块字体（作用于右侧详情所有代码块）
 	CodeFont    string  `json:"codeFont"`    // 字体族
 	CodeFontSize float64 `json:"codeFontSize"` // 字号(px)
+	// 文档导出水印（作用于 Word / PDF 导出，可在「文档中心」配置）
+	Watermark DocWatermark `json:"watermark"`
+	// 企业级文档排版（封面 / 目录 / 前言 / 规范 / 附录 / 修订记录，作用于全格式导出）
+	DocLayout DocLayout `json:"docLayout"`
+	// 用户保存的自定义文档结构模板（一键套用）
+	DocLayoutTemplates []DocLayoutTemplate `json:"docLayoutTemplates"`
+	// 分享文档是否套用「文档结构」与「导出水印」
+	ShareDocLayout    bool `json:"shareDocLayout"`
+	ShareDocWatermark bool `json:"shareDocWatermark"`
+}
+
+// DocLayoutTemplate 自定义文档结构模板（团队可保存多套，如「对外版」「评审版」）。
+type DocLayoutTemplate struct {
+	ID     string    `json:"id"`
+	Name   string    `json:"name"`
+	Layout DocLayout `json:"layout"`
+}
+
+// DocLayout 企业级接口文档的排版配置：决定导出文档由哪些章节组成、顺序如何。
+// 零值即「只导出接口正文 + 目录」，用户可在「文档中心 → 文档结构」中逐项开启。
+type DocLayout struct {
+	Toc        bool   `json:"toc"`        // 是否生成目录（Word 为可更新域，PDF/HTML 为静态目录）
+	Numbering  bool   `json:"numbering"`  // 章节与接口树是否自动编号（1 / 1.1 / 1.1.1）
+	Cover      DocCover `json:"cover"`    // 封面（作者/单位/版本/日期）
+	Prefaces   []DocChapter `json:"prefaces"`   // 文档公共描述（可多条章节）
+	Convention string `json:"convention"` // 接口统一定义规范（Markdown 文本，空则不输出）
+	StatusCodes bool  `json:"statusCodes"` // 附录：HTTP 状态码说明
+	Revisions  []DocRevision `json:"revisions"` // 文档修订记录
+}
+
+// DocCover 封面信息。
+type DocCover struct {
+	Enabled  bool   `json:"enabled"`
+	Title    string `json:"title"`    // 为空时取文档/项目标题
+	Subtitle string `json:"subtitle"` // 如「内部技术文档 · 禁止外传」
+	Author   string `json:"author"`
+	Org      string `json:"org"`   // 公司 / 部门
+	Version  string `json:"version"` // 如 V1.2.0
+	Date     string `json:"date"`  // 为空时取导出日期
+}
+
+// DocChapter 文档章节（用于「文档公共描述」等自定义正文）。
+type DocChapter struct {
+	Title   string `json:"title"`
+	Content string `json:"content"` // 简化 Markdown（支持标题/列表/表格/代码块/段落）
+}
+
+// DocRevision 文档修订记录的一行。
+type DocRevision struct {
+	Version string `json:"version"`
+	Date    string `json:"date"`
+	Author  string `json:"author"`
+	Note    string `json:"note"`
+}
+
+// DocWatermark 文档导出水印配置。
+// 零值视为「未配置」，渲染前经 doc.NormalizeWatermark 补全为内置默认值。
+type DocWatermark struct {
+	Enabled bool    `json:"enabled"` // 是否启用
+	Text    string  `json:"text"`    // 水印文字，默认「内部资料」
+	Color   string  `json:"color"`   // 颜色 #RRGGBB，默认 #C0C4CC
+	Size    int     `json:"size"`    // 字号(pt)，默认 42
+	Opacity float64 `json:"opacity"` // 不透明度 0-1，默认 0.14
+	Angle   int     `json:"angle"`   // 旋转角度(度，顺时针为正)，默认 -30
+	Repeat  bool    `json:"repeat"`  // 是否平铺；false 为页面居中单个水印
 }
 
 // AppData 应用全部数据

@@ -1,12 +1,14 @@
 package doc
 
 import (
-	"apitool/internal/model"
-	"apitool/internal/store"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
+
+	"apitool/internal/model"
+	"apitool/internal/store"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -66,74 +68,163 @@ func CollectScope(data model.AppData, dirID string, apiID string) (title string,
 	return title, dirs, apis
 }
 
-// buildDocContent 按指定格式（markdown/html/word/openapi）生成文档内容。
-func buildDocContent(ctx context.Context, s *store.Store, version, updateURL, dirID, apiID, format string) (content string, title string, err error) {
+// ---------------- 导出 ----------------
+
+// docScopeData 一次导出所需的数据快照。
+type docScopeData struct {
+	Title     string
+	RootID    string
+	Project   string // 当前项目名（水印占位符 {{project}} 使用）
+	Dirs      []model.Directory
+	Apis      []model.ApiInfo
+	Common    model.CommonParams
+	Watermark model.DocWatermark // 已补全默认值并展开占位符的水印配置
+	Layout    model.DocLayout    // 企业文档排版（封面 / 目录 / 前言 / 规范 / 附录 / 修订记录）
+}
+
+// loadDocScope 解析导出范围（标题、根目录、目录、接口、公共参数）与水印配置。
+func loadDocScope(s *store.Store, dirID, apiID string) (docScopeData, error) {
 	data := s.GetData()
 	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
-		return "", "", fmt.Errorf("没有可用的项目")
+		return docScopeData{}, fmt.Errorf("没有可用的项目")
 	}
-	proj := data.Projects[idx]
+	project := data.Projects[idx]
 	title, dirs, apis := CollectScope(data, dirID, apiID)
 	if len(apis) == 0 {
-		return "", "", fmt.Errorf("所选范围内没有接口")
+		return docScopeData{}, fmt.Errorf("所选范围内没有接口")
 	}
-	rootID := ""
+	scope := docScopeData{
+		Title:   title,
+		Project: project.Name,
+		Dirs:    dirs,
+		Apis:    apis,
+		Common:  project.Common,
+		Watermark: ExpandWatermark(
+			NormalizeWatermark(data.Settings.Watermark), project.Name, time.Now()),
+		Layout: data.Settings.DocLayout,
+	}
 	if apiID == "" {
-		rootID = dirID
+		scope.RootID = dirID
 	}
-	switch format {
-	case "markdown":
-		content = buildMarkdown(title, rootID, dirs, apis, proj.Common)
-	case "html", "word":
-		content = BuildHTML(title, rootID, dirs, apis, proj.Common)
-	case "openapi":
-		content, err = BuildOpenAPI(title, dirs, apis, rootID, proj.Common, "")
-	default:
-		return "", "", fmt.Errorf("不支持的格式: %s", format)
-	}
-	return content, title, err
+	return scope, nil
 }
 
-// ExportDoc 导出文档，返回保存路径
-func ExportDoc(ctx context.Context, s *store.Store, version, updateURL, dirID string, apiID string, format string) (string, error) {
-	content, title, err := buildDocContent(ctx, s, version, updateURL, dirID, apiID, format)
+// docFormat 导出格式的落盘参数（扩展名 / 保存对话框过滤器 / 对话框标题）。
+type docFormat struct {
+	ext    string
+	filter string
+	dialog string
+}
+
+// docFormats 支持的导出格式。word / pdf 会按「文档中心 → 导出水印」配置加水印。
+var docFormats = map[string]docFormat{
+	"markdown": {".md", "Markdown (*.md)|*.md", "导出接口文档（Markdown）"},
+	"html":     {".html", "HTML (*.html)|*.html", "导出接口文档（HTML）"},
+	"word":     {".docx", "Word 文档 (*.docx)|*.docx", "导出接口文档（Word）"},
+	"pdf":      {".pdf", "PDF 文件 (*.pdf)|*.pdf", "导出接口文档（PDF）"},
+	"openapi":  {".json", "OpenAPI JSON (*.json)|*.json", "导出接口文档（OpenAPI）"},
+}
+
+// docPayload 渲染产物：data 直接写盘；save 非空时由自定义函数落盘（PDF 交给浏览器打印）。
+type docPayload struct {
+	title string
+	data  []byte
+	save  func(path string) error
+}
+
+func (p docPayload) writeTo(path string) error {
+	if p.save != nil {
+		return p.save(path)
+	}
+	return os.WriteFile(path, p.data, 0o644)
+}
+
+// ExportDoc 导出文档，返回保存路径。
+// 支持格式见 docFormats：markdown / html / word（.docx，Word 原生排版）/
+// pdf（浏览器无头打印）/ openapi。
+func ExportDoc(ctx context.Context, s *store.Store, dirID string, apiID string, format string) (string, error) {
+	f, ok := docFormats[format]
+	if !ok {
+		return "", fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf / openapi）", format)
+	}
+	payload, err := renderDoc(s, dirID, apiID, format)
 	if err != nil {
 		return "", err
 	}
-	ext, filter := ".md", "Markdown (*.md)|*.md"
-	switch format {
-	case "html":
-		ext, filter = ".html", "HTML (*.html)|*.html"
-	case "word":
-		ext, filter = ".doc", "Word (*.doc)|*.doc"
-	case "openapi":
-		ext, filter = ".json", "OpenAPI JSON (*.json)|*.json"
-	}
 	path, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
-		Title:           "导出接口文档",
-		DefaultFilename: SanitizeFilename(title) + ext,
-		Filters: []runtime.FileFilter{
-			{DisplayName: filter, Pattern: "*" + ext},
-		},
+		Title:           f.dialog,
+		DefaultFilename: ExportFileName(payload.title, f.ext),
+		Filters:         []runtime.FileFilter{{DisplayName: f.filter, Pattern: "*" + f.ext}},
 	})
 	if err != nil || path == "" {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := payload.writeTo(path); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
-// ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）
-func ShareDoc(ctx context.Context, s *store.Store, version, updateURL, dirID string, apiID string) (string, error) {
-	content, title, err := buildDocContent(ctx, s, version, updateURL, dirID, apiID, "html")
+// renderDoc 按格式渲染导出产物（word / pdf 会写入水印）。
+func renderDoc(s *store.Store, dirID, apiID, format string) (docPayload, error) {
+	scope, err := loadDocScope(s, dirID, apiID)
+	if err != nil {
+		return docPayload{}, err
+	}
+	switch format {
+	case "markdown":
+		return docPayload{title: scope.Title, data: []byte(buildMarkdown(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Layout))}, nil
+	case "html":
+		return docPayload{title: scope.Title, data: []byte(BuildHTMLWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Layout))}, nil
+	case "word":
+		b, err := BuildDOCXWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout)
+		if err != nil {
+			return docPayload{}, err
+		}
+		return docPayload{title: scope.Title, data: b}, nil
+	case "pdf":
+		html := BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout)
+		return docPayload{title: scope.Title, save: func(path string) error {
+			return WriteHTMLToPDF(html, path)
+		}}, nil
+	case "openapi":
+		content, err := BuildOpenAPI(scope.Title, scope.Dirs, scope.Apis, scope.RootID, scope.Common, "")
+		if err != nil {
+			return docPayload{}, err
+		}
+		return docPayload{title: scope.Title, data: []byte(content)}, nil
+	}
+	return docPayload{}, fmt.Errorf("不支持的格式: %s", format)
+}
+
+// PreviewWatermark 按当前水印配置渲染 HTML 文档并在浏览器打开，返回临时文件路径。
+// 与 PDF 导出共用同一套 HTML 水印层，用于导出前核对水印效果。
+func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID string) (string, error) {
+	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(os.TempDir(), "apitool-share-"+SanitizeFilename(title)+".html")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if !WatermarkActive(scope.Watermark) {
+		return "", fmt.Errorf("水印未启用：请先在「导出水印」中开启并填写水印文字")
+	}
+	html := BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout)
+	path := filepath.Join(os.TempDir(), "apitool-watermark-preview-"+SanitizeFilename(scope.Title)+".html")
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	return path, nil
+}
+
+// ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）
+func ShareDoc(ctx context.Context, s *store.Store, dirID string, apiID string) (string, error) {
+	payload, err := renderDoc(s, dirID, apiID, "html")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(os.TempDir(), "apitool-share-"+SanitizeFilename(payload.title)+".html")
+	if err := os.WriteFile(path, payload.data, 0o644); err != nil {
 		return "", err
 	}
 	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
@@ -141,14 +232,15 @@ func ShareDoc(ctx context.Context, s *store.Store, version, updateURL, dirID str
 }
 
 // CopyDocMarkdown 复制 Markdown 文档到剪贴板（用于快速分享）
-func CopyDocMarkdown(ctx context.Context, s *store.Store, version, updateURL, dirID string, apiID string) error {
-	content, _, err := buildDocContent(ctx, s, version, updateURL, dirID, apiID, "markdown")
+func CopyDocMarkdown(ctx context.Context, s *store.Store, dirID string, apiID string) error {
+	payload, err := renderDoc(s, dirID, apiID, "markdown")
 	if err != nil {
 		return err
 	}
-	return runtime.ClipboardSetText(ctx, content)
+	return runtime.ClipboardSetText(ctx, string(payload.data))
 }
 
+// SanitizeFilename 清理文件名中的非法字符，空结果回退为 api-doc。
 func SanitizeFilename(s string) string {
 	out := []rune{}
 	for _, r := range s {

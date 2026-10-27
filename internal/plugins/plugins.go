@@ -1101,7 +1101,8 @@ func PluginFTPList(conn model.PluginConn, path string) ([]FileInfo, error) {
 		if path != "" {
 			cmd += " " + path
 		}
-		fc.c.PrintfLine(cmd)
+		// 用常量格式串：目录名里若出现 % 等字符，直接当格式串会解析出错
+		_ = fc.c.PrintfLine("%s", cmd)
 		fc.c.ReadResponse(150)
 		data, _ := io.ReadAll(dc)
 		fc.c.ReadResponse(226)

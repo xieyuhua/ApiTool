@@ -110,6 +110,10 @@ export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
 }
 
+export function DefaultDocConvention() {
+  return window['go']['main']['App']['DefaultDocConvention']();
+}
+
 export function DefaultTestCasePrompt() {
   return window['go']['main']['App']['DefaultTestCasePrompt']();
 }
@@ -122,8 +126,20 @@ export function DeleteClipItem(arg1) {
   return window['go']['main']['App']['DeleteClipItem'](arg1);
 }
 
+export function DeleteDocLayoutTemplate(arg1) {
+  return window['go']['main']['App']['DeleteDocLayoutTemplate'](arg1);
+}
+
 export function DeleteTestCases(arg1) {
   return window['go']['main']['App']['DeleteTestCases'](arg1);
+}
+
+export function DocPresetLayout(arg1) {
+  return window['go']['main']['App']['DocPresetLayout'](arg1);
+}
+
+export function DocPresets() {
+  return window['go']['main']['App']['DocPresets']();
 }
 
 export function Emit(arg1, arg2) {
@@ -446,6 +462,10 @@ export function PolishText(arg1) {
   return window['go']['main']['App']['PolishText'](arg1);
 }
 
+export function PreviewDocWatermark(arg1, arg2) {
+  return window['go']['main']['App']['PreviewDocWatermark'](arg1, arg2);
+}
+
 export function QueryAgentLogs(arg1) {
   return window['go']['main']['App']['QueryAgentLogs'](arg1);
 }
@@ -512,6 +532,10 @@ export function SaveClipText(arg1, arg2) {
 
 export function SaveData(arg1) {
   return window['go']['main']['App']['SaveData'](arg1);
+}
+
+export function SaveDocLayoutTemplate(arg1, arg2) {
+  return window['go']['main']['App']['SaveDocLayoutTemplate'](arg1, arg2);
 }
 
 export function SaveFileDialog(arg1) {

@@ -413,6 +413,31 @@ async function loadInto() {
   d.settings.codeFont ||= 'Consolas, "Courier New", monospace'
   if (typeof d.settings.codeFontSize !== 'number') d.settings.codeFontSize = 12.5
   d.settings.testCasePrompt ||= ''
+  // 文档导出水印（Word / PDF）
+  d.settings.watermark ||= {}
+  const wm = d.settings.watermark
+  if (typeof wm.enabled !== 'boolean') wm.enabled = false
+  if (!wm.text) wm.text = '内部资料'
+  if (!wm.color) wm.color = '#C0C4CC'
+  if (typeof wm.size !== 'number' || wm.size <= 0) wm.size = 42
+  if (typeof wm.opacity !== 'number' || wm.opacity <= 0) wm.opacity = 0.14
+  if (typeof wm.angle !== 'number' || wm.angle === 0) wm.angle = -30
+  if (typeof wm.repeat !== 'boolean') wm.repeat = true
+  // 企业级文档结构（封面 / 目录 / 公共描述 / 规范 / 附录 / 修订记录）
+  d.settings.docLayout ||= {}
+  const dl = d.settings.docLayout
+  if (typeof dl.toc !== 'boolean') dl.toc = true
+  if (typeof dl.numbering !== 'boolean') dl.numbering = true
+  dl.cover ||= { enabled: false, title: '', subtitle: '', author: '', org: '', version: 'V1.0.0', date: '' }
+  if (typeof dl.cover.enabled !== 'boolean') dl.cover.enabled = false
+  if (typeof dl.cover.version !== 'string') dl.cover.version = 'V1.0.0'
+  if (!Array.isArray(dl.prefaces)) dl.prefaces = []
+  if (typeof dl.convention !== 'string') dl.convention = ''
+  if (typeof dl.statusCodes !== 'boolean') dl.statusCodes = false
+  if (!Array.isArray(dl.revisions)) dl.revisions = []
+  if (!Array.isArray(d.settings.docLayoutTemplates)) d.settings.docLayoutTemplates = []
+  if (typeof d.settings.shareDocLayout !== 'boolean') d.settings.shareDocLayout = false
+  if (typeof d.settings.shareDocWatermark !== 'boolean') d.settings.shareDocWatermark = false
   d.plugins ||= { connections: [] }
   d.plugins.connections ||= []
   d.clipboard ||= { history: [] }

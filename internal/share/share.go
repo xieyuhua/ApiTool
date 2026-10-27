@@ -175,6 +175,33 @@ h3{margin:0 0 16px;font-size:16px;color:#1f2329}</style></head>
 <body><form method="get"><h3>该分享需要访问密码</h3>
 <input name="pwd" type="password" placeholder="请输入密码" autofocus/><button type="submit">查看</button></form></body></html>`
 
+// shareLayout 返回分享文档要套用的排版与水印配置（未启用时均为零值，输出保持简洁版）。
+func shareLayout(data model.AppData) (model.DocLayout, model.DocWatermark, model.Project) {
+	idx := store.ActiveProjectIndex(data)
+	proj := model.Project{}
+	if idx >= 0 {
+		proj = data.Projects[idx]
+	}
+	var layout model.DocLayout
+	var wm model.DocWatermark
+	if data.Settings.ShareDocLayout {
+		layout = data.Settings.DocLayout
+	}
+	if data.Settings.ShareDocWatermark {
+		wm = doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
+	}
+	return layout, wm, proj
+}
+
+// buildShareHTML 构建分享用 HTML：可选套用「文档结构」与「导出水印」。
+func buildShareHTML(data model.AppData, title, dirID string, dirs []model.Directory, apis []model.ApiInfo) string {
+	layout, wm, proj := shareLayout(data)
+	if !data.Settings.ShareDocLayout && !data.Settings.ShareDocWatermark {
+		return doc.BuildHTML(title, dirID, dirs, apis, proj.Common)
+	}
+	return doc.BuildHTMLForExportWithLayout(title, dirID, dirs, apis, proj.Common, wm, layout)
+}
+
 // htmlByAPI 构建指定目录/接口范围的 HTML 文档（供多分享链接使用）。
 func htmlByAPI(s *store.Store, dirID, apiID string) (title, html string, err error) {
 	data := s.GetData()
@@ -182,9 +209,7 @@ func htmlByAPI(s *store.Store, dirID, apiID string) (title, html string, err err
 	if len(apis) == 0 {
 		return "", "", fmt.Errorf("所选范围内没有接口")
 	}
-	idx := store.ActiveProjectIndex(data)
-	proj := data.Projects[idx]
-	return title, doc.BuildHTML(title, dirID, dirs, apis, proj.Common), nil
+	return title, buildShareHTML(data, title, dirID, dirs, apis), nil
 }
 
 // BuildHTMLByAPI 导出：按 dirID/apiID 构建 HTML 文档内容。
@@ -274,13 +299,14 @@ func BuildDoc(s *store.Store, scope, projectID, dirID, format string) (string, e
 	if len(apis) == 0 {
 		return "", fmt.Errorf("所选范围内没有接口")
 	}
+	layout, _, _ := shareLayout(data)
 	switch format {
 	case "openapi":
 		return doc.BuildOpenAPI(title, dirs, apis, realDir, proj.Common, "")
 	case "markdown":
-		return doc.BuildMarkdown(title, realDir, dirs, apis, proj.Common), nil
+		return doc.BuildMarkdownWithLayout(title, realDir, dirs, apis, proj.Common, layout), nil
 	default:
-		return doc.BuildHTML(title, realDir, dirs, apis, proj.Common), nil
+		return buildShareHTML(data, title, realDir, dirs, apis), nil
 	}
 }
 

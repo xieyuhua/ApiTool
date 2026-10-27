@@ -75,7 +75,8 @@ function formFileName(path) {
               <el-dropdown-menu>
                 <el-dropdown-item command="markdown">Markdown (.md)</el-dropdown-item>
                 <el-dropdown-item command="html">HTML (.html)</el-dropdown-item>
-                <el-dropdown-item command="word">Word (.doc)</el-dropdown-item>
+                <el-dropdown-item command="word">Word (.docx)</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF (.pdf)</el-dropdown-item>
                 <el-dropdown-item command="openapi">OpenAPI (.json)</el-dropdown-item>
               </el-dropdown-menu>
             </template>

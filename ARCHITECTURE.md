@@ -45,7 +45,8 @@ apitool/
 | `ai` | AI 底层调用（`Chat`/`ChatRaw`/字段描述生成），以 `Host` 接口解耦宿主 | `model` |
 | `testing` | 测试引擎：用例生成、执行、报告导出 | `model`, `httpx`, `store` |
 | `tool` | 通用工具（Hash/HMAC/对称加解密），由 App 嵌入提升给 Wails 前端 | `crypto` |
-| `doc` | 接口文档生成（md/html/word/openapi）与导入（OpenAPI/Swagger/Postman） | `model`, `jsonutil` |
+| `doc` | 接口文档生成（md/html/docx/pdf/openapi，Word/PDF 支持水印）与导入（OpenAPI/Swagger/Postman） | `model`, `jsonutil` |
+| `pdfprint` | HTML→PDF 无头打印（本机 Edge/Chrome 无头模式），供 doc 与 agent 会话导出复用 | `-` |
 | `share` | 本地分享服务（独立 HTML / 在线链接，localhost 托管） | `model`, `store`, `bus` |
 | `sync` | 桌面端内置同步服务（账号、项目、分享文档） | `model`, `store` |
 | `capture` | 浏览器扩展回传的流量捕获（服务端兜底过滤、去重） | `model`, `store`, `bus` |

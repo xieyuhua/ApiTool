@@ -731,6 +731,27 @@ export namespace db {
 
 }
 
+export namespace doc {
+	
+	export class DocPreset {
+	    key: string;
+	    label: string;
+	    desc: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocPreset(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.desc = source["desc"];
+	    }
+	}
+
+}
+
 export namespace frontend {
 	
 	export class FileFilter {
@@ -1308,6 +1329,162 @@ export namespace model {
 		    return a;
 		}
 	}
+	export class DocLayoutTemplate {
+	    id: string;
+	    name: string;
+	    layout: DocLayout;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocLayoutTemplate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.layout = this.convertValues(source["layout"], DocLayout);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DocRevision {
+	    version: string;
+	    date: string;
+	    author: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocRevision(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.date = source["date"];
+	        this.author = source["author"];
+	        this.note = source["note"];
+	    }
+	}
+	export class DocChapter {
+	    title: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocChapter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.content = source["content"];
+	    }
+	}
+	export class DocCover {
+	    enabled: boolean;
+	    title: string;
+	    subtitle: string;
+	    author: string;
+	    org: string;
+	    version: string;
+	    date: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocCover(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.title = source["title"];
+	        this.subtitle = source["subtitle"];
+	        this.author = source["author"];
+	        this.org = source["org"];
+	        this.version = source["version"];
+	        this.date = source["date"];
+	    }
+	}
+	export class DocLayout {
+	    toc: boolean;
+	    numbering: boolean;
+	    cover: DocCover;
+	    prefaces: DocChapter[];
+	    convention: string;
+	    statusCodes: boolean;
+	    revisions: DocRevision[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DocLayout(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.toc = source["toc"];
+	        this.numbering = source["numbering"];
+	        this.cover = this.convertValues(source["cover"], DocCover);
+	        this.prefaces = this.convertValues(source["prefaces"], DocChapter);
+	        this.convention = source["convention"];
+	        this.statusCodes = source["statusCodes"];
+	        this.revisions = this.convertValues(source["revisions"], DocRevision);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DocWatermark {
+	    enabled: boolean;
+	    text: string;
+	    color: string;
+	    size: number;
+	    opacity: number;
+	    angle: number;
+	    repeat: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocWatermark(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.text = source["text"];
+	        this.color = source["color"];
+	        this.size = source["size"];
+	        this.opacity = source["opacity"];
+	        this.angle = source["angle"];
+	        this.repeat = source["repeat"];
+	    }
+	}
 	export class ClipSettings {
 	    monitor: boolean;
 	    maxItems: number;
@@ -1339,6 +1516,11 @@ export namespace model {
 	    autoSync: boolean;
 	    codeFont: string;
 	    codeFontSize: number;
+	    watermark: DocWatermark;
+	    docLayout: DocLayout;
+	    docLayoutTemplates: DocLayoutTemplate[];
+	    shareDocLayout: boolean;
+	    shareDocWatermark: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -1362,6 +1544,11 @@ export namespace model {
 	        this.autoSync = source["autoSync"];
 	        this.codeFont = source["codeFont"];
 	        this.codeFontSize = source["codeFontSize"];
+	        this.watermark = this.convertValues(source["watermark"], DocWatermark);
+	        this.docLayout = this.convertValues(source["docLayout"], DocLayout);
+	        this.docLayoutTemplates = this.convertValues(source["docLayoutTemplates"], DocLayoutTemplate);
+	        this.shareDocLayout = source["shareDocLayout"];
+	        this.shareDocWatermark = source["shareDocWatermark"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1816,6 +2003,12 @@ export namespace model {
 		    return a;
 		}
 	}
+	
+	
+	
+	
+	
+	
 	
 	
 	

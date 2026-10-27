@@ -18,6 +18,7 @@ import (
 	syncsrv "apitool/internal/sync"
 	"apitool/internal/testing"
 	"apitool/internal/tool"
+	"apitool/internal/util"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
@@ -324,22 +325,88 @@ func (a *App) OpenInBrowser(url string) {
 
 // ExportDoc 导出文档（转发到 doc 包）
 func (a *App) ExportDoc(dirID string, apiID string, format string) (string, error) {
-	return doc.ExportDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID, format)
+	return doc.ExportDoc(a.ctx, a.store, dirID, apiID, format)
+}
+
+// PreviewDocWatermark 生成带水印的文档 HTML 并用浏览器打开，供导出前核对水印效果
+func (a *App) PreviewDocWatermark(dirID string, apiID string) (string, error) {
+	return doc.PreviewWatermark(a.ctx, a.store, dirID, apiID)
+}
+
+// DefaultDocConvention 返回内置的「接口统一定义规范」模板，供文档中心一键填入
+func (a *App) DefaultDocConvention() string {
+	return doc.DefaultConventionTemplate()
+}
+
+// DocPresets 返回预置文档结构模板清单（内部版 / 对外版 / 精简版）
+func (a *App) DocPresets() []doc.DocPreset {
+	return doc.DocPresetList()
+}
+
+// DocPresetLayout 生成指定预置模板的排版配置，供前端「套用模板」使用
+func (a *App) DocPresetLayout(key string) model.DocLayout {
+	return doc.DocPresetLayout(key)
+}
+
+// SaveDocLayoutTemplate 把当前文档结构保存为自定义模板（同名覆盖）
+func (a *App) SaveDocLayoutTemplate(name string, layoutJSON string) (model.DocLayoutTemplate, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.DocLayoutTemplate{}, fmt.Errorf("模板名称不能为空")
+	}
+	var layout model.DocLayout
+	if err := json.Unmarshal([]byte(layoutJSON), &layout); err != nil {
+		return model.DocLayoutTemplate{}, fmt.Errorf("文档结构解析失败: %v", err)
+	}
+	data := a.store.GetData()
+	tpl := model.DocLayoutTemplate{ID: util.GenID(), Name: name, Layout: layout}
+	replaced := false
+	for i := range data.Settings.DocLayoutTemplates {
+		if data.Settings.DocLayoutTemplates[i].Name == name {
+			tpl.ID = data.Settings.DocLayoutTemplates[i].ID
+			data.Settings.DocLayoutTemplates[i] = tpl
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		data.Settings.DocLayoutTemplates = append(data.Settings.DocLayoutTemplates, tpl)
+		if len(data.Settings.DocLayoutTemplates) > 20 {
+			return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 20 个，请先删除不用的模板")
+		}
+	}
+	if err := a.store.SaveData(data); err != nil {
+		return model.DocLayoutTemplate{}, err
+	}
+	return tpl, nil
+}
+
+// DeleteDocLayoutTemplate 删除自定义文档结构模板
+func (a *App) DeleteDocLayoutTemplate(id string) error {
+	data := a.store.GetData()
+	kept := make([]model.DocLayoutTemplate, 0, len(data.Settings.DocLayoutTemplates))
+	for _, t := range data.Settings.DocLayoutTemplates {
+		if t.ID != id {
+			kept = append(kept, t)
+		}
+	}
+	data.Settings.DocLayoutTemplates = kept
+	return a.store.SaveData(data)
 }
 
 // ImportDoc 选择并导入接口文档（转发到 doc 包）
 func (a *App) ImportDoc() (string, error) {
-	return doc.ImportDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, "")
+	return doc.ImportDoc(a.ctx, a.store, "")
 }
 
 // ShareDoc 生成 HTML 文档并用浏览器打开（转发到 doc 包）
 func (a *App) ShareDoc(dirID string, apiID string) (string, error) {
-	return doc.ShareDoc(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID)
+	return doc.ShareDoc(a.ctx, a.store, dirID, apiID)
 }
 
 // CopyDocMarkdown 复制 Markdown 文档到剪贴板（转发到 doc 包）
 func (a *App) CopyDocMarkdown(dirID string, apiID string) error {
-	return doc.CopyDocMarkdown(a.ctx, a.store, AppVersion, DefaultUpdateURL, dirID, apiID)
+	return doc.CopyDocMarkdown(a.ctx, a.store, dirID, apiID)
 }
 
 // UpdateInfo 升级服务返回的版本信息

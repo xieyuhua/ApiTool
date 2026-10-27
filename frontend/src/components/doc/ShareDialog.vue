@@ -6,7 +6,7 @@ import {
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
   SyncShareBackend,
 } from '../../../wailsjs/go/main/App'
-import { store, cloudBase } from '../../store'
+import { store, cloudBase, saveNow } from '../../store'
 
 const props = defineProps({
   dirId: { type: String, default: '' },
@@ -14,6 +14,18 @@ const props = defineProps({
 })
 const visible = defineModel('visible')
 const tab = ref('code')
+
+// ---------------- 分享设置（文档结构 / 水印） ----------------
+const settings = store.data.settings
+
+async function toggleShareOption() {
+  try {
+    await saveNow()
+    ElMessage.success('分享设置已保存（重新生成网页代码或在线链接后生效）')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
 
 // ---------------- 网页代码 ----------------
 const code = ref('')
@@ -48,7 +60,6 @@ async function preview() {
 }
 
 // ---------------- 在线链接 ----------------
-const settings = store.data.settings
 // 云分享：已配置云服务器地址且已登录，文档上传到云端，得到公网可访问链接
 const cloudReady = computed(() => {
   const u = (settings.cloudURL || '').trim()
@@ -214,6 +225,12 @@ function fmtExpire(exp) {
 
 <template>
   <el-dialog v-model="visible" title="分享接口文档" width="720px" top="6vh">
+    <div class="share-opts">
+      <span class="so-title">分享内容：</span>
+      <el-checkbox v-model="settings.shareDocLayout" @change="toggleShareOption">套用「文档结构」</el-checkbox>
+      <el-checkbox v-model="settings.shareDocWatermark" @change="toggleShareOption">添加导出水印</el-checkbox>
+      <span class="so-hint">开启后，网页代码 / 在线链接会带上封面、目录与前言等章节（及水印），与导出文件保持一致</span>
+    </div>
     <el-tabs v-model="tab">
       <!-- 网页代码 -->
       <el-tab-pane label="网页代码" name="code">
@@ -290,6 +307,9 @@ function fmtExpire(exp) {
 </template>
 
 <style scoped>
+.share-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; padding: 8px 10px; background: #f7f8fa; border-radius: 8px; }
+.so-title { font-size: 13px; color: #4e5969; }
+.so-hint { font-size: 12px; color: #86909c; }
 .code-tip { font-size: 12.5px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 10px 12px; line-height: 1.7; margin-bottom: 12px; }
 .code-tip code { background: #e5e6eb; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; color: #165dff; }
 .code-loading { color: #86909c; font-size: 13px; padding: 30px 0; text-align: center; }

@@ -40,6 +40,20 @@ th{background:#f7f8fa;font-weight:600}
 .kv th{background:#f7f8fa;font-weight:600;width:160px}
 .kv pre{margin:0;border:1px solid #e5e6eb;padding:10px;white-space:pre-wrap;word-break:break-all;font-family:Consolas,'Courier New',monospace;font-size:12px;max-height:320px;overflow:auto;background:#fff}
 .resp-meta{font-size:12px;color:#4e5969;margin-bottom:6px}
+.doc-cover{padding:96px 24px 72px;text-align:center;border-bottom:1px solid #e5e6eb;margin-bottom:18px}
+.cover-title{font-size:32px;font-weight:700;margin-bottom:10px;line-height:1.3}
+.cover-subtitle{color:#4e5969;font-size:15px;margin-bottom:40px}
+.cover-lines{display:inline-block;text-align:left;font-size:14px;line-height:2.1}
+.cover-lines span{display:inline-block;width:56px;color:#86909c}
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  .doc-cover{break-after:page;padding:28% 12px 0;border-bottom:none}
+  h1,h2{break-after:avoid}
+  .card{break-inside:auto}
+  .kv pre{max-height:none;overflow:visible}
+}
 `
 
 // HTMLEscape 转义 HTML 特殊字符（保留中文，不转义为实体名），供其他报告渲染复用。
@@ -173,6 +187,21 @@ func BuildTestReportMarkdown(r model.TestReport) string {
 
 // BuildTestReportHTML 将测试报告渲染为独立 HTML 源码
 func BuildTestReportHTML(r model.TestReport) string {
+	return buildTestReportHTML(r, model.DocWatermark{}, model.DocCover{})
+}
+
+// BuildTestReportHTMLForExport 生成用于 PDF 导出的打印版 HTML：
+// 版式与独立 HTML 一致，按配置叠加水印层（Chromium 打印时每页都会重复绘制）。
+func BuildTestReportHTMLForExport(r model.TestReport, wm model.DocWatermark) string {
+	return BuildTestReportHTMLForExportWithCover(r, wm, model.DocCover{})
+}
+
+// BuildTestReportHTMLForExportWithCover 同上，并可选择为报告加上「作者封面」页。
+func BuildTestReportHTMLForExportWithCover(r model.TestReport, wm model.DocWatermark, cover model.DocCover) string {
+	return buildTestReportHTML(r, wm, cover)
+}
+
+func buildTestReportHTML(r model.TestReport, wm model.DocWatermark, cover model.DocCover) string {
 	var stats strings.Builder
 	fmt.Fprintf(&stats, `<div class="stats">
 <div class="stat tot"><div class="n">%d</div><div>用例总数</div></div>
@@ -248,10 +277,22 @@ func BuildTestReportHTML(r model.TestReport) string {
 	if r.EnvName != "" {
 		meta += " · 环境：" + HTMLEscape(r.EnvName)
 	}
+	css := ReportCSS
+	wmCSS, wmMarkup := watermarkHTMLCSS(wm)
+	if wmCSS != "" {
+		css += "\n" + wmCSS
+	}
+	coverHTML := ""
+	if cover.Enabled {
+		if strings.TrimSpace(cover.Title) == "" {
+			cover.Title = "接口测试报告"
+		}
+		coverHTML = htmlCover(cover)
+	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>接口测试报告 - %s</title><style>%s</style></head>
-<body><div class="wrap">
+<body>%s%s<div class="wrap">
 <h1>接口测试报告</h1>
 <div class="meta">%s</div>
 %s
@@ -260,6 +301,6 @@ func BuildTestReportHTML(r model.TestReport) string {
 <table><thead><tr><th>用例</th><th>分类</th><th>状态码</th><th>耗时</th><th>结果</th></tr></thead><tbody>%s</tbody></table></div>
 %s
 </div></body></html>`,
-		HTMLEscape(r.PlanName), ReportCSS, meta,
+		HTMLEscape(r.PlanName), css, wmMarkup, coverHTML, meta,
 		stats.String(), summary.String(), rows.String(), details.String())
 }

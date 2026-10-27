@@ -4,6 +4,7 @@ import {main} from '../models';
 import {capture} from '../models';
 import {http} from '../models';
 import {model} from '../models';
+import {doc} from '../models';
 import {agent} from '../models';
 import {share} from '../models';
 import {frontend} from '../models';
@@ -69,13 +70,21 @@ export function CreateAgentSession(arg1:string):Promise<string>;
 
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
+export function DefaultDocConvention():Promise<string>;
+
 export function DefaultTestCasePrompt():Promise<string>;
 
 export function DeleteAgentSession(arg1:string):Promise<void>;
 
 export function DeleteClipItem(arg1:string):Promise<void>;
 
+export function DeleteDocLayoutTemplate(arg1:string):Promise<void>;
+
 export function DeleteTestCases(arg1:Array<string>):Promise<number>;
+
+export function DocPresetLayout(arg1:string):Promise<model.DocLayout>;
+
+export function DocPresets():Promise<Array<doc.DocPreset>>;
 
 export function Emit(arg1:string,arg2:Array<any>):Promise<void>;
 
@@ -237,6 +246,8 @@ export function PluginTest(arg1:model.PluginConn):Promise<plugins.PluginOpResult
 
 export function PolishText(arg1:agent.RunAgentArgs):Promise<string>;
 
+export function PreviewDocWatermark(arg1:string,arg2:string):Promise<string>;
+
 export function QueryAgentLogs(arg1:agent.QueryAgentLogsArgs):Promise<Array<agent.AgentLog>>;
 
 export function Quit():Promise<void>;
@@ -270,6 +281,8 @@ export function SaveClipImage(arg1:Array<number>,arg2:number,arg3:number,arg4:st
 export function SaveClipText(arg1:string,arg2:string):Promise<void>;
 
 export function SaveData(arg1:model.AppData):Promise<void>;
+
+export function SaveDocLayoutTemplate(arg1:string,arg2:string):Promise<model.DocLayoutTemplate>;
 
 export function SaveFileDialog(arg1:frontend.SaveDialogOptions):Promise<string>;
 

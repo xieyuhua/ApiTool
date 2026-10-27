@@ -12,15 +12,14 @@ package agent
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"apitool/internal/pdfprint"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -668,109 +667,12 @@ func inlineMD(text string) string {
 // ============================ PDF 转换 ============================
 
 // htmlToPDF 用本机 Chromium 内核浏览器的无头打印把 HTML 文本转换为 PDF 文件。
+// 会话里可能包含 mermaid 图表（远程 CDN 渲染），因此放宽虚拟时间预算。
 func htmlToPDF(html, pdfPath string) error {
-	browser, err := findChromium()
-	if err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp("", "apitool-agent-export")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-	src := filepath.Join(tmp, "session.html")
-	if err := os.WriteFile(src, []byte(html), 0o644); err != nil {
-		return err
-	}
-	if err := printToPDF(browser, src, pdfPath, true); err != nil {
-		// 部分旧版本浏览器不认 --no-pdf-header-footer，去掉后再试一次
-		if err2 := printToPDF(browser, src, pdfPath, false); err2 != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// printToPDF 执行一次无头打印。noHeader 控制是否隐藏浏览器默认页眉页脚。
-func printToPDF(browser, src, pdfPath string, noHeader bool) error {
-	args := []string{
-		"--headless=new",
-		"--disable-gpu",
-		"--no-sandbox",
-		"--disable-extensions",
-		"--hide-scrollbars",
-		"--run-all-compositor-stages-before-draw",
-		// 给 mermaid CDN 脚本留出加载与渲染时间（虚拟时间会加速推进）
-		"--virtual-time-budget=15000",
-	}
-	if noHeader {
-		args = append(args, "--no-pdf-header-footer")
-	}
-	args = append(args, "--print-to-pdf="+pdfPath, fileURL(src))
-	cmd := exec.Command(browser, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("调用浏览器生成 PDF 失败: %s", tailText(string(out), 300))
-	}
-	if fi, statErr := os.Stat(pdfPath); statErr != nil || fi.Size() == 0 {
-		return fmt.Errorf("浏览器未生成 PDF 文件: %s", tailText(string(out), 300))
-	}
-	return nil
-}
-
-// findChromium 查找本机可用的 Chromium 内核浏览器（Edge / Chrome / Chromium）。
-func findChromium() (string, error) {
-	var candidates []string
-	switch goruntime.GOOS {
-	case "windows":
-		paths := []struct{ env, rel string }{
-			{"ProgramFiles", `Microsoft\Edge\Application\msedge.exe`},
-			{"ProgramFiles(x86)", `Microsoft\Edge\Application\msedge.exe`},
-			{"ProgramFiles", `Google\Chrome\Application\chrome.exe`},
-			{"ProgramFiles(x86)", `Google\Chrome\Application\chrome.exe`},
-			{"LOCALAPPDATA", `Microsoft\Edge\Application\msedge.exe`},
-			{"LOCALAPPDATA", `Google\Chrome\Application\chrome.exe`},
-		}
-		for _, p := range paths {
-			if base := os.Getenv(p.env); base != "" {
-				candidates = append(candidates, filepath.Join(base, p.rel))
-			}
-		}
-	case "darwin":
-		candidates = append(candidates,
-			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-			"/Applications/Chromium.app/Contents/MacOS/Chromium",
-		)
-	default:
-		for _, name := range []string{"microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"} {
-			if p, err := exec.LookPath(name); err == nil {
-				candidates = append(candidates, p)
-			}
-		}
-	}
-	for _, p := range candidates {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p, nil
-		}
-	}
-	// 兜底：PATH 中的 chrome / msedge
-	for _, name := range []string{"chrome", "msedge", "chromium", "google-chrome"} {
-		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("未找到 Chrome / Edge 浏览器，无法直接生成 PDF；请改用「导出 HTML」，再在浏览器中打印为 PDF")
-}
-
-// fileURL 把本地路径转为 file:// URL（Windows 下盘符需转为 /C:/ 形式）。
-func fileURL(p string) string {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		abs = p
-	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
-	return u.String()
+	return pdfprint.FromHTML(html, pdfPath, pdfprint.Options{
+		VirtualTimeBudgetMS: 15000,
+		TempPrefix:          "apitool-agent-export",
+	})
 }
 
 // ============================ 通用小工具 ============================
@@ -800,14 +702,4 @@ func fmtTime(s string) string {
 		return s
 	}
 	return t.Format("2006-01-02 15:04:05")
-}
-
-// tailText 截取文本末尾 n 个字符（用于浏览器错误输出摘要），按 rune 截断避免乱码。
-func tailText(s string, n int) string {
-	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return "..." + string(r[len(r)-n:])
 }
