@@ -737,6 +737,7 @@ export namespace doc {
 	    key: string;
 	    label: string;
 	    desc: string;
+	    tag: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocPreset(source);
@@ -747,6 +748,7 @@ export namespace doc {
 	        this.key = source["key"];
 	        this.label = source["label"];
 	        this.desc = source["desc"];
+	        this.tag = source["tag"];
 	    }
 	}
 

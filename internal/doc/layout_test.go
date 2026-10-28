@@ -215,8 +215,37 @@ func TestDocNumbering(t *testing.T) {
 
 func TestDocPresets(t *testing.T) {
 	list := DocPresetList()
-	if len(list) != 3 {
-		t.Fatalf("预置模板数量 = %d, want 3", len(list))
+	if len(list) != 6 {
+		t.Fatalf("预置模板数量 = %d, want 6", len(list))
+	}
+	// 每个模板都要有标签与描述，且 key 唯一
+	seen := map[string]bool{}
+	for _, p := range list {
+		if p.Key == "" || p.Label == "" || p.Desc == "" || p.Tag == "" {
+			t.Fatalf("模板字段不完整: %+v", p)
+		}
+		if seen[p.Key] {
+			t.Fatalf("模板 key 重复: %s", p.Key)
+		}
+		seen[p.Key] = true
+	}
+	// 每套模板至少要能渲染出目录 + 接口正文
+	for _, p := range list {
+		layout := DocPresetLayout(p.Key)
+		if !layout.Toc || !layout.Numbering {
+			t.Fatalf("模板 %s 未开启目录/编号: %+v", p.Key, layout)
+		}
+	}
+	// 差异化检查：REST 版无封面，微服务版有服务约定章节
+	if DocPresetLayout("rest").Cover.Enabled {
+		t.Fatal("标准 RESTful 版不应带封面")
+	}
+	micro := DocPresetLayout("micro")
+	if !micro.Cover.Enabled || len(micro.Prefaces) == 0 || !micro.StatusCodes {
+		t.Fatalf("微服务版配置不完整: %+v", micro)
+	}
+	if review := DocPresetLayout("review"); !review.Cover.Enabled || len(review.Revisions) == 0 {
+		t.Fatalf("评审版应带封面与修订记录: %+v", review)
 	}
 	internal := DocPresetLayout("internal")
 	if !internal.Cover.Enabled || internal.Convention == "" || !internal.StatusCodes ||
@@ -230,6 +259,46 @@ func TestDocPresets(t *testing.T) {
 	minimal := DocPresetLayout("unknown")
 	if minimal.Cover.Enabled || minimal.Convention != "" || minimal.StatusCodes || !minimal.Toc {
 		t.Fatalf("未知模板应回退为精简版: %+v", minimal)
+	}
+}
+
+// TestDocPresetsRender 每套预置模板都要能正常渲染三种格式，且章节与配置一致。
+func TestDocPresetsRender(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	for _, p := range DocPresetList() {
+		layout := DocPresetLayout(p.Key)
+
+		html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+		if !strings.Contains(html, labelAPISection) {
+			t.Fatalf("[%s] HTML 缺少接口正文", p.Key)
+		}
+		if layout.Cover.Enabled != strings.Contains(html, `id="cover"`) {
+			t.Fatalf("[%s] 封面开关与输出不一致", p.Key)
+		}
+		if layout.Toc != strings.Contains(html, `id="toc"`) {
+			t.Fatalf("[%s] 目录开关与输出不一致", p.Key)
+		}
+		for _, ch := range layout.Prefaces {
+			if !strings.Contains(html, ch.Title) {
+				t.Fatalf("[%s] HTML 缺少章节 %q", p.Key, ch.Title)
+			}
+		}
+		if layout.StatusCodes && !strings.Contains(html, "附录：HTTP 状态码") {
+			t.Fatalf("[%s] 缺少状态码附录", p.Key)
+		}
+
+		md := buildMarkdown(title, rootID, dirs, apis, common, layout)
+		if !strings.Contains(md, "## ") {
+			t.Fatalf("[%s] Markdown 结构缺失", p.Key)
+		}
+
+		parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
+		if !strings.Contains(parts["word/document.xml"], "查询用户列表") {
+			t.Fatalf("[%s] DOCX 缺少接口内容", p.Key)
+		}
+		if layout.Toc && !strings.Contains(parts["word/document.xml"], "TOC ") {
+			t.Fatalf("[%s] DOCX 缺少目录域", p.Key)
+		}
 	}
 }
 

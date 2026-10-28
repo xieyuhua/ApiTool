@@ -1,14 +1,10 @@
 <script setup>
-// 企业级文档结构配置：封面 / 目录 / 文档公共描述 / 接口统一定义规范 / 附录状态码 / 修订记录。
-// 直接读写全局设置并即时保存，供「文档中心」导出时使用（Word / PDF / HTML / Markdown 均生效）。
+// 文档结构表单：封面 / 目录 / 章节编号 / 公共描述 / 统一定义规范 / 附录状态码 / 修订记录。
+// 模板库（预置 + 我的模板）在「文档模板」页面维护，本组件只负责结构本身。
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ElMessageBox } from 'element-plus'
-import {
-  DefaultDocConvention, PreviewDocWatermark, DocPresets, DocPresetLayout,
-  SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
-} from '../../../wailsjs/go/main/App'
-import { store, saveNow, reloadStore } from '../../store'
+import { DefaultDocConvention, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
+import { store, saveNow } from '../../store'
 
 const props = defineProps({
   dirId: { type: String, default: '' },
@@ -17,8 +13,6 @@ const props = defineProps({
 
 const dl = computed(() => store.data.settings.docLayout)
 const previewing = ref(false)
-const presets = ref([])   // 后端返回的预置模板清单
-const applying = ref('')
 
 // normalize 补齐字段：老数据或后端返回的 null 数组都要转成可用结构
 function normalize(v) {
@@ -36,80 +30,7 @@ function normalize(v) {
   return v
 }
 
-onMounted(async () => {
-  normalize(dl.value)
-  try { presets.value = await DocPresets() || [] } catch { presets.value = [] }
-})
-
-// 套用预置模板（覆盖当前文档结构，水印配置不受影响）
-async function applyPreset(p) {
-  if (applying.value) return
-  if (!window.confirm(`套用「${p.label}」会覆盖当前文档结构配置，确定继续吗？`)) return
-  applying.value = p.key
-  try {
-    const layout = normalize(await DocPresetLayout(p.key))
-    // 整体替换当前结构（水印配置独立保存，不受影响）
-    Object.assign(store.data.settings.docLayout, layout)
-    await saveNow()
-    ElMessage.success('已套用模板：' + p.label)
-  } catch (e) {
-    ElMessage.error(String(e))
-  } finally {
-    applying.value = ''
-  }
-}
-
-// ---------------- 自定义模板（团队模板库） ----------------
-const myTemplates = computed(() => store.data.settings.docLayoutTemplates || [])
-
-// 把当前结构保存为命名模板（同名覆盖）
-async function saveAsTemplate() {
-  let name = ''
-  try {
-    const r = await ElMessageBox.prompt('模板名称（如「对外版 v2」「评审版」）', '保存为自定义模板', {
-      inputPlaceholder: '模板名称', inputValidator: v => (v && v.trim() ? true : '请输入模板名称'),
-    })
-    name = (r.value || '').trim()
-  } catch { return }
-  try {
-    await SaveDocLayoutTemplate(name, JSON.stringify(store.data.settings.docLayout))
-    await reloadTemplates()
-    ElMessage.success('已保存模板：' + name)
-  } catch (e) {
-    ElMessage.error(String(e))
-  }
-}
-
-// 套用自定义模板
-async function applyTemplate(tpl) {
-  if (!window.confirm(`套用「${tpl.name}」会覆盖当前文档结构配置，确定继续吗？`)) return
-  try {
-    Object.assign(store.data.settings.docLayout, normalize(JSON.parse(JSON.stringify(tpl.layout))))
-    await saveNow()
-    ElMessage.success('已套用模板：' + tpl.name)
-  } catch (e) {
-    ElMessage.error(String(e))
-  }
-}
-
-// 删除自定义模板
-async function removeTemplate(tpl) {
-  if (!window.confirm(`删除模板「${tpl.name}」？`)) return
-  try {
-    await DeleteDocLayoutTemplate(tpl.id)
-    await reloadTemplates()
-    ElMessage.success('已删除模板：' + tpl.name)
-  } catch (e) {
-    ElMessage.error(String(e))
-  }
-}
-
-async function reloadTemplates() {
-  try {
-    await reloadStore()
-    normalize(dl.value)
-  } catch { /* 忽略：模板列表刷新失败不影响导出 */ }
-}
+onMounted(() => normalize(dl.value))
 
 async function save() {
   try {
@@ -143,15 +64,12 @@ function removePreface(i) {
 // ---------------- 接口统一定义规范 ----------------
 async function fillConvention() {
   try {
-    if (String(dl.value.convention || '').trim() && !confirmFilled()) return
+    if (String(dl.value.convention || '').trim() && !window.confirm('当前已有规范内容，确定用默认模板覆盖吗？')) return
     dl.value.convention = await DefaultDocConvention()
     saveWithTip('已填入默认规范模板，可按团队要求修改')
   } catch (e) {
     ElMessage.error(String(e))
   }
-}
-function confirmFilled() {
-  return window.confirm('当前已有规范内容，确定用默认模板覆盖吗？')
 }
 
 // ---------------- 修订记录 ----------------
@@ -178,6 +96,8 @@ async function preview() {
     previewing.value = false
   }
 }
+
+defineExpose({ preview })
 </script>
 
 <template>
@@ -186,21 +106,6 @@ async function preview() {
     <div class="dl-tip">
       按需勾选要输出的章节，导出顺序固定为：封面 → 修订记录 → 目录 → 文档公共描述 → 接口统一定义规范 → 接口正文 → 附录。
       Word / PDF / HTML / Markdown 都会套用同一套结构，配置自动保存。
-    </div>
-
-    <div class="dl-presets" v-if="presets.length">
-      <span class="dl-presets-label">套用模板：</span>
-      <el-tooltip v-for="p in presets" :key="p.key" :content="p.desc" placement="top">
-        <el-button size="small" :loading="applying === p.key" @click="applyPreset(p)">{{ p.label }}</el-button>
-      </el-tooltip>
-    </div>
-
-    <div class="dl-presets">
-      <span class="dl-presets-label">我的模板：</span>
-      <el-tag v-for="tpl in myTemplates" :key="tpl.id" class="dl-tpl" closable
-        @close="removeTemplate(tpl)" @click="applyTemplate(tpl)">{{ tpl.name }}</el-tag>
-      <span v-if="!myTemplates.length" class="dl-hint" style="margin-left:0">暂无自定义模板</span>
-      <el-button size="small" link type="primary" @click="saveAsTemplate">+ 保存当前结构为模板</el-button>
     </div>
 
     <el-form label-width="104px" label-position="left">
@@ -239,16 +144,14 @@ async function preview() {
         <el-button size="small" @click="addPreface">+ 添加章节</el-button>
         <span class="dl-hint">{{ dl.prefaces.length }} 个章节（文档说明 / 变更背景 / 术语表等，支持标题、列表、表格、代码块）</span>
       </el-form-item>
-      <template v-for="(p, i) in dl.prefaces" :key="i">
-        <el-form-item :label="`章节 ${i + 1}`">
-          <div class="dl-chapter">
-            <el-input v-model="p.title" placeholder="章节标题" style="width:300px" @change="save" />
-            <el-button link type="danger" style="margin-left:8px" @click="removePreface(i)">删除</el-button>
-            <el-input v-model="p.content" type="textarea" :rows="4" class="dl-md"
-              placeholder="支持简化 Markdown：#### 小标题 / - 列表 / **加粗** / `代码` / 表格 / ```代码块```" @change="save" />
-          </div>
-        </el-form-item>
-      </template>
+      <el-form-item v-for="(p, i) in dl.prefaces" :key="i" :label="`章节 ${i + 1}`">
+        <div class="dl-chapter">
+          <el-input v-model="p.title" placeholder="章节标题" style="width:300px" @change="save" />
+          <el-button link type="danger" style="margin-left:8px" @click="removePreface(i)">删除</el-button>
+          <el-input v-model="p.content" type="textarea" :rows="4" class="dl-md"
+            placeholder="支持简化 Markdown：#### 小标题 / - 列表 / **加粗** / `代码` / 表格 / 代码块" @change="save" />
+        </div>
+      </el-form-item>
 
       <el-form-item label="统一定义规范">
         <div style="width:100%">
@@ -283,7 +186,7 @@ async function preview() {
 
       <el-form-item label="效果预览">
         <el-button size="small" type="primary" plain :loading="previewing" @click="preview">👁 预览整份文档</el-button>
-        <span class="dl-hint">用当前范围与结构在浏览器打开，按 Ctrl+P 可看打印分页效果</span>
+        <span class="dl-hint">用当前结构与水印在浏览器打开，按 Ctrl+P 可看打印分页效果</span>
       </el-form-item>
     </el-form>
   </div>
@@ -291,9 +194,6 @@ async function preview() {
 
 <style scoped>
 .dl-tip { font-size: 13px; color: #4e5969; margin-bottom: 12px; }
-.dl-presets { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.dl-presets-label { font-size: 13px; color: #4e5969; }
-.dl-tpl { cursor: pointer; }
 .dl-hint { font-size: 12px; color: #86909c; margin-left: 10px; }
 .dl-chapter { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .dl-chapter :deep(.el-input) { align-self: flex-start; }

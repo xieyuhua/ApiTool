@@ -5,7 +5,6 @@ import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestRepor
 import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 import DocWatermarkPanel from './DocWatermarkPanel.vue'
-import DocLayoutPanel from './DocLayoutPanel.vue'
 
 const scopeDirId = ref('')
 const busy = ref(false)
@@ -45,6 +44,24 @@ async function doExport(format) {
   } catch (e) {
     ElMessage.error(String(e))
   } finally { busy.value = false }
+}
+
+// 文档结构摘要（配置入口在「文档模板」菜单）
+const layoutSummary = computed(() => {
+  const v = store.data.settings.docLayout || {}
+  const parts = []
+  if (v.cover?.enabled) parts.push('封面')
+  if (v.revisions?.length) parts.push(`修订记录 ${v.revisions.length} 条`)
+  if (v.toc) parts.push('目录')
+  if (v.numbering) parts.push('编号')
+  if (v.prefaces?.length) parts.push(`公共描述 ${v.prefaces.length} 章`)
+  if (v.convention) parts.push('统一定义规范')
+  if (v.statusCodes) parts.push('附录状态码')
+  return parts.length ? parts.join(' · ') : '仅接口正文'
+})
+
+function goTemplates() {
+  store.view = 'templates'
 }
 
 async function share() {
@@ -174,7 +191,17 @@ const formats = [
         </div>
       </div>
 
-      <DocLayoutPanel :dir-id="scopeDirId" />
+      <div class="card">
+        <div class="card-title">企业级排版（文档结构 / 模板）</div>
+        <div class="layout-tip">
+          导出时的章节结构（封面 / 修订记录 / 目录 / 公共描述 / 统一定义规范 / 附录）由「文档模板」统一配置，
+          Word / PDF / HTML / Markdown 共用同一套配置。
+        </div>
+        <div class="layout-now">
+          <span>当前结构：<b>{{ layoutSummary }}</b></span>
+          <el-button size="small" type="primary" plain @click="goTemplates">📐 去配置文档模板</el-button>
+        </div>
+      </div>
 
       <DocWatermarkPanel :dir-id="scopeDirId" />
 
@@ -258,6 +285,8 @@ const formats = [
 .api-row:hover { background: #f2f3f5; }
 .api-row-name { font-size: 13px; }
 .api-row-url { color: #86909c; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layout-tip { font-size: 13px; color: #4e5969; margin-bottom: 10px; }
+.layout-now { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: #1f2329; }
 .report-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 4px; border-bottom: 1px dashed #f2f3f5; }
 .report-row:last-child { border-bottom: none; }
 .rr-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

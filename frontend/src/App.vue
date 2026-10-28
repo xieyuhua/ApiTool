@@ -8,6 +8,7 @@ import DebugPanel from './components/common/DebugPanel.vue'
 import ParamsPanel from './components/common/ParamsPanel.vue'
 import DocPreview from './components/doc/DocPreview.vue'
 import DocCenter from './components/doc/DocCenter.vue'
+import DocTemplateCenter from './components/doc/DocTemplateCenter.vue'
 import SettingsPanel from './components/settings/SettingsPanel.vue'
 import TestCenter from './components/test/TestCenter.vue'
 import EnvManager from './components/common/EnvManager.vue'
@@ -124,6 +125,7 @@ const api = computed(() => currentApi())
 const navs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
+  { key: 'templates', label: '文档模板', icon: '📐' },
   { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
   { key: 'mitm', label: '网络抓包', icon: '🕵' },
@@ -202,6 +204,7 @@ const navs = [
 
     <keep-alive v-else>
       <DocCenter v-if="store.view === 'docs'" />
+      <DocTemplateCenter v-else-if="store.view === 'templates'" />
       <TestCenter v-else-if="store.view === 'testing'" />
       <CapturePanel v-else-if="store.view === 'capture'" />
       <MitmPanel v-else-if="store.view === 'mitm'" />

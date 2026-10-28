@@ -187,49 +187,83 @@ type DocPreset struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Desc  string `json:"desc"`
+	Tag   string `json:"tag"` // 适用场景标签，便于前端分组展示
 }
 
-// DocPresetList 预置模板清单（供前端展示「套用模板」按钮）。
+// DocPresetList 预置模板清单（供前端「模板库」展示，一键套用）。
 func DocPresetList() []DocPreset {
 	return []DocPreset{
-		{Key: "internal", Label: "内部版（推荐）", Desc: "封面 + 修订记录 + 目录 + 文档说明 + 统一定义规范 + 附录状态码"},
-		{Key: "external", Label: "对外版", Desc: "封面 + 目录 + 统一定义规范 + 附录状态码（不含修订记录）"},
-		{Key: "minimal", Label: "精简版", Desc: "仅目录 + 接口正文，适合快速交付"},
+		{Key: "internal", Label: "内部版", Tag: "推荐",
+			Desc: "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作"},
+		{Key: "external", Label: "对外版", Tag: "对外",
+			Desc: "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方"},
+		{Key: "rest", Label: "标准 RESTful 版", Tag: "通用",
+			Desc: "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档"},
+		{Key: "review", Label: "评审版", Tag: "评审",
+			Desc: "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用"},
+		{Key: "micro", Label: "微服务版", Tag: "架构",
+			Desc: "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同"},
+		{Key: "minimal", Label: "精简版", Tag: "精简",
+			Desc: "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查"},
 	}
 }
 
-// DocPresetLayout 生成预置模板的排版配置；未知 key 返回精简版。
+// DocPresetLayout 生成预置模板的排版配置；未知 key 回退为精简版。
 func DocPresetLayout(key string) model.DocLayout {
+	today := time.Now().Format("2006-01-02")
+	base := model.DocLayout{Toc: true, Numbering: true}
+
 	switch key {
 	case "internal":
-		return model.DocLayout{
-			Toc:       true,
-			Numbering: true,
-			Cover: model.DocCover{
-				Enabled: true, Subtitle: "内部技术文档 · 禁止外传", Version: "V1.0.0",
-			},
-			Prefaces: []model.DocChapter{{
-				Title: "文档说明",
-				Content: "#### 适用范围\n- 本文档覆盖当前项目全部对外接口\n\n" +
-					"#### 阅读对象\n- 前端 / 后端 / 测试同学\n\n" +
-					"#### 术语约定\n| 术语 | 说明 |\n|---|---|\n| 业务状态码 | 响应体中的 `code` 字段 |\n| 鉴权 | 请求头 `Authorization: Bearer <token>` |\n",
-			}},
-			Convention:  DefaultConventionTemplate(),
-			StatusCodes: true,
-			Revisions: []model.DocRevision{
-				{Version: "V1.0.0", Date: time.Now().Format("2006-01-02"), Author: "", Note: "首次发布"},
-			},
-		}
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "内部技术文档 · 禁止外传", Version: "V1.0.0"}
+		base.Prefaces = []model.DocChapter{docChapterIntro()}
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布"}}
 	case "external":
-		return model.DocLayout{
-			Toc:         true,
-			Numbering:   true,
-			Cover:       model.DocCover{Enabled: true, Subtitle: "对外接口文档", Version: "V1.0.0"},
-			Convention:  DefaultConventionTemplate(),
-			StatusCodes: true,
-		}
-	default: // minimal
-		return model.DocLayout{Toc: true, Numbering: true}
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "对外接口文档", Version: "V1.0.0"}
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+	case "rest":
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+	case "review":
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "接口评审稿", Version: "V0.9.0"}
+		base.Prefaces = []model.DocChapter{{
+			Title: "评审说明",
+			Content: "#### 评审范围\n- 本次新增 / 变更的接口清单\n- 参数与响应结构的合理性\n\n" +
+				"#### 评审要点\n- 命名与路径是否符合统一规范\n- 是否存在破坏性变更、是否需要升版本\n" +
+				"- 权限与鉴权是否明确、错误码是否覆盖异常分支\n\n" +
+				"| 结论 | 记录 |\n|---|---|\n| 通过 / 待修改 | |\n",
+		}}
+		base.Convention = DefaultConventionTemplate()
+		base.Revisions = []model.DocRevision{{Version: "V0.9.0", Date: today, Note: "提交评审"}}
+	case "micro":
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "微服务接口文档", Version: "V1.0.0"}
+		base.Prefaces = []model.DocChapter{{
+			Title: "服务与调用约定",
+			Content: "#### 服务信息\n- 服务名：`order-service`（按实际填写）\n- 网关前缀：`/api/order`\n\n" +
+				"#### 调用约定\n- 内部调用走服务发现，禁止硬编码 IP\n" +
+				"- 超时：连接 1s / 读取 3s；仅幂等接口可重试，最多 2 次\n" +
+				"- 链路追踪：透传 `X-Request-Id` 与 `X-Trace-Id`\n\n" +
+				"#### 鉴权\n- 网关校验 `Authorization: Bearer <token>`，服务内二次校验租户 `X-Tenant-Id`\n",
+		}}
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+	default: // minimal：仅目录 + 接口正文
+	}
+	return base
+}
+
+// docChapterIntro 内部版默认的「文档说明」章节内容。
+func docChapterIntro() model.DocChapter {
+	return model.DocChapter{
+		Title: "文档说明",
+		Content: "#### 适用范围\n- 本文档覆盖当前项目全部对外接口\n\n" +
+			"#### 阅读对象\n- 前端 / 后端 / 测试同学\n\n" +
+			"#### 术语约定\n| 术语 | 说明 |\n|---|---|\n" +
+			"| 业务状态码 | 响应体中的 `code` 字段 |\n" +
+			"| 鉴权 | 请求头 `Authorization: Bearer <token>` |\n",
 	}
 }
 

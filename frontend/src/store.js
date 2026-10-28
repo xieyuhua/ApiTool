@@ -45,7 +45,7 @@ export const store = reactive({
   loaded: false,
   loading: false, // 初始化数据加载中（全屏遮罩）
   treeLoading: false, // 切换项目 / 重建目录时的局部加载
-  view: 'workspace', // workspace | docs | settings
+  view: 'workspace', // workspace | docs | templates | testing | capture | mitm | tools | agent | settings
   currentApiId: '',
   activeTab: 'debug', // debug | params | doc
   // 接口调试多标签：每个标签绑定一个接口，支持同时打开多个接口窗口（类似浏览器标签）
