@@ -44,7 +44,7 @@ func htmlFormTable(sb *strings.Builder, title string, kvs []model.KV) {
 		typ := "文本"
 		val := kv.Value
 		if kv.Type == model.FormTypeFile {
-			typ = `<span style="color:#165dff">文件</span>`
+			typ = `<span>文件</span>`
 			if val == "" {
 				val = "（未选择文件）"
 			} else {
@@ -121,59 +121,59 @@ func htmlToc(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, 
 // docCSS 分享/导出 HTML 文档的内联样式，自包含，无需外部样式表。
 const docCSS = `
 :root{color-scheme:light}
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2329;background:#f7f8fa}
+*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#000;background:#f7f8fa}
 .layout{display:flex;max-width:1280px;margin:0 auto}
 .toc{width:260px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow:auto;padding:24px 8px;border-right:1px solid #e5e6eb;background:#fff}
 .toc-title{font-weight:700;padding:0 12px 12px;font-size:15px}
-.toc-dir{font-weight:600;font-size:13px;color:#4e5969;padding:8px 12px 4px}
-.toc a{display:block;padding:5px 12px;font-size:13px;color:#1f2329;text-decoration:none;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toc-dir{font-weight:600;font-size:13px;color:#000;padding:8px 12px 4px}
+.toc a{display:block;padding:5px 12px;font-size:13px;color:#000;text-decoration:none;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toc a:hover{background:#f2f3f5}
 .tm{display:inline-block;font-size:10px;font-weight:700;margin-right:6px;width:44px;text-align:center;border-radius:3px;padding:1px 0;color:#fff}
 main{flex:1;padding:32px 40px;min-width:0}
 .doc-head{margin:0}
 h1{font-size:26px;margin:0 0 4px}
-.meta{color:#86909c;font-size:13px;margin-bottom:18px}
+.meta{color:#000;font-size:13px;margin-bottom:18px}
 .doc-search{position:sticky;top:0;background:#f7f8fa;padding:6px 0 14px;z-index:5}
 .doc-search input{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #e5e6eb;border-radius:8px;font-size:14px;outline:none;background:#fff}
-.doc-search input:focus{border-color:#165dff;box-shadow:0 0 0 2px rgba(22,93,255,.12)}
+.doc-search input:focus{border-color:#000;box-shadow:0 0 0 2px rgba(0,0,0,.08)}
 h2.dir{font-size:20px;margin:36px 0 8px;padding-bottom:8px;border-bottom:2px solid #e5e6eb}
 .api{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:20px 24px;margin:16px 0}
 .api h3{margin:0 0 12px;font-size:18px}
-.api h4{margin:18px 0 8px;font-size:14px;color:#4e5969}
+.api h4{margin:18px 0 8px;font-size:14px;color:#000}
 .urlbar{display:flex;align-items:center;gap:10px;background:#f7f8fa;border-radius:6px;padding:8px 12px}
 .urlbar code{font-size:14px;word-break:break-all}
 .method,.tm{font-family:inherit}
 .method{font-size:12px;font-weight:700;padding:3px 10px;border-radius:4px;color:#fff}
-.m-get,.tm-get{background:#0fc6c2}.m-post,.tm-post{background:#165dff}.m-put,.tm-put{background:#ff7d00}
-.m-delete,.tm-delete{background:#f53f3f}.m-patch,.tm-patch{background:#722ed1}.m-head,.tm-head,.m-options,.tm-options{background:#86909c}
-.desc{color:#4e5969;font-size:14px}
+.m-get,.tm-get,.m-post,.tm-post,.m-put,.tm-put{background:#1f2329}
+.m-delete,.tm-delete,.m-patch,.tm-patch,.m-head,.tm-head,.m-options,.tm-options{background:#1f2329}
+.desc{color:#000;font-size:14px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border:1px solid #e5e6eb;padding:7px 12px;text-align:left;word-break:break-all}
 th{background:#f7f8fa;font-weight:600}
 .fname{font-family:Consolas,monospace}
-.ftype{color:#165dff;font-size:12px}
-.fex{color:#86909c}
-pre{background:#1d2129;color:#e5e6eb;border-radius:8px;padding:14px;font-size:13px;overflow:auto;max-height:400px}
-.empty-tip{color:#86909c;font-size:14px;padding:40px 0;text-align:center;display:none}
+.ftype{color:#000;font-size:12px}
+.fex{color:#000}
+pre{background:#f7f8fa;color:#000;border:1px solid #e5e6eb;border-radius:8px;padding:14px;font-size:13px;overflow:auto;max-height:400px}
+.empty-tip{color:#000;font-size:14px;padding:40px 0;text-align:center;display:none}
 /* ---------- 企业文档章节（封面 / 目录 / 前言 / 规范 / 附录） ---------- */
 .doc-sec{margin:18px 0}
 .sec-title{font-size:20px;margin:26px 0 12px;padding-bottom:8px;border-bottom:2px solid #e5e6eb}
 .doc-cover{padding:96px 24px 72px;text-align:center;border-bottom:1px solid #e5e6eb;margin-bottom:18px}
 .cover-title{font-size:32px;font-weight:700;margin-bottom:10px;line-height:1.3}
-.cover-subtitle{color:#4e5969;font-size:15px;margin-bottom:40px}
+.cover-subtitle{color:#000;font-size:15px;margin-bottom:40px}
 .cover-lines{display:inline-block;text-align:left;font-size:14px;line-height:2.1}
-.cover-lines span{display:inline-block;width:56px;color:#86909c}
+.cover-lines span{display:inline-block;width:56px;color:#000}
 .doc-table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
 .doc-toc{padding:6px 0}
 .doc-toc .toc-body{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:8px}
-.doc-toc .toc-body a{display:block;padding:4px 10px;font-size:13px;color:#1f2329;text-decoration:none;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-toc .toc-body a{display:block;padding:4px 10px;font-size:13px;color:#000;text-decoration:none;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .doc-toc .toc-body a:hover{background:#f2f3f5}
-.doc-toc .toc-body .toc-sec{font-weight:600;color:#165dff}
+.doc-toc .toc-body .toc-sec{font-weight:600;color:#000}
 .mini-h{margin:16px 0 8px}
 .mini-p{margin:8px 0;line-height:1.8}
 .mini-ul,.mini-ol{margin:8px 0 8px 22px;line-height:1.8}
-.mini-quote{margin:10px 0;padding:8px 14px;border-left:3px solid #165dff;background:#f7f8fa;color:#4e5969}
-.mini-code{margin:10px 0;background:#1d2129;color:#e5e6eb;border-radius:8px;padding:12px;font-size:12.5px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.mini-quote{margin:10px 0;padding:8px 14px;border-left:3px solid #c9cdd4;background:#f7f8fa;color:#000}
+.mini-code{margin:10px 0;background:#f7f8fa;color:#000;border:1px solid #e5e6eb;border-radius:8px;padding:12px;font-size:12.5px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 .mini-code-inline{background:#f2f3f5;padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:12.5px}
 .mini-table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}@media print{
   @page{size:A4;margin:14mm 12mm}
@@ -187,7 +187,7 @@ pre{background:#1d2129;color:#e5e6eb;border-radius:8px;padding:14px;font-size:13
   .api h3{break-after:avoid}
   table{break-inside:auto}
   tr{break-inside:avoid}
-  pre{max-height:none;overflow:visible;white-space:pre-wrap;word-break:break-all;background:#f7f8fa;color:#1f2329;border:1px solid #e5e6eb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  pre{max-height:none;overflow:visible;white-space:pre-wrap;word-break:break-all;background:#f7f8fa;color:#000;border:1px solid #e5e6eb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .doc-cover{break-after:page;padding:28% 12px 0;border-bottom:none;text-align:center}
   .doc-toc{break-after:page}
   .doc-sec.pb{break-before:page}

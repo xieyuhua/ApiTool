@@ -163,44 +163,44 @@ const docxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
 <w:style w:type="paragraph" w:styleId="DocTitle"><w:name w:val="Doc Title"/><w:basedOn w:val="Normal"/><w:qFormat/>
 <w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="120"/></w:pPr>
-<w:rPr><w:b/><w:sz w:val="44"/><w:szCs w:val="44"/><w:color w:val="1F2329"/></w:rPr></w:style>
+<w:rPr><w:b/><w:sz w:val="44"/><w:szCs w:val="44"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocMeta"><w:name w:val="Doc Meta"/><w:basedOn w:val="Normal"/><w:qFormat/>
 <w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="280"/></w:pPr>
-<w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/><w:color w:val="86909C"/></w:rPr></w:style>
+<w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocSpacer"><w:name w:val="Doc Spacer"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:spacing w:before="0" w:after="0" w:line="200" w:lineRule="auto"/></w:pPr>
 <w:rPr><w:sz w:val="10"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>
 <w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="160"/>
 <w:pBdr><w:bottom w:val="single" w:sz="8" w:space="4" w:color="E5E6EB"/></w:pBdr><w:outlineLvl w:val="0"/></w:pPr>
-<w:rPr><w:b/><w:sz w:val="32"/><w:szCs w:val="32"/><w:color w:val="1F2329"/></w:rPr></w:style>
+<w:rPr><w:b/><w:sz w:val="32"/><w:szCs w:val="32"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>
 <w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="280" w:after="120"/><w:outlineLvl w:val="1"/></w:pPr>
-<w:rPr><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="1F2329"/></w:rPr></w:style>
+<w:rPr><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>
 <w:pPr><w:keepNext/><w:spacing w:before="200" w:after="80"/><w:outlineLvl w:val="2"/></w:pPr>
-<w:rPr><w:b/><w:sz w:val="21"/><w:szCs w:val="21"/><w:color w:val="4E5969"/></w:rPr></w:style>
+<w:rPr><w:b/><w:sz w:val="21"/><w:szCs w:val="21"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocURL"><w:name w:val="Doc Url"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F7F8FA"/><w:spacing w:before="40" w:after="140"/></w:pPr>
 <w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:eastAsia="Consolas"/><w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocCode"><w:name w:val="Doc Code"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F7F8FA"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
-<w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:eastAsia="Consolas"/><w:sz w:val="17"/><w:szCs w:val="17"/><w:color w:val="1F2329"/></w:rPr></w:style>
+<w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:eastAsia="Consolas"/><w:sz w:val="17"/><w:szCs w:val="17"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocCoverTitle"><w:name w:val="Doc Cover Title"/><w:basedOn w:val="Normal"/><w:qFormat/>
 <w:pPr><w:jc w:val="center"/><w:spacing w:before="2400" w:after="240"/></w:pPr>
-<w:rPr><w:b/><w:sz w:val="56"/><w:szCs w:val="56"/><w:color w:val="1F2329"/></w:rPr></w:style>
+<w:rPr><w:b/><w:sz w:val="56"/><w:szCs w:val="56"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocCoverSubtitle"><w:name w:val="Doc Cover Subtitle"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="600"/></w:pPr>
-<w:rPr><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="4E5969"/></w:rPr></w:style>
+<w:rPr><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocCoverLine"><w:name w:val="Doc Cover Line"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="120"/></w:pPr>
-<w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/><w:color w:val="4E5969"/></w:rPr></w:style>
+<w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/><w:color w:val="000000"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocBullet"><w:name w:val="Doc Bullet"/><w:basedOn w:val="Normal"/>
 <w:pPr><w:spacing w:before="0" w:after="60"/><w:ind w:left="300"/></w:pPr></w:style>
 <w:style w:type="paragraph" w:styleId="DocQuote"><w:name w:val="Doc Quote"/><w:basedOn w:val="Normal"/>
-<w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F7F8FA"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="6" w:color="165DFF"/></w:pBdr>
+<w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F7F8FA"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="6" w:color="C9CDD4"/></w:pBdr>
 <w:spacing w:before="80" w:after="80"/><w:ind w:left="180"/></w:pPr>
-<w:rPr><w:color w:val="4E5969"/></w:rPr></w:style>
+<w:rPr><w:color w:val="000000"/></w:rPr></w:style>
 </w:styles>`
 
 // docxSettings 文档级设置：打开时自动更新域，使 TOC 目录生成真实页码。

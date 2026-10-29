@@ -114,6 +114,10 @@ export function DefaultDocConvention() {
   return window['go']['main']['App']['DefaultDocConvention']();
 }
 
+export function DefaultDocSign() {
+  return window['go']['main']['App']['DefaultDocSign']();
+}
+
 export function DefaultTestCasePrompt() {
   return window['go']['main']['App']['DefaultTestCasePrompt']();
 }

@@ -171,24 +171,24 @@ type AssertionResult struct {
 
 // TestResult 单个用例执行结果
 type TestResult struct {
-	CaseID     string            `json:"caseId"`
-	CaseName   string            `json:"caseName"`
-	Category   string            `json:"category"`
-	Passed     bool              `json:"passed"`
-	Status     int               `json:"status"`
-	StatusText string            `json:"statusText"`
-	DurationMs int64             `json:"durationMs"`
-	Size       int64             `json:"size"`
-	Error      string            `json:"error"`
+	CaseID     string `json:"caseId"`
+	CaseName   string `json:"caseName"`
+	Category   string `json:"category"`
+	Passed     bool   `json:"passed"`
+	Status     int    `json:"status"`
+	StatusText string `json:"statusText"`
+	DurationMs int64  `json:"durationMs"`
+	Size       int64  `json:"size"`
+	Error      string `json:"error"`
 	// 实际请求快照（公共参数合并、环境变量替换前的定义）
-	RequestMethod      string          `json:"requestMethod"`
-	RequestURL         string          `json:"requestURL"`
-	RequestHeaders     []KV            `json:"requestHeaders"`
-	RequestQuery       []KV            `json:"requestQuery"`
-	RequestFormItems   []KV            `json:"requestFormItems"`
-	RequestBodyType    string          `json:"requestBodyType"`
-	RequestBody        string          `json:"requestBody"`
-	RequestContentType string          `json:"requestContentType"`
+	RequestMethod      string `json:"requestMethod"`
+	RequestURL         string `json:"requestURL"`
+	RequestHeaders     []KV   `json:"requestHeaders"`
+	RequestQuery       []KV   `json:"requestQuery"`
+	RequestFormItems   []KV   `json:"requestFormItems"`
+	RequestBodyType    string `json:"requestBodyType"`
+	RequestBody        string `json:"requestBody"`
+	RequestContentType string `json:"requestContentType"`
 	// 完整响应
 	ResponseBody     string            `json:"responseBody"`
 	ResponseHeaders  map[string]string `json:"responseHeaders"`
@@ -234,11 +234,11 @@ type Settings struct {
 	Version   string `json:"version"`   // 客户端版本号（同时作为配置初始化标记）
 	UpdateURL string `json:"updateURL"` // 升级服务地址，如 http://127.0.0.1:8080
 	// 外观
-	Theme   string       `json:"theme"`   // light | dark | system
-	Accent  string       `json:"accent"`  // 主题强调色
-	AutoSync bool        `json:"autoSync"` // 是否启用云同步
+	Theme    string `json:"theme"`    // light | dark | system
+	Accent   string `json:"accent"`   // 主题强调色
+	AutoSync bool   `json:"autoSync"` // 是否启用云同步
 	// 详情代码块字体（作用于右侧详情所有代码块）
-	CodeFont    string  `json:"codeFont"`    // 字体族
+	CodeFont     string  `json:"codeFont"`     // 字体族
 	CodeFontSize float64 `json:"codeFontSize"` // 字号(px)
 	// 文档导出水印（作用于 Word / PDF 导出，可在「文档中心」配置）
 	Watermark DocWatermark `json:"watermark"`
@@ -263,13 +263,19 @@ type DocLayoutTemplate struct {
 // DocLayout 企业级接口文档的排版配置：决定导出文档由哪些章节组成、顺序如何。
 // 零值即「只导出接口正文 + 目录」，用户可在「文档中心 → 文档结构」中逐项开启。
 type DocLayout struct {
-	Toc        bool   `json:"toc"`        // 是否生成目录（Word 为可更新域，PDF/HTML 为静态目录）
-	Numbering  bool   `json:"numbering"`  // 章节与接口树是否自动编号（1 / 1.1 / 1.1.1）
-	Cover      DocCover `json:"cover"`    // 封面（作者/单位/版本/日期）
-	Prefaces   []DocChapter `json:"prefaces"`   // 文档公共描述（可多条章节）
-	Convention string `json:"convention"` // 接口统一定义规范（Markdown 文本，空则不输出）
-	StatusCodes bool  `json:"statusCodes"` // 附录：HTTP 状态码说明
-	Revisions  []DocRevision `json:"revisions"` // 文档修订记录
+	Toc         bool          `json:"toc"`         // 是否生成目录（Word 为可更新域，PDF/HTML 为静态目录）
+	Numbering   bool          `json:"numbering"`   // 章节与接口树是否自动编号（1 / 1.1 / 1.1.1）
+	Cover       DocCover      `json:"cover"`       // 封面（作者/单位/版本/日期）
+	Prefaces    []DocChapter  `json:"prefaces"`    // 文档公共描述（可多条章节）
+	Convention  string        `json:"convention"`  // 接口统一定义规范（Markdown 文本，空则不输出）
+	StatusCodes bool          `json:"statusCodes"` // 附录：HTTP 状态码说明
+	Revisions   []DocRevision `json:"revisions"`   // 文档修订记录
+	// Environment 输出「接入地址（环境）」章节，地址取自项目环境变量
+	Environment bool `json:"environment"`
+	// CommonHeaders 输出「公共请求头与公共参数」章节，取自项目公共参数
+	CommonHeaders bool `json:"commonHeaders"`
+	// Sign 加密与验签说明（Markdown 文本，空则不输出该章节）
+	Sign string `json:"sign"`
 }
 
 // DocCover 封面信息。
@@ -278,9 +284,9 @@ type DocCover struct {
 	Title    string `json:"title"`    // 为空时取文档/项目标题
 	Subtitle string `json:"subtitle"` // 如「内部技术文档 · 禁止外传」
 	Author   string `json:"author"`
-	Org      string `json:"org"`   // 公司 / 部门
+	Org      string `json:"org"`     // 公司 / 部门
 	Version  string `json:"version"` // 如 V1.2.0
-	Date     string `json:"date"`  // 为空时取导出日期
+	Date     string `json:"date"`    // 为空时取导出日期
 }
 
 // DocChapter 文档章节（用于「文档公共描述」等自定义正文）。

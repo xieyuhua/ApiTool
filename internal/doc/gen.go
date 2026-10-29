@@ -78,8 +78,9 @@ type docScopeData struct {
 	Dirs      []model.Directory
 	Apis      []model.ApiInfo
 	Common    model.CommonParams
-	Watermark model.DocWatermark // 已补全默认值并展开占位符的水印配置
-	Layout    model.DocLayout    // 企业文档排版（封面 / 目录 / 前言 / 规范 / 附录 / 修订记录）
+	Watermark model.DocWatermark  // 已补全默认值并展开占位符的水印配置
+	Layout    model.DocLayout     // 企业文档排版（封面 / 目录 / 前言 / 规范 / 附录 / 修订记录）
+	Envs      []model.Environment // 项目环境列表（生成「接入地址」章节用）
 }
 
 // loadDocScope 解析导出范围（标题、根目录、目录、接口、公共参数）与水印配置。
@@ -102,7 +103,7 @@ func loadDocScope(s *store.Store, dirID, apiID string) (docScopeData, error) {
 		Common:  project.Common,
 		Watermark: ExpandWatermark(
 			NormalizeWatermark(data.Settings.Watermark), project.Name, time.Now()),
-		Layout: EffectiveDocLayout(data, project),
+		Layout: EnrichDocLayout(EffectiveDocLayout(data, project), project.Environments, project.Common),
 	}
 	if apiID == "" {
 		scope.RootID = dirID

@@ -421,7 +421,7 @@ func (b *docxBuilder) tocField() {
 	b.body.WriteString(`<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>` +
 		`<w:r><w:instrText xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText></w:r>` +
 		`<w:r><w:fldChar w:fldCharType="separate"/></w:r>` +
-		`<w:r><w:rPr><w:color w:val="86909C"/></w:rPr><w:t>（打开文档后按 Ctrl+A 再按 F9，或右键「更新域」，即可生成带页码的目录）</w:t></w:r>` +
+		`<w:r><w:rPr><w:color w:val="000000"/></w:rPr><w:t>（打开文档后按 Ctrl+A 再按 F9，或右键「更新域」，即可生成带页码的目录）</w:t></w:r>` +
 		`<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`)
 }
 

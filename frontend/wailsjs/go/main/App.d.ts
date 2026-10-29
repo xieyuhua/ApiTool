@@ -73,6 +73,8 @@ export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number)
 
 export function DefaultDocConvention():Promise<string>;
 
+export function DefaultDocSign():Promise<string>;
+
 export function DefaultTestCasePrompt():Promise<string>;
 
 export function DeleteAgentSession(arg1:string):Promise<void>;

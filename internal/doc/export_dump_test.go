@@ -60,6 +60,9 @@ func TestDumpArtifacts(t *testing.T) {
 	// 企业级排版样例（封面 / 修订记录 / 目录 / 公共描述 / 规范 / 附录）
 	layout := sampleLayout()
 	layout.Numbering = true // 打开章节编号，便于核对编号效果
+	// 企业标准章节：接入地址 / 公共请求头 / 加密验签
+	layout.Environment, layout.CommonHeaders, layout.Sign = true, true, DefaultSignTemplate()
+	layout = EnrichDocLayout(layout, sampleEnvironments(), common)
 	entDOCX, err := BuildDOCXWithLayout(title, rootID, dirs, apis, common, wm, layout)
 	if err != nil {
 		t.Fatal(err)

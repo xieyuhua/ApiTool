@@ -206,19 +206,19 @@ func DocPresetList() []DocPreset {
 	return []DocPreset{
 		{Key: "internal", Label: "内部版", Tag: "推荐",
 			Desc:  "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "统一规范", "附录"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
 		{Key: "external", Label: "对外版", Tag: "对外",
 			Desc:  "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方",
-			Chips: []string{"封面", "目录", "编号", "统一规范", "附录"}},
+			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
 		{Key: "rest", Label: "标准 RESTful 版", Tag: "通用",
 			Desc:  "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档",
-			Chips: []string{"目录", "编号", "统一规范", "附录"}},
+			Chips: []string{"目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
 		{Key: "review", Label: "评审版", Tag: "评审",
 			Desc:  "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "统一规范"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "接入地址", "公共请求头", "加密验签", "统一规范"}},
 		{Key: "micro", Label: "微服务版", Tag: "架构",
 			Desc:  "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同",
-			Chips: []string{"封面", "目录", "编号", "服务约定", "统一规范", "附录"}},
+			Chips: []string{"封面", "目录", "编号", "服务约定", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
 		{Key: "minimal", Label: "精简版", Tag: "精简",
 			Desc:  "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查",
 			Chips: []string{"目录", "编号"}},
@@ -234,14 +234,17 @@ func DocPresetLayout(key string) model.DocLayout {
 	case "internal":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "内部技术文档 · 禁止外传", Version: "V1.0.0"}
 		base.Prefaces = []model.DocChapter{docChapterIntro()}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布"}}
 	case "external":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "对外接口文档", Version: "V1.0.0"}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 	case "rest":
+		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 	case "review":
@@ -253,6 +256,7 @@ func DocPresetLayout(key string) model.DocLayout {
 				"- 权限与鉴权是否明确、错误码是否覆盖异常分支\n\n" +
 				"| 结论 | 记录 |\n|---|---|\n| 通过 / 待修改 | |\n",
 		}}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.Revisions = []model.DocRevision{{Version: "V0.9.0", Date: today, Note: "提交评审"}}
 	case "micro":
@@ -265,6 +269,7 @@ func DocPresetLayout(key string) model.DocLayout {
 				"- 链路追踪：透传 `X-Request-Id` 与 `X-Trace-Id`\n\n" +
 				"#### 鉴权\n- 网关校验 `Authorization: Bearer <token>`，服务内二次校验租户 `X-Tenant-Id`\n",
 		}}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 	default: // minimal：仅目录 + 接口正文
@@ -283,6 +288,155 @@ func docChapterIntro() model.DocChapter {
 			"| 鉴权 | 请求头 `Authorization: Bearer <token>` |\n",
 	}
 }
+
+// ---------------- 企业标准章节：接入地址 / 公共请求头 / 加密验签 ----------------
+
+// EnrichDocLayout 依据项目环境与公共参数，补齐「接入地址 / 公共请求头 / 加密与验签」章节。
+// 这些内容来自项目真实配置，放在渲染前动态生成，Markdown / HTML(PDF) / Word 共用同一份文本。
+func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common model.CommonParams) model.DocLayout {
+	extra := make([]model.DocChapter, 0, 3)
+	if layout.Environment {
+		if c := envChapter(envs); c != "" {
+			extra = append(extra, model.DocChapter{Title: "接入地址（环境）", Content: c})
+		}
+	}
+	if layout.CommonHeaders {
+		if c := headersChapter(common); c != "" {
+			extra = append(extra, model.DocChapter{Title: "公共请求头与公共参数", Content: c})
+		}
+	}
+	if sign := strings.TrimSpace(layout.Sign); sign != "" {
+		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign})
+	}
+	if len(extra) == 0 {
+		return layout
+	}
+	out := layout
+	out.Prefaces = append(append([]model.DocChapter{}, layout.Prefaces...), extra...)
+	return out
+}
+
+// envChapter 把项目的环境列表渲染成「接入地址」表格。
+func envChapter(envs []model.Environment) string {
+	if len(envs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("| 环境 | 接口地址 | 说明 |\n|---|---|---|\n")
+	for _, e := range envs {
+		name := strings.TrimSpace(e.Name)
+		if name == "" {
+			name = "未命名环境"
+		}
+		addr := envBaseURL(e)
+		if addr == "" {
+			addr = "—"
+		}
+		sb.WriteString("| " + mdCell(name) + " | " + mdCell(addr) + " | " + mdCell(envDesc(name)) + " |\n")
+	}
+	sb.WriteString("\n> 以上地址取自项目环境变量（`baseUrl` / `host` / `domain`），切换环境时请同步替换。" +
+		"`appId`、`appSecret` 等敏感变量请在各端配置中心维护，不要写入文档正文。\n")
+	return sb.String()
+}
+
+// envBaseURL 从环境变量里挑出接口根地址（优先 baseUrl，其次包含 url/host/domain 的键）。
+func envBaseURL(e model.Environment) string {
+	best := ""
+	for _, v := range e.Vars {
+		key := strings.ToLower(strings.TrimSpace(v.Key))
+		val := strings.TrimSpace(v.Value)
+		if key == "" || val == "" || !v.Enabled {
+			continue
+		}
+		switch {
+		case key == "baseurl" || key == "base_url":
+			return val
+		case best == "" && (strings.Contains(key, "url") || strings.Contains(key, "host") || strings.Contains(key, "domain")):
+			best = val
+		}
+	}
+	return best
+}
+
+// envDesc 按环境名给出常见用途说明。
+func envDesc(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "test") || strings.Contains(name, "测试") || strings.Contains(name, "联调"):
+		return "联调测试环境，数据可随时重置"
+	case strings.Contains(lower, "prod") || strings.Contains(name, "正式") || strings.Contains(name, "生产"):
+		return "生产环境，谨慎操作，勿使用测试数据"
+	case strings.Contains(lower, "pre") || strings.Contains(name, "预发") || strings.Contains(name, "灰度"):
+		return "预发环境，上线前验收使用"
+	case strings.Contains(lower, "dev") || strings.Contains(name, "开发"):
+		return "开发环境，仅供研发自测"
+	}
+	return ""
+}
+
+// headersChapter 把项目的公共请求头 / 公共查询参数渲染成表格。
+func headersChapter(common model.CommonParams) string {
+	var sb strings.Builder
+	if len(common.Headers) > 0 {
+		sb.WriteString("#### 公共请求头\n\n| 请求头 | 示例值 | 说明 |\n|---|---|---|\n")
+		for _, kv := range common.Headers {
+			key := strings.TrimSpace(kv.Key)
+			if key == "" {
+				continue
+			}
+			sb.WriteString("| `" + mdCell(key) + "` | " + mdCell(kv.Value) + " | 公共请求头，所有接口都需携带 |\n")
+		}
+		sb.WriteString("\n")
+	}
+	if len(common.Query) > 0 {
+		sb.WriteString("#### 公共查询参数\n\n| 参数 | 示例值 | 说明 |\n|---|---|---|\n")
+		for _, kv := range common.Query {
+			key := strings.TrimSpace(kv.Key)
+			if key == "" {
+				continue
+			}
+			sb.WriteString("| `" + mdCell(key) + "` | " + mdCell(kv.Value) + " | 公共查询参数，所有接口都需携带 |\n")
+		}
+		sb.WriteString("\n")
+	}
+	if sb.Len() == 0 {
+		return ""
+	}
+	sb.WriteString("> 以上取自项目「公共参数」，可在接口调试页统一维护，导出时自动写入文档。\n")
+	return sb.String()
+}
+
+// mdCell 转义表格单元格：去掉换行、避免 | 破坏表格结构。
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+// DefaultSignTemplate 内置的「加密与验签」说明模板（HMAC-SHA256 签名 + 可选报文加密）。
+func DefaultSignTemplate() string { return defaultSignTemplate }
+
+const defaultSignTemplate = "#### 1. 请求签名\n" +
+	"- 待签名字符串：`HTTPMethod` + `\\n` + `Path` + `\\n` + 按 key 升序拼接的 query + `\\n` + `X-Timestamp` + `\\n` + `X-Nonce`\n" +
+	"- 算法：`HMAC-SHA256`，密钥为平台分配的 `appSecret`，输出**大写十六进制**\n" +
+	"- 需携带的请求头：`X-App-Id`（应用标识）、`X-Timestamp`（毫秒时间戳）、`X-Nonce`（随机串）、`X-Sign`（签名值）\n" +
+	"- 防重放：时间戳与服务端相差超过 5 分钟即拒绝；同一 `X-Nonce` 在 5 分钟内不可重复使用\n\n" +
+	"```text\n" +
+	"Method: POST\nPath: /user-center/users\nQuery: page=1&size=20\n" +
+	"Timestamp: 1730000000000\nNonce: 8f2c1e\nSign: 9C1B7F...\n" +
+	"```\n\n" +
+	"#### 2. 报文加密（如需）\n" +
+	"- 请求体整体加密：`AES-128-CBC`，`key` 取 `appSecret` 前 16 字节，`iv` 随机 16 字节并以 `X-Iv` 传递\n" +
+	"- 加密后请求体形如 `{\"encrypted\": true, \"data\": \"<base64>\"}`，服务端解密后再解析\n" +
+	"- 响应加密同上，客户端先解密再按业务结构解析\n\n" +
+	"#### 3. 参数校验约定\n" +
+	"- 所有金额单位为「分」；时间统一 `yyyy-MM-dd HH:mm:ss`（东八区）\n" +
+	"- 签名失败统一返回 HTTP 200 + 业务码 `10003`；时间戳过期返回 `10004`\n"
 
 const defaultConventionTemplate = `#### 1. 命名与路径
 - 路径全部小写，单词间用短横线：` + "`/user-center/users/{id}`" + `

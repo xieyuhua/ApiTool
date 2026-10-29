@@ -339,7 +339,12 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
-// DocPresets 返回预置文档结构模板清单（内部版 / 对外版 / 精简版）
+// DefaultDocSign 返回内置的「加密与验签」说明模板（签名算法 / 请求头 / 防重放 / 报文加密）。
+func (a *App) DefaultDocSign() string {
+	return doc.DefaultSignTemplate()
+}
+
+// DocPresets 返回预置文档结构模板清单（6 套企业标准模板）
 func (a *App) DocPresets() []doc.DocPreset {
 	return doc.DocPresetList()
 }

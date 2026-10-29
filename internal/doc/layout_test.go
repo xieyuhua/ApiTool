@@ -362,6 +362,107 @@ func TestLoadDocScopeUsesProjectLayout(t *testing.T) {
 	}
 }
 
+// sampleEnvironments 测试用的项目环境列表（含测试 / 预发 / 生产）。
+func sampleEnvironments() []model.Environment {
+	return []model.Environment{
+		{ID: "e1", Name: "测试环境", Vars: []model.EnvVar{
+			{Key: "baseUrl", Value: "https://test-api.example.com", Enabled: true},
+			{Key: "appSecret", Value: "should-not-appear", Enabled: true},
+		}},
+		{ID: "e2", Name: "预发环境", Vars: []model.EnvVar{
+			{Key: "host", Value: "https://pre-api.example.com", Enabled: true},
+		}},
+		{ID: "e3", Name: "正式环境", Vars: []model.EnvVar{
+			{Key: "domain", Value: "https://api.example.com", Enabled: true},
+		}},
+	}
+}
+
+// TestEnrichDocLayout 验证「接入地址 / 公共请求头 / 加密验签」章节按开关生成。
+func TestEnrichDocLayout(t *testing.T) {
+	_, _, _, _, common := sampleScope()
+	envs := sampleEnvironments()
+
+	// 全部关闭：不追加任何章节
+	off := EnrichDocLayout(model.DocLayout{Toc: true}, envs, common)
+	if len(off.Prefaces) != 0 {
+		t.Fatalf("关闭时不应追加章节: %+v", off.Prefaces)
+	}
+
+	layout := EnrichDocLayout(model.DocLayout{
+		Toc: true, Environment: true, CommonHeaders: true, Sign: DefaultSignTemplate(),
+	}, envs, common)
+	if len(layout.Prefaces) != 3 {
+		t.Fatalf("应追加 3 个章节, got %d: %+v", len(layout.Prefaces), layout.Prefaces)
+	}
+	if layout.Prefaces[0].Title != "接入地址（环境）" || layout.Prefaces[1].Title != "公共请求头与公共参数" ||
+		layout.Prefaces[2].Title != "加密与验签" {
+		t.Fatalf("章节顺序不符合预期: %+v", layout.Prefaces)
+	}
+
+	envText := layout.Prefaces[0].Content
+	for _, want := range []string{"测试环境", "https://test-api.example.com", "预发环境", "https://pre-api.example.com",
+		"正式环境", "https://api.example.com", "生产环境，谨慎操作"} {
+		if !strings.Contains(envText, want) {
+			t.Fatalf("接入地址章节缺少 %q:\n%s", want, envText)
+		}
+	}
+	if strings.Contains(envText, "should-not-appear") {
+		t.Fatal("接入地址章节不应输出 appSecret 等敏感变量")
+	}
+
+	// 公共请求头 / 公共查询参数：来自项目的公共参数配置
+	layout2 := EnrichDocLayout(model.DocLayout{CommonHeaders: true}, nil, model.CommonParams{
+		Headers: []model.KV{{Key: "Authorization", Value: "Bearer {{token}}"}, {Key: "X-App-Id", Value: "demo"}},
+		Query:   []model.KV{{Key: "appId", Value: "demo"}},
+	})
+	headText := layout2.Prefaces[0].Content
+	for _, want := range []string{"公共请求头", "`Authorization`", "Bearer {{token}}", "公共查询参数", "`appId`"} {
+		if !strings.Contains(headText, want) {
+			t.Fatalf("公共请求头章节缺少 %q:\n%s", want, headText)
+		}
+	}
+
+	signText := layout.Prefaces[2].Content
+	for _, want := range []string{"HMAC-SHA256", "X-Timestamp", "X-Nonce", "防重放", "AES-128-CBC"} {
+		if !strings.Contains(signText, want) {
+			t.Fatalf("加密验签章节缺少 %q", want)
+		}
+	}
+}
+
+// TestDocExportIsMonochrome 导出的文档正文与目录只能是黑色文字（只有黑白灰）。
+func TestDocExportIsMonochrome(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	layout := EnrichDocLayout(sampleLayout(), sampleEnvironments(), common)
+	layout.Numbering = true
+
+	html := BuildHTMLForExportWithLayout(title, rootID, dirs, apis, common, model.DocWatermark{}, layout)
+	for _, bad := range []string{"#165dff", "#0fc6c2", "#ff7d00", "#f53f3f", "#722ed1", "#1d2129"} {
+		if strings.Contains(html, bad) {
+			t.Fatalf("导出 HTML 仍含彩色 %s", bad)
+		}
+	}
+	if !strings.Contains(html, "color:#000") {
+		t.Fatal("导出 HTML 未使用黑色文字")
+	}
+
+	// Word：所有文字颜色必须是 000000（表格边框等仍可用浅灰）
+	parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
+	doc := parts["word/document.xml"]
+	for _, bad := range []string{`w:color w:val="1F2329"`, `w:color w:val="165DFF"`, `w:color w:val="4E5969"`} {
+		if strings.Contains(doc, bad) {
+			t.Fatalf("Word 仍含彩色文字 %s", bad)
+		}
+	}
+	styles := parts["word/styles.xml"]
+	for _, bad := range []string{"1F2329", "165DFF", "4E5969", "86909C"} {
+		if strings.Contains(styles, bad) {
+			t.Fatalf("Word 样式仍含彩色 %s", bad)
+		}
+	}
+}
+
 // ---------------- 测试辅助 ----------------
 
 func mustDOCX(t *testing.T, title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, layout model.DocLayout) []byte {

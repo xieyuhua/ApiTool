@@ -1450,6 +1450,9 @@ export namespace model {
 	    convention: string;
 	    statusCodes: boolean;
 	    revisions: DocRevision[];
+	    environment: boolean;
+	    commonHeaders: boolean;
+	    sign: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1464,6 +1467,9 @@ export namespace model {
 	        this.convention = source["convention"];
 	        this.statusCodes = source["statusCodes"];
 	        this.revisions = this.convertValues(source["revisions"], DocRevision);
+	        this.environment = source["environment"];
+	        this.commonHeaders = source["commonHeaders"];
+	        this.sign = source["sign"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

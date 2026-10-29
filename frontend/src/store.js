@@ -434,6 +434,9 @@ async function loadInto() {
   if (!Array.isArray(dl.prefaces)) dl.prefaces = []
   if (typeof dl.convention !== 'string') dl.convention = ''
   if (typeof dl.statusCodes !== 'boolean') dl.statusCodes = false
+  if (typeof dl.environment !== 'boolean') dl.environment = true
+  if (typeof dl.commonHeaders !== 'boolean') dl.commonHeaders = true
+  if (typeof dl.sign !== 'string') dl.sign = ''
   if (!Array.isArray(dl.revisions)) dl.revisions = []
   if (!Array.isArray(d.settings.docLayoutTemplates)) d.settings.docLayoutTemplates = []
   if (!d.settings.projectDocLayouts || typeof d.settings.projectDocLayouts !== 'object') d.settings.projectDocLayouts = {}

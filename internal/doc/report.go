@@ -10,14 +10,14 @@ import (
 // ReportCSS 测试/压测报告共用的 HTML 内联样式
 const ReportCSS = `
 :root{color-scheme:light}
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#1f2329;background:#f7f8fa}
+*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#000;background:#f7f8fa}
 .wrap{max-width:1100px;margin:0 auto;padding:32px 28px}
 h1{font-size:26px;margin:0 0 6px}
-.meta{color:#86909c;font-size:13px;margin-bottom:18px}
+.meta{color:#000;font-size:13px;margin-bottom:18px}
 .stats{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
 .stat{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:14px 20px;min-width:120px}
 .stat .n{font-size:24px;font-weight:700}
-.stat.ok .n{color:#00b42a}.stat.fail .n{color:#f53f3f}.stat.tot .n{color:#165dff}
+.stat.ok .n{color:#00b42a}.stat.fail .n{color:#f53f3f}.stat.tot .n{color:#000}
 .card{background:#fff;border:1px solid #e5e6eb;border-radius:10px;padding:18px 22px;margin:16px 0}
 .card h2{margin:0 0 12px;font-size:18px}
 .summary{white-space:pre-wrap;line-height:1.8;font-size:14px}
@@ -25,26 +25,26 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border:1px solid #e5e6eb;padding:8px 12px;text-align:left;word-break:break-all}
 th{background:#f7f8fa;font-weight:600}
 .pass{color:#00b42a;font-weight:600}.fail{color:#f53f3f;font-weight:600}
-.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:#f2f3f5;color:#4e5969;margin-right:6px}
+.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:#f2f3f5;color:#000;margin-right:6px}
 .assert{font-size:12px;padding:3px 0;border-bottom:1px dashed #eee}
 .assert .ok{color:#00b42a}.assert .no{color:#f53f3f}
 .block{margin-top:12px;border-top:1px solid #f0f0f0;padding-top:10px}
-.block-h{font-size:13px;font-weight:700;color:#1f2329;margin-bottom:6px}
+.block-h{font-size:13px;font-weight:700;color:#000;margin-bottom:6px}
 .req-line{font-size:13px;margin-bottom:6px;word-break:break-all}
-.req-line .method{display:inline-block;font-weight:700;color:#165dff;margin-right:6px}
+.req-line .method{display:inline-block;font-weight:700;color:#000;margin-right:6px}
 .req-line code{background:#f2f3f5;padding:2px 6px;border-radius:4px}
 .kv{margin:6px 0}
-.kv-h{font-size:12px;font-weight:600;color:#4e5969;margin-bottom:4px}
+.kv-h{font-size:12px;font-weight:600;color:#000;margin-bottom:4px}
 .kv table{width:100%;border-collapse:collapse;font-size:12px}
 .kv th,.kv td{border:1px solid #e5e6eb;padding:5px 8px;text-align:left;word-break:break-all;vertical-align:top}
 .kv th{background:#f7f8fa;font-weight:600;width:160px}
 .kv pre{margin:0;border:1px solid #e5e6eb;padding:10px;white-space:pre-wrap;word-break:break-all;font-family:Consolas,'Courier New',monospace;font-size:12px;max-height:320px;overflow:auto;background:#fff}
-.resp-meta{font-size:12px;color:#4e5969;margin-bottom:6px}
+.resp-meta{font-size:12px;color:#000;margin-bottom:6px}
 .doc-cover{padding:96px 24px 72px;text-align:center;border-bottom:1px solid #e5e6eb;margin-bottom:18px}
 .cover-title{font-size:32px;font-weight:700;margin-bottom:10px;line-height:1.3}
-.cover-subtitle{color:#4e5969;font-size:15px;margin-bottom:40px}
+.cover-subtitle{color:#000;font-size:15px;margin-bottom:40px}
 .cover-lines{display:inline-block;text-align:left;font-size:14px;line-height:2.1}
-.cover-lines span{display:inline-block;width:56px;color:#86909c}
+.cover-lines span{display:inline-block;width:56px;color:#000}
 @media print{
   @page{size:A4;margin:12mm}
   body{background:#fff}

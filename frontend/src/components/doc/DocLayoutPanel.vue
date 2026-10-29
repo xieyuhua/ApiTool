@@ -3,7 +3,7 @@
 // 模板库（预置 + 我的模板）在「文档模板」页面维护，本组件只负责结构本身。
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DefaultDocConvention, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
+import { DefaultDocConvention, DefaultDocSign, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
 const props = defineProps({
@@ -26,6 +26,9 @@ function normalize(v) {
   if (typeof v.toc !== 'boolean') v.toc = true
   if (typeof v.numbering !== 'boolean') v.numbering = true
   if (typeof v.statusCodes !== 'boolean') v.statusCodes = false
+  if (typeof v.environment !== 'boolean') v.environment = true
+  if (typeof v.commonHeaders !== 'boolean') v.commonHeaders = true
+  if (typeof v.sign !== 'string') v.sign = ''
   if (typeof v.convention !== 'string') v.convention = ''
   if (!Array.isArray(v.prefaces)) v.prefaces = []
   if (!Array.isArray(v.revisions)) v.revisions = []
@@ -69,6 +72,17 @@ async function fillConvention() {
     if (String(dl.value.convention || '').trim() && !window.confirm('当前已有规范内容，确定用默认模板覆盖吗？')) return
     dl.value.convention = await DefaultDocConvention()
     saveWithTip('已填入默认规范模板，可按团队要求修改')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+// ---------------- 加密与验签 ----------------
+async function fillSign() {
+  try {
+    if (String(dl.value.sign || '').trim() && !window.confirm('当前已有验签说明，确定用默认模板覆盖吗？')) return
+    dl.value.sign = await DefaultDocSign()
+    saveWithTip('已填入默认验签模板，可按实际算法修改')
   } catch (e) {
     ElMessage.error(String(e))
   }
@@ -141,6 +155,25 @@ defineExpose({ preview })
             style="margin-left:10px;width:190px" @change="save" />
         </el-form-item>
       </template>
+
+      <el-form-item label="接入地址">
+        <el-switch v-model="dl.environment" @change="save" />
+        <span class="dl-hint">按项目环境自动生成「接入地址（环境）」表格（测试 / 预发 / 生产等）</span>
+      </el-form-item>
+      <el-form-item label="公共请求头">
+        <el-switch v-model="dl.commonHeaders" @change="save" />
+        <span class="dl-hint">按项目「公共参数」自动生成公共请求头 / 公共查询参数表格</span>
+      </el-form-item>
+      <el-form-item label="加密与验签">
+        <div style="width:100%">
+          <div style="margin-bottom:6px">
+            <el-button size="small" @click="fillSign">填入默认验签模板</el-button>
+            <span class="dl-hint">签名算法、请求头（X-Sign / X-Timestamp / X-Nonce）、防重放、报文加密</span>
+          </div>
+          <el-input v-model="dl.sign" type="textarea" :rows="6" class="dl-md"
+            placeholder="留空则不输出该章节；可点「填入默认验签模板」后修改" @change="save" />
+        </div>
+      </el-form-item>
 
       <el-form-item label="公共描述">
         <el-button size="small" @click="addPreface">+ 添加章节</el-button>
