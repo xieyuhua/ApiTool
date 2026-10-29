@@ -199,7 +199,7 @@ func mdTOC(sb *strings.Builder, sections []docSection, dirs []model.Directory, a
 	walk = func(parentID string, depth int) {
 		indent := strings.Repeat("  ", depth)
 		for _, api := range dirApis(apis, parentID) {
-			sb.WriteString(indent + "- " + num.api(api.ID, api.Name) + "（" + strings.ToUpper(api.Method) + " " + api.URL + "）\n")
+			sb.WriteString(indent + "- " + num.api(api.ID, api.Name) + "\n")
 		}
 		for _, d := range childDirs(dirs, parentID) {
 			sb.WriteString(indent + "- " + num.dir(d.ID, d.Name) + "\n")

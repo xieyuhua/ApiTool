@@ -552,6 +552,55 @@ func TestBusinessCodesAppendix(t *testing.T) {
 	}
 }
 
+// TestDocTOCWithoutMethod 目录只保留「编号 + 接口名」，不出现请求方式与地址（企业文档惯例）。
+func TestDocTOCWithoutMethod(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	layout := model.DocLayout{Toc: true, Numbering: true}
+
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	if strings.Contains(html, `class="tm tm-`) {
+		t.Fatal("目录项不应包含请求方式徽章")
+	}
+	// 正文接口标题上的方法标识仍需保留
+	if !strings.Contains(html, `class="method m-`) {
+		t.Fatal("正文接口标题应保留请求方法标识")
+	}
+	// 正文中的目录块里也不应出现方法文本
+	start := strings.Index(html, `id="toc"`)
+	if start < 0 {
+		t.Fatal("缺少正文目录块")
+	}
+	end := strings.Index(html[start:], "</section>")
+	if end < 0 {
+		t.Fatal("目录块结构异常")
+	}
+	block := html[start : start+end]
+	for _, bad := range []string{">GET<", ">POST<", "tm-get", "tm-post"} {
+		if strings.Contains(block, bad) {
+			t.Fatalf("目录块仍含请求方式 %q", bad)
+		}
+	}
+
+	md := buildMarkdown(title, rootID, dirs, apis, common, layout)
+	tocStart := strings.Index(md, "## 目录")
+	if tocStart < 0 {
+		t.Fatal("Markdown 缺少目录章节")
+	}
+	tocEnd := strings.Index(md[tocStart:], "\n## ")
+	if tocEnd < 0 {
+		tocEnd = len(md) - tocStart
+	}
+	toc := md[tocStart : tocStart+tocEnd]
+	for _, bad := range []string{"（GET ", "（POST ", "（PUT ", "https://"} {
+		if strings.Contains(toc, bad) {
+			t.Fatalf("Markdown 目录仍含 %q", bad)
+		}
+	}
+	if !strings.Contains(toc, "1 接口正文") || !strings.Contains(toc, "1.1 用户中心") || !strings.Contains(toc, "查询用户列表") {
+		t.Fatalf("Markdown 目录缺少编号或接口名:\n%s", toc)
+	}
+}
+
 // ---------------- 测试辅助 ----------------
 
 func mustDOCX(t *testing.T, title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, layout model.DocLayout) []byte {

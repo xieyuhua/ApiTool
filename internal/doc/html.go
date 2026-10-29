@@ -108,9 +108,9 @@ func htmlDir(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, 
 
 func htmlToc(sb *strings.Builder, dirs []model.Directory, apis []model.ApiInfo, parentID string, depth int, dirName string, num docNumbering) {
 	for _, api := range dirApis(apis, parentID) {
-		sb.WriteString(fmt.Sprintf(`<a class="toc-api" style="padding-left:%dpx" href="#api-%s" data-name="%s" data-url="%s" data-dir="%s"><span class="tm tm-%s">%s</span>%s</a>`,
+		sb.WriteString(fmt.Sprintf(`<a class="toc-api" style="padding-left:%dpx" href="#api-%s" data-name="%s" data-url="%s" data-dir="%s">%s</a>`,
 			12+depth*14, api.ID, escAttr(api.Name), escAttr(api.URL), escAttr(dirName),
-			strings.ToLower(api.Method), strings.ToUpper(api.Method), html.EscapeString(num.api(api.ID, api.Name))))
+			html.EscapeString(num.api(api.ID, api.Name))))
 	}
 	for _, d := range childDirs(dirs, parentID) {
 		sb.WriteString(fmt.Sprintf(`<a class="toc-dir" style="padding-left:%dpx" href="#dir-%s" data-dir="%s">%s</a>`, 12+depth*14, d.ID, escAttr(d.Name), html.EscapeString(num.dir(d.ID, d.Name))))
