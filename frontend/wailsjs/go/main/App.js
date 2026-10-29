@@ -118,6 +118,14 @@ export function DefaultDocConvention() {
   return window['go']['main']['App']['DefaultDocConvention']();
 }
 
+export function DefaultDocEnums() {
+  return window['go']['main']['App']['DefaultDocEnums']();
+}
+
+export function DefaultDocGlossary() {
+  return window['go']['main']['App']['DefaultDocGlossary']();
+}
+
 export function DefaultDocSign() {
   return window['go']['main']['App']['DefaultDocSign']();
 }

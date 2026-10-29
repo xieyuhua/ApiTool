@@ -63,6 +63,10 @@ func TestDumpArtifacts(t *testing.T) {
 	// 企业标准章节：接入地址 / 公共请求头 / 加密验签
 	layout.Environment, layout.CommonHeaders, layout.Sign = true, true, DefaultSignTemplate()
 	layout.BusinessCodes = DefaultBusinessCodes()
+	layout.QuickStart = true
+	layout.Glossary = DefaultGlossary()
+	layout.Enums = DefaultEnums()
+	layout.Support = model.DocSupport{Enabled: true, Name: "接口对接支持", Email: "api@example.com", Group: "支持群：apitool-接口对接", SLA: "工作日 2 小时内响应"}
 	layout = EnrichDocLayout(layout, sampleEnvironments(), common)
 	entDOCX, err := BuildDOCXWithLayout(title, rootID, dirs, apis, common, wm, layout)
 	if err != nil {

@@ -93,6 +93,9 @@ func mdApi(sb *strings.Builder, api model.ApiInfo, level int, common model.Commo
 	if body := responseSampleBody(api); body != "" {
 		sb.WriteString("**响应示例**\n\n```json\n" + body + "\n```\n\n")
 	}
+	if curl := curlSample(api, common); curl != "" {
+		sb.WriteString("**" + labelCurlSample + "**\n\n```bash\n" + curl + "\n```\n\n")
+	}
 	sb.WriteString("---\n\n")
 }
 
@@ -144,7 +147,7 @@ func buildMarkdown(title, rootID string, dirs []model.Directory, apis []model.Ap
 			}
 		case sectionAppendix:
 			mdStatusCodes(&sb, num.section(s.ID, s.Title))
-		case sectionBizCodes:
+		case sectionBizCodes, sectionEnums, sectionSupport:
 			sb.WriteString("## " + num.section(s.ID, s.Title) + "\n\n" + s.Content + "\n")
 		}
 	}

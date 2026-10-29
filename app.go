@@ -339,6 +339,16 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
+// DefaultDocGlossary 返回内置的通用术语表（术语表章节初始内容）。
+func (a *App) DefaultDocGlossary() []model.DocTerm {
+	return doc.DefaultGlossary()
+}
+
+// DefaultDocEnums 返回内置的数据字典样例（附录：数据字典初始内容）。
+func (a *App) DefaultDocEnums() []model.DocEnum {
+	return doc.DefaultEnums()
+}
+
 // DefaultDocBusinessCodes 返回内置的业务错误码表（附录：业务错误码的初始内容）。
 func (a *App) DefaultDocBusinessCodes() []model.DocCode {
 	return doc.DefaultBusinessCodes()

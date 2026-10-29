@@ -4,7 +4,8 @@
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  DefaultDocBusinessCodes, DefaultDocConvention, DocSignTemplates, PreviewDocWatermark,
+  DefaultDocBusinessCodes, DefaultDocConvention, DefaultDocEnums, DefaultDocGlossary,
+  DocSignTemplates, PreviewDocWatermark,
 } from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
@@ -33,6 +34,14 @@ function normalize(v) {
   if (typeof v.commonHeaders !== 'boolean') v.commonHeaders = true
   if (typeof v.sign !== 'string') v.sign = ''
   if (!Array.isArray(v.businessCodes)) v.businessCodes = []
+  if (typeof v.quickStart !== 'boolean') v.quickStart = true
+  if (!Array.isArray(v.glossary)) v.glossary = []
+  if (!Array.isArray(v.enums)) v.enums = []
+  v.support = v.support || {}
+  const supportDef = { enabled: false, name: '', email: '', phone: '', group: '', ticket: '', sla: '' }
+  for (const k of Object.keys(supportDef)) {
+    if (v.support[k] === undefined || v.support[k] === null) v.support[k] = supportDef[k]
+  }
   if (typeof v.convention !== 'string') v.convention = ''
   if (!Array.isArray(v.prefaces)) v.prefaces = []
   if (!Array.isArray(v.revisions)) v.revisions = []
@@ -117,6 +126,42 @@ function clearCodes() {
   if (!window.confirm('清空后文档不再输出「附录：业务错误码」，确定吗？')) return
   dl.value.businessCodes = []
   saveWithTip('已清空业务错误码')
+}
+
+// ---------------- 术语表 / 数据字典 / 技术支持 ----------------
+function addTerm() {
+  dl.value.glossary.push({ term: '', desc: '' })
+  save()
+}
+function removeTerm(i) {
+  dl.value.glossary.splice(i, 1)
+  saveWithTip('已删除该术语')
+}
+async function fillGlossary() {
+  try {
+    if (dl.value.glossary.length && !window.confirm('当前已有术语，确定用默认术语表覆盖吗？')) return
+    dl.value.glossary = await DefaultDocGlossary()
+    saveWithTip('已填入通用术语表')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+function addEnum() {
+  dl.value.enums.push({ field: '', code: '', meaning: '' })
+  save()
+}
+function removeEnum(i) {
+  dl.value.enums.splice(i, 1)
+  saveWithTip('已删除该枚举')
+}
+async function fillEnums() {
+  try {
+    if (dl.value.enums.length && !window.confirm('当前已有枚举，确定用默认数据字典覆盖吗？')) return
+    dl.value.enums = await DefaultDocEnums()
+    saveWithTip('已填入默认数据字典（按项目实际修改）')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
 }
 
 // ---------------- 修订记录 ----------------
@@ -246,6 +291,63 @@ defineExpose({ preview })
         <el-switch v-model="dl.statusCodes" @change="save" />
         <span class="dl-hint">附上常用 HTTP 状态码的名称、含义与典型场景</span>
       </el-form-item>
+
+      <el-form-item label="接入指引">
+        <el-switch v-model="dl.quickStart" @change="save" />
+        <span class="dl-hint">生成「接入指引（快速开始）」：申请凭证 → 选择环境 → 公共头 → 签名 → 调用示例</span>
+      </el-form-item>
+
+      <el-form-item label="术语表">
+        <div style="width:100%">
+          <div>
+            <el-button size="small" @click="fillGlossary">填入通用术语</el-button>
+            <el-button size="small" @click="addTerm">+ 添加</el-button>
+            <span class="dl-hint">{{ dl.glossary.length }} 条（appId / appSecret / Nonce / 幂等 等名词解释）</span>
+          </div>
+          <div v-for="(t, i) in dl.glossary" :key="i" class="dl-rev">
+            <el-input v-model="t.term" placeholder="术语" style="width:180px" @change="save" />
+            <el-input v-model="t.desc" placeholder="说明" style="width:400px" @change="save" />
+            <el-button link type="danger" @click="removeTerm(i)">删除</el-button>
+          </div>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="数据字典">
+        <div style="width:100%">
+          <div>
+            <el-button size="small" @click="fillEnums">填入默认枚举</el-button>
+            <el-button size="small" @click="addEnum">+ 添加</el-button>
+            <span class="dl-hint">{{ dl.enums.length }} 条（附录「数据字典」：字段 / 枚举值 / 含义）</span>
+          </div>
+          <div v-for="(e, i) in dl.enums" :key="i" class="dl-rev">
+            <el-input v-model="e.field" placeholder="status" style="width:140px" @change="save" />
+            <el-input v-model="e.code" placeholder="1" style="width:90px" @change="save" />
+            <el-input v-model="e.meaning" placeholder="正常 / 已启用" style="width:330px" @change="save" />
+            <el-button link type="danger" @click="removeEnum(i)">删除</el-button>
+          </div>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="技术支持">
+        <el-switch v-model="dl.support.enabled" @change="save" />
+        <span class="dl-hint">生成「技术支持与联系」章节（对接人 / 邮箱 / 群 / 工单 / 响应时效）</span>
+      </el-form-item>
+      <template v-if="dl.support.enabled">
+        <el-form-item label="对接人">
+          <el-input v-model="dl.support.name" placeholder="接口对接支持" style="width:240px" @change="save" />
+          <el-input v-model="dl.support.email" placeholder="support@example.com" style="width:240px;margin-left:10px" @change="save" />
+        </el-form-item>
+        <el-form-item label="电话/群">
+          <el-input v-model="dl.support.phone" placeholder="400-000-0000" style="width:200px" @change="save" />
+          <el-input v-model="dl.support.group" placeholder="支持群 / 工单入口" style="width:260px;margin-left:10px" @change="save" />
+        </el-form-item>
+        <el-form-item label="帮助中心">
+          <el-input v-model="dl.support.ticket" placeholder="https://help.example.com" style="width:340px" @change="save" />
+        </el-form-item>
+        <el-form-item label="响应时效">
+          <el-input v-model="dl.support.sla" placeholder="工作日 2 小时内响应" style="width:280px" @change="save" />
+        </el-form-item>
+      </template>
 
       <el-form-item label="业务错误码">
         <div style="width:100%">

@@ -23,6 +23,8 @@ const (
 	sectionAPIs       docSectionKind = "apis"       // 接口正文
 	sectionAppendix   docSectionKind = "appendix"   // 附录（HTTP 状态码）
 	sectionBizCodes   docSectionKind = "bizCodes"   // 附录（业务错误码）
+	sectionEnums      docSectionKind = "enums"      // 附录（数据字典 / 枚举值）
+	sectionSupport    docSectionKind = "support"    // 技术支持与联系
 )
 
 // docSection 导出文档中的一章。Content 为简化 Markdown（前言 / 规范正文）。
@@ -108,6 +110,18 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 		out = append(out, docSection{
 			Kind: sectionBizCodes, ID: "appendix-codes", Title: "附录：业务错误码",
 			Content: businessCodesMarkdown(layout.BusinessCodes),
+		})
+	}
+	if len(layout.Enums) > 0 {
+		out = append(out, docSection{
+			Kind: sectionEnums, ID: "appendix-enums", Title: "附录：数据字典",
+			Content: enumsMarkdown(layout.Enums),
+		})
+	}
+	if layout.Support.Enabled && supportHasContent(layout.Support) {
+		out = append(out, docSection{
+			Kind: sectionSupport, ID: "support", Title: "技术支持与联系",
+			Content: supportMarkdown(layout.Support),
 		})
 	}
 	return out
@@ -213,25 +227,25 @@ func DocPresetList() []DocPreset {
 	return []DocPreset{
 		{Key: "internal", Label: "内部版", Tag: "推荐",
 			Desc:  "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "external", Label: "对外版", Tag: "对外",
 			Desc:  "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方",
-			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
+			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "rest", Label: "标准 RESTful 版", Tag: "通用",
 			Desc:  "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档",
-			Chips: []string{"目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
+			Chips: []string{"目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "review", Label: "评审版", Tag: "评审",
 			Desc:  "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "接入地址", "公共请求头", "加密验签", "统一规范", "错误码"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "接入地址", "公共请求头", "加密验签", "统一规范", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "micro", Label: "微服务版", Tag: "架构",
 			Desc:  "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同",
-			Chips: []string{"封面", "目录", "编号", "服务约定", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
+			Chips: []string{"封面", "目录", "编号", "服务约定", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "open", Label: "开放平台版", Tag: "开放",
 			Desc:  "封面 + 目录 + 接入地址 + 公共请求头 + RSA2 验签 + 统一规范 + 业务错误码，对外开放接口标准形态",
-			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "RSA2 验签", "统一规范", "附录", "错误码"}},
+			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "RSA2 验签", "统一规范", "附录", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "gov", Label: "金融 / 政务合规版", Tag: "合规",
 			Desc:  "封面 + 修订记录 + 目录 + 接入地址 + 公共请求头 + 国密 SM2 验签 + 统一规范 + 业务错误码，满足国密改造要求",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "接入地址", "公共请求头", "国密验签", "统一规范", "错误码"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "接入地址", "公共请求头", "国密验签", "统一规范", "错误码", "接入指引", "术语表", "数据字典"}},
 		{Key: "minimal", Label: "精简版", Tag: "精简",
 			Desc:  "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查",
 			Chips: []string{"目录", "编号"}},
@@ -241,7 +255,8 @@ func DocPresetList() []DocPreset {
 // DocPresetLayout 生成预置模板的排版配置；未知 key 回退为精简版。
 func DocPresetLayout(key string) model.DocLayout {
 	today := time.Now().Format("2006-01-02")
-	base := model.DocLayout{Toc: true, Numbering: true}
+	base := model.DocLayout{Toc: true, Numbering: true,
+		QuickStart: true, Glossary: DefaultGlossary(), Enums: DefaultEnums()}
 
 	switch key {
 	case "internal":
@@ -304,6 +319,7 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.BusinessCodes = DefaultBusinessCodes()
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布（国密改造）"}}
 	default: // minimal：仅目录 + 接口正文
+		return model.DocLayout{Toc: true, Numbering: true}
 	}
 	return base
 }
@@ -321,6 +337,122 @@ func docChapterIntro() model.DocChapter {
 }
 
 // ---------------- 企业标准章节：接入地址 / 公共请求头 / 加密验签 ----------------
+
+// quickStartChapter 内置的「接入指引（快速开始）」正文。
+const quickStartChapter = "#### 1. 申请应用凭证\n" +
+	"- 向平台申请 `appId` 与 `appSecret`（或 RSA2 / SM2 密钥对），生产与测试环境需分别申请\n" +
+	"- 密钥仅在服务端保存，禁止写入前端代码、App 包体或日志\n\n" +
+	"#### 2. 选择接入地址\n" +
+	"- 测试环境先联调，验收后再切换到生产环境（见「接入地址（环境）」章节）\n\n" +
+	"#### 3. 构造公共请求头\n" +
+	"- 每个请求都要携带公共请求头（`X-App-Id`、`X-Timestamp`、`X-Nonce`、`X-Sign` 等，见「公共请求头」章节）\n\n" +
+	"#### 4. 计算签名\n" +
+	"- 按「加密与验签」章节的规则计算签名，注意参数排序、空值剔除与时间戳精度\n\n" +
+	"#### 5. 发起调用并处理响应\n" +
+	"- 以 HTTP 状态码判断传输层结果，以响应体 `code` 判断业务结果（见「附录：业务错误码」）\n" +
+	"- 失败时按 `message` 与 `traceId` 排查，必要时带 `traceId` 联系技术支持\n\n" +
+	"```bash\n" +
+	"curl -X POST 'https://api.example.com/user-center/users' \\\n" +
+	"  -H 'Content-Type: application/json' \\\n" +
+	"  -H 'X-App-Id: {{appId}}' \\\n" +
+	"  -H 'X-Timestamp: {{timestamp}}' \\\n" +
+	"  -H 'X-Nonce: {{nonce}}' \\\n" +
+	"  -H 'X-Sign: {{sign}}' \\\n" +
+	"  -d '{\"page\": 1, \"pageSize\": 20}'\n" +
+	"```\n\n" +
+	"> 建议先用「接口调试」页跑通单个接口，再按本文档批量接入。"
+
+// glossaryChapter 把术语表渲染成 Markdown 表格。
+func glossaryChapter(terms []model.DocTerm) string {
+	if len(terms) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("| 术语 | 说明 |\n|---|---|\n")
+	for _, t := range terms {
+		term := strings.TrimSpace(t.Term)
+		if term == "" {
+			continue
+		}
+		sb.WriteString("| *" + mdCell(term) + "* | " + mdCell(t.Desc) + " |\n")
+	}
+	sb.WriteString("\n> 本文档中出现的缩写与专有名词以上表为准；如有遗漏请联系技术支持补充。\n")
+	return sb.String()
+}
+
+// DefaultGlossary 返回内置的通用术语表（用户可在面板中增删改）。
+func DefaultGlossary() []model.DocTerm {
+	out := make([]model.DocTerm, len(defaultGlossary))
+	copy(out, defaultGlossary)
+	return out
+}
+
+var defaultGlossary = []model.DocTerm{
+	{Term: "appId", Desc: "应用唯一标识，由平台分配，随每个请求的公共请求头传递"},
+	{Term: "appSecret", Desc: "应用密钥，用于计算签名或换取访问令牌，严禁外泄"},
+	{Term: "Access Token", Desc: "调用凭证（JWT 场景），通过 `Authorization: Bearer <token>` 传递"},
+	{Term: "业务码（code）", Desc: "响应体中的业务处理结果码，`0` 表示成功，其余含义见「附录：业务错误码」"},
+	{Term: "HTTP 状态码", Desc: "传输层结果，`200` 表示请求已被服务端正确接收处理"},
+	{Term: "Nonce", Desc: "一次性随机串，用于防重放，同一值在有效期内不可重复使用"},
+	{Term: "幂等", Desc: "同一请求重复提交结果一致；写接口建议通过业务唯一键或幂等键保证"},
+	{Term: "traceId", Desc: "链路追踪 ID，排查问题时可提供给平台定位日志"},
+}
+
+// enumsMarkdown 把数据字典（枚举值）渲染成 Markdown 表格。
+func enumsMarkdown(enums []model.DocEnum) string {
+	var sb strings.Builder
+	sb.WriteString("请求 / 响应中取值受限的字段与全部枚举值如下，未列出的值视为非法参数（业务码 40001）。\n\n")
+	sb.WriteString("| 字段 | 枚举值 | 含义 |\n|---|---|---|\n")
+	for _, e := range enums {
+		field := strings.TrimSpace(e.Field)
+		if field == "" {
+			continue
+		}
+		sb.WriteString("| `" + mdCell(field) + "` | `" + mdCell(e.Code) + "` | " + mdCell(e.Meaning) + " |\n")
+	}
+	sb.WriteString("\n> 枚举值新增属于兼容变更，客户端遇到未知枚举值时应按「未知」处理而不是报错。\n")
+	return sb.String()
+}
+
+// DefaultEnums 返回内置的数据字典样例（用户可在面板中增删改）。
+func DefaultEnums() []model.DocEnum {
+	out := make([]model.DocEnum, len(defaultEnums))
+	copy(out, defaultEnums)
+	return out
+}
+
+var defaultEnums = []model.DocEnum{
+	{Field: "status", Code: "0", Meaning: "已禁用 / 已关闭"},
+	{Field: "status", Code: "1", Meaning: "正常 / 已启用"},
+	{Field: "status", Code: "2", Meaning: "待审核"},
+	{Field: "gender", Code: "0", Meaning: "未知"},
+	{Field: "gender", Code: "1", Meaning: "男"},
+	{Field: "gender", Code: "2", Meaning: "女"},
+}
+
+// supportHasContent 判断技术支持信息是否有内容。
+func supportHasContent(s model.DocSupport) bool {
+	return strings.TrimSpace(s.Name+s.Email+s.Phone+s.Group+s.Ticket+s.SLA) != ""
+}
+
+// supportMarkdown 渲染「技术支持与联系」章节。
+func supportMarkdown(s model.DocSupport) string {
+	var sb strings.Builder
+	sb.WriteString("| 项目 | 信息 |\n|---|---|\n")
+	add := func(label, value string) {
+		if v := strings.TrimSpace(value); v != "" {
+			sb.WriteString("| " + label + " | " + mdCell(v) + " |\n")
+		}
+	}
+	add("技术支持", s.Name)
+	add("邮箱", s.Email)
+	add("电话", s.Phone)
+	add("支持群 / 工单", s.Group)
+	add("帮助中心", s.Ticket)
+	add("响应时效", s.SLA)
+	sb.WriteString("\n> 反馈问题时请提供：环境、接口地址、请求时间、`traceId` 与错误响应体，便于快速定位。\n")
+	return sb.String()
+}
 
 // businessCodesMarkdown 把业务错误码渲染成 Markdown 表格（三种格式共用）。
 func businessCodesMarkdown(codes []model.DocCode) string {
@@ -357,7 +489,10 @@ var defaultBusinessCodes = []model.DocCode{
 // EnrichDocLayout 依据项目环境与公共参数，补齐「接入地址 / 公共请求头 / 加密与验签」章节。
 // 这些内容来自项目真实配置，放在渲染前动态生成，Markdown / HTML(PDF) / Word 共用同一份文本。
 func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common model.CommonParams) model.DocLayout {
-	extra := make([]model.DocChapter, 0, 3)
+	extra := make([]model.DocChapter, 0, 5)
+	if layout.QuickStart {
+		extra = append(extra, model.DocChapter{Title: "接入指引（快速开始）", Content: quickStartChapter})
+	}
 	if layout.Environment {
 		if c := envChapter(envs); c != "" {
 			extra = append(extra, model.DocChapter{Title: "接入地址（环境）", Content: c})
@@ -370,6 +505,9 @@ func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common mo
 	}
 	if sign := strings.TrimSpace(layout.Sign); sign != "" {
 		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign})
+	}
+	if c := glossaryChapter(layout.Glossary); c != "" {
+		extra = append(extra, model.DocChapter{Title: "术语表", Content: c})
 	}
 	if len(extra) == 0 {
 		return layout

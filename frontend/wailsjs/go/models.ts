@@ -1404,6 +1404,60 @@ export namespace model {
 		    return a;
 		}
 	}
+	export class DocSupport {
+	    enabled: boolean;
+	    name: string;
+	    email: string;
+	    phone: string;
+	    group: string;
+	    ticket: string;
+	    sla: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocSupport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.name = source["name"];
+	        this.email = source["email"];
+	        this.phone = source["phone"];
+	        this.group = source["group"];
+	        this.ticket = source["ticket"];
+	        this.sla = source["sla"];
+	    }
+	}
+	export class DocEnum {
+	    field: string;
+	    code: string;
+	    meaning: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocEnum(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.field = source["field"];
+	        this.code = source["code"];
+	        this.meaning = source["meaning"];
+	    }
+	}
+	export class DocTerm {
+	    term: string;
+	    desc: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocTerm(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.term = source["term"];
+	        this.desc = source["desc"];
+	    }
+	}
 	export class DocCode {
 	    code: string;
 	    message: string;
@@ -1488,6 +1542,10 @@ export namespace model {
 	    commonHeaders: boolean;
 	    sign: string;
 	    businessCodes: DocCode[];
+	    quickStart: boolean;
+	    glossary: DocTerm[];
+	    enums: DocEnum[];
+	    support: DocSupport;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1506,6 +1564,10 @@ export namespace model {
 	        this.commonHeaders = source["commonHeaders"];
 	        this.sign = source["sign"];
 	        this.businessCodes = this.convertValues(source["businessCodes"], DocCode);
+	        this.quickStart = source["quickStart"];
+	        this.glossary = this.convertValues(source["glossary"], DocTerm);
+	        this.enums = this.convertValues(source["enums"], DocEnum);
+	        this.support = this.convertValues(source["support"], DocSupport);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2070,6 +2132,9 @@ export namespace model {
 		    return a;
 		}
 	}
+	
+	
+	
 	
 	
 	

@@ -93,6 +93,9 @@ func htmlApi(sb *strings.Builder, api model.ApiInfo, dirName string, common mode
 	if body := responseSampleBody(api); body != "" {
 		sb.WriteString(`<h4>响应示例</h4><pre>` + html.EscapeString(body) + `</pre>`)
 	}
+	if curl := curlSample(api, common); curl != "" {
+		sb.WriteString(`<h4>` + labelCurlSample + `</h4><pre>` + html.EscapeString(curl) + `</pre>`)
+	}
 	sb.WriteString(`</div>`)
 }
 
@@ -268,7 +271,7 @@ func buildHTML(title, rootID string, dirs []model.Directory, apis []model.ApiInf
 			body.WriteString(`</section>`)
 		case sectionAppendix:
 			body.WriteString(htmlStatusAppendix(s.ID, num.section(s.ID, s.Title), pb))
-		case sectionBizCodes:
+		case sectionBizCodes, sectionEnums, sectionSupport:
 			body.WriteString(htmlChapter(num.section(s.ID, s.Title), s, pb))
 		}
 	}

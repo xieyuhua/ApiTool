@@ -278,6 +278,38 @@ type DocLayout struct {
 	Sign string `json:"sign"`
 	// BusinessCodes 附录：业务错误码（空则不输出该章节）
 	BusinessCodes []DocCode `json:"businessCodes"`
+	// QuickStart 输出「接入指引（快速开始）」章节
+	QuickStart bool `json:"quickStart"`
+	// Glossary 术语表（空则不输出该章节）
+	Glossary []DocTerm `json:"glossary"`
+	// Enums 附录：数据字典（枚举值，空则不输出该章节）
+	Enums []DocEnum `json:"enums"`
+	// Support 技术支持与联系（Enabled 为 true 且至少填一项时输出）
+	Support DocSupport `json:"support"`
+}
+
+// DocTerm 术语表条目。
+type DocTerm struct {
+	Term string `json:"term"` // 术语
+	Desc string `json:"desc"` // 说明
+}
+
+// DocEnum 数据字典条目（枚举值说明）。
+type DocEnum struct {
+	Field   string `json:"field"`   // 字段名
+	Code    string `json:"code"`    // 枚举值
+	Meaning string `json:"meaning"` // 含义
+}
+
+// DocSupport 技术支持与联系信息。
+type DocSupport struct {
+	Enabled bool   `json:"enabled"`
+	Name    string `json:"name"`   // 对接人 / 支持团队
+	Email   string `json:"email"`  // 邮箱
+	Phone   string `json:"phone"`  // 电话
+	Group   string `json:"group"`  // 支持群 / 工单入口
+	Ticket  string `json:"ticket"` // 工单 / 帮助中心链接
+	SLA     string `json:"sla"`    // 响应时效说明
 }
 
 // DocCode 业务错误码条目（附录表格的一行）。

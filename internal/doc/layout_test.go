@@ -601,6 +601,84 @@ func TestDocTOCWithoutMethod(t *testing.T) {
 	}
 }
 
+// TestEnterpriseChapters 接入指引 / 术语表 / 数据字典 / 技术支持 与接口级 cURL 示例。
+func TestEnterpriseChapters(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	layout := EnrichDocLayout(model.DocLayout{
+		Toc: true, Numbering: true, QuickStart: true,
+		Glossary: DefaultGlossary(), Enums: DefaultEnums(),
+		Support: model.DocSupport{Enabled: true, Name: "接口对接支持", Email: "api@example.com", SLA: "工作日 2 小时内响应"},
+	}, sampleEnvironments(), common)
+
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	for _, want := range []string{
+		"接入指引（快速开始）", "术语表", "附录：数据字典", "技术支持与联系",
+		"appSecret", "gender", "api@example.com", "工作日 2 小时内响应",
+		"调用示例（cURL）", "curl -X GET", "curl -X POST",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("HTML 缺少 %q", want)
+		}
+	}
+	// 目录也要包含这些章节
+	for _, want := range []string{"接入指引（快速开始）", "术语表", "附录：数据字典", "技术支持与联系"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("目录缺少 %q", want)
+		}
+	}
+
+	md := buildMarkdown(title, rootID, dirs, apis, common, layout)
+	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系", "```bash", "curl -X GET"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("Markdown 缺少 %q", want)
+		}
+	}
+
+	parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
+	doc := parts["word/document.xml"]
+	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系", "curl -X GET"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("Word 缺少 %q", want)
+		}
+	}
+
+	// 关闭开关后不输出
+	off := BuildHTMLWithLayout(title, rootID, dirs, apis, common, model.DocLayout{Toc: true})
+	for _, bad := range []string{"接入指引（快速开始）", "附录：数据字典", "技术支持与联系"} {
+		if strings.Contains(off, bad) {
+			t.Fatalf("关闭开关后仍输出 %q", bad)
+		}
+	}
+}
+
+// TestCurlSample 依据接口定义生成可复制的 cURL。
+func TestCurlSample(t *testing.T) {
+	api := model.ApiInfo{
+		ID: "a1", Name: "创建用户", Method: "post", URL: "https://api.example.com/users",
+		BodyType: "json", Body: `{"name":"张三"}`,
+		Headers: []model.KV{{Key: "X-Tenant-Id", Value: "t1"}},
+		Query:   []model.KV{{Key: "debug", Value: "1"}},
+	}
+	common := model.CommonParams{
+		Headers: []model.KV{{Key: "X-App-Id", Value: ""}},
+		Query:   []model.KV{{Key: "appId", Value: "A001"}},
+	}
+	got := curlSample(api, common)
+	for _, want := range []string{
+		"curl -X POST 'https://api.example.com/users?debug=1&appId=A001'",
+		"-H 'Content-Type: application/json'", "-H 'X-Tenant-Id: t1'", "-H 'X-App-Id: {{ X-App-Id }}'",
+		`-d '{"name":"张三"}'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("cURL 缺少 %q:\n%s", want, got)
+		}
+	}
+	// 无 URL 的接口不生成示例
+	if curlSample(model.ApiInfo{Method: "get"}, model.CommonParams{}) != "" {
+		t.Fatal("空地址不应生成 cURL")
+	}
+}
+
 // ---------------- 测试辅助 ----------------
 
 func mustDOCX(t *testing.T, title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, layout model.DocLayout) []byte {

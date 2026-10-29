@@ -438,6 +438,10 @@ async function loadInto() {
   if (typeof dl.commonHeaders !== 'boolean') dl.commonHeaders = true
   if (typeof dl.sign !== 'string') dl.sign = ''
   if (!Array.isArray(dl.businessCodes)) dl.businessCodes = []
+  if (typeof dl.quickStart !== 'boolean') dl.quickStart = true
+  if (!Array.isArray(dl.glossary)) dl.glossary = []
+  if (!Array.isArray(dl.enums)) dl.enums = []
+  if (!dl.support || typeof dl.support !== 'object') dl.support = { enabled: false }
   if (!Array.isArray(dl.revisions)) dl.revisions = []
   if (!Array.isArray(d.settings.docLayoutTemplates)) d.settings.docLayoutTemplates = []
   if (!d.settings.projectDocLayouts || typeof d.settings.projectDocLayouts !== 'object') d.settings.projectDocLayouts = {}

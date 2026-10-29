@@ -75,6 +75,10 @@ export function DefaultDocBusinessCodes():Promise<Array<model.DocCode>>;
 
 export function DefaultDocConvention():Promise<string>;
 
+export function DefaultDocEnums():Promise<Array<model.DocEnum>>;
+
+export function DefaultDocGlossary():Promise<Array<model.DocTerm>>;
+
 export function DefaultDocSign():Promise<string>;
 
 export function DefaultTestCasePrompt():Promise<string>;

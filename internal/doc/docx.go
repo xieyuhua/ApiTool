@@ -321,6 +321,10 @@ func (b *docxBuilder) api(api model.ApiInfo, level int, common model.CommonParam
 		b.heading(3, labelReqExample)
 		b.code(api.Body)
 	}
+	if curl := curlSample(api, common); curl != "" {
+		b.text("DocH4", labelCurlSample)
+		b.code(curl)
+	}
 	if body := responseSampleBody(api); body != "" {
 		b.heading(3, labelRespExample)
 		b.code(body)
@@ -387,7 +391,7 @@ func buildDocxBody(title, rootID string, dirs []model.Directory, apis []model.Ap
 			} else {
 				b.dir(dirs, apis, rootID, 2, common, num)
 			}
-		case sectionBizCodes:
+		case sectionBizCodes, sectionEnums, sectionSupport:
 			b.heading(1, num.section(s.ID, s.Title))
 			b.miniMarkdown(s.Content)
 		case sectionAppendix:
