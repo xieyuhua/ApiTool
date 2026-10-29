@@ -5,8 +5,9 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
+  PullDocTemplates, PushDocTemplates,
 } from '../../../wailsjs/go/main/App'
-import { store, saveNow, reloadStore, buildDirTree, currentProject } from '../../store'
+import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
 
 const presets = ref([])
@@ -14,6 +15,8 @@ const applying = ref('')
 const panelRef = ref(null)
 const scopeDirId = ref('')      // 预览用的目录范围（空 = 全部接口）
 const fileInput = ref(null)
+const syncing = ref('')   // '' | 'push' | 'pull'
+const cloudReady = computed(() => cloudConfigured())
 
 // 作用范围：global 全局配置（默认，所有项目共用）；project 当前项目覆盖
 const scope = ref('global')
@@ -126,6 +129,7 @@ async function saveAsTemplate() {
     await reloadStore()
     normalize(dl.value)
     ElMessage.success('已保存模板：' + name)
+    autoPushIfEnabled()
   } catch (e) {
     ElMessage.error(String(e))
   }
@@ -138,9 +142,46 @@ async function removeTemplate(tpl) {
     await reloadStore()
     normalize(dl.value)
     ElMessage.success('已删除模板：' + tpl.name)
+    autoPushIfEnabled()
   } catch (e) {
     ElMessage.error(String(e))
   }
+}
+
+// ---------------- 云同步（团队模板库） ----------------
+// 上传：用本地模板库覆盖云端；拉取：云端同名模板覆盖本地，并保留本地独有项
+async function pushCloud(silent = false) {
+  if (syncing.value) return
+  syncing.value = 'push'
+  try {
+    const r = await PushDocTemplates()
+    if (!silent) ElMessage.success(`已上传 ${r.changed} 套模板到云端`)
+  } catch (e) {
+    if (!silent) ElMessage.error('上传失败：' + String(e))
+    else console.warn('模板库自动上传失败', e)
+  } finally {
+    syncing.value = ''
+  }
+}
+
+async function pullCloud() {
+  if (syncing.value) return
+  syncing.value = 'pull'
+  try {
+    const r = await PullDocTemplates()
+    await reloadStore()
+    normalize(dl.value)
+    ElMessage.success(r.changed ? `已从云端拉取，合并后共 ${r.total} 套（更新 ${r.changed} 套）` : '云端模板与本地一致')
+  } catch (e) {
+    ElMessage.error('拉取失败：' + String(e))
+  } finally {
+    syncing.value = ''
+  }
+}
+
+// 保存 / 删除后，若开启了自动同步则顺手把模板库推到云端
+function autoPushIfEnabled() {
+  if (cloudSyncEnabled()) pushCloud(true)
 }
 
 // ---------------- 模板导出 / 导入（JSON，便于团队共享） ----------------
@@ -247,7 +288,23 @@ function preview() {
       </div>
 
       <div class="card">
-        <div class="card-title">我的模板（{{ myTemplates.length }}）</div>
+        <div class="card-title">
+          我的模板（{{ myTemplates.length }}）
+          <span class="tpl-ops">
+            <el-tooltip :content="cloudReady ? '用本地模板库覆盖云端模板库' : '请先在「设置 → 云同步」配置服务器地址并登录'">
+              <span>
+                <el-button size="small" :disabled="!cloudReady || !myTemplates.length" :loading="syncing === 'push'"
+                  @click="pushCloud()">☁ 上传到云端</el-button>
+              </span>
+            </el-tooltip>
+            <el-tooltip :content="cloudReady ? '拉取云端模板并与本地合并（同名以云端为准）' : '请先在「设置 → 云同步」配置服务器地址并登录'">
+              <span>
+                <el-button size="small" :disabled="!cloudReady" :loading="syncing === 'pull'"
+                  @click="pullCloud">☁ 从云端拉取</el-button>
+              </span>
+            </el-tooltip>
+          </span>
+        </div>
         <div class="tpl-mine">
           <el-tag v-for="tpl in myTemplates" :key="tpl.id" class="tpl-tag" closable
             @close="removeTemplate(tpl)" @click="applyTemplate(tpl)">{{ tpl.name }}</el-tag>
@@ -256,7 +313,10 @@ function preview() {
             + 保存当前结构为模板
           </el-button>
         </div>
-        <div class="tpl-hint">最多保存 20 套；同名保存会覆盖旧模板。点击标签即可套用。</div>
+        <div class="tpl-hint">
+          最多保存 20 套；同名保存会覆盖旧模板，点击标签即可套用。
+          <span v-if="cloudReady && cloudSyncEnabled()">已开启自动同步：保存 / 删除模板后会自动上传云端。</span>
+        </div>
       </div>
 
       <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" />

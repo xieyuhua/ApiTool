@@ -5,6 +5,7 @@ import (
 	"apitool/internal/ai"
 	"apitool/internal/bus"
 	"apitool/internal/capture"
+	"apitool/internal/cloud"
 	"apitool/internal/doc"
 	"apitool/internal/httpx"
 	"apitool/internal/jsonutil"
@@ -371,14 +372,54 @@ func (a *App) SaveDocLayoutTemplate(name string, layoutJSON string) (model.DocLa
 	}
 	if !replaced {
 		data.Settings.DocLayoutTemplates = append(data.Settings.DocLayoutTemplates, tpl)
-		if len(data.Settings.DocLayoutTemplates) > 20 {
-			return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 20 个，请先删除不用的模板")
+		if len(data.Settings.DocLayoutTemplates) > maxDocTemplates {
+			return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 %d 个，请先删除不用的模板", maxDocTemplates)
 		}
 	}
 	if err := a.store.SaveData(data); err != nil {
 		return model.DocLayoutTemplate{}, err
 	}
 	return tpl, nil
+}
+
+// maxDocTemplates 自定义模板数量上限（与 SaveDocLayoutTemplate 保持一致）。
+const maxDocTemplates = 20
+
+// cloudClient 按当前设置构造云端同步客户端。
+func (a *App) cloudClient() *cloud.Client {
+	s := a.store.GetData().Settings
+	return cloud.New(s.CloudURL, s.CloudToken)
+}
+
+// PullDocTemplates 从云端拉取模板库并合并到本地（同名以云端为准）。
+func (a *App) PullDocTemplates() (cloud.SyncResult, error) {
+	data := a.store.GetData()
+	remote, err := a.cloudClient().PullTemplates()
+	if err != nil {
+		return cloud.SyncResult{}, err
+	}
+	merged, changed := cloud.MergeTemplates(data.Settings.DocLayoutTemplates, remote)
+	if len(merged) > maxDocTemplates {
+		merged = merged[:maxDocTemplates]
+	}
+	data.Settings.DocLayoutTemplates = merged
+	if err := a.store.SaveData(data); err != nil {
+		return cloud.SyncResult{}, err
+	}
+	return cloud.SyncResult{Total: len(merged), Changed: changed}, nil
+}
+
+// PushDocTemplates 把本地模板库上传到云端（团队共享）。
+func (a *App) PushDocTemplates() (cloud.SyncResult, error) {
+	data := a.store.GetData()
+	tpls := data.Settings.DocLayoutTemplates
+	if len(tpls) == 0 {
+		return cloud.SyncResult{}, fmt.Errorf("本地没有可上传的模板")
+	}
+	if err := a.cloudClient().PushTemplates(tpls); err != nil {
+		return cloud.SyncResult{}, err
+	}
+	return cloud.SyncResult{Total: len(tpls), Changed: len(tpls)}, nil
 }
 
 // DeleteDocLayoutTemplate 删除自定义文档结构模板

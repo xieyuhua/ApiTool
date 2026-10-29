@@ -9,6 +9,7 @@ import {agent} from '../models';
 import {share} from '../models';
 import {frontend} from '../models';
 import {plugins} from '../models';
+import {cloud} from '../models';
 import {stress} from '../models';
 import {db} from '../models';
 import {sniff} from '../models';
@@ -247,6 +248,10 @@ export function PluginTest(arg1:model.PluginConn):Promise<plugins.PluginOpResult
 export function PolishText(arg1:agent.RunAgentArgs):Promise<string>;
 
 export function PreviewDocWatermark(arg1:string,arg2:string):Promise<string>;
+
+export function PullDocTemplates():Promise<cloud.SyncResult>;
+
+export function PushDocTemplates():Promise<cloud.SyncResult>;
 
 export function QueryAgentLogs(arg1:agent.QueryAgentLogsArgs):Promise<Array<agent.AgentLog>>;
 

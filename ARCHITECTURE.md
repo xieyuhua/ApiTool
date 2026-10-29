@@ -48,6 +48,7 @@ apitool/
 | `doc` | 接口文档生成（md/html/docx/pdf/openapi，Word/PDF 支持水印）与导入（OpenAPI/Swagger/Postman） | `model`, `jsonutil` |
 | `pdfprint` | HTML→PDF 无头打印（本机 Edge/Chrome 无头模式），供 doc 与 agent 会话导出复用 | `-` |
 | `share` | 本地分享服务（独立 HTML / 在线链接，localhost 托管） | `model`, `store`, `bus` |
+| `cloud` | 云端同步客户端：文档模板库上传/拉取（复用项目同步接口，承载在保留项目 `__doc_templates__`）与模板合并 | `model` |
 | `sync` | 桌面端内置同步服务（账号、项目、分享文档） | `model`, `store` |
 | `capture` | 浏览器扩展回传的流量捕获（服务端兜底过滤、去重） | `model`, `store`, `bus` |
 | `plugins` | 插件数据库连接（MySQL/Redis/PG 等） | `model` |

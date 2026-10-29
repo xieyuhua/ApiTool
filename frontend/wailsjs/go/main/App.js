@@ -466,6 +466,14 @@ export function PreviewDocWatermark(arg1, arg2) {
   return window['go']['main']['App']['PreviewDocWatermark'](arg1, arg2);
 }
 
+export function PullDocTemplates() {
+  return window['go']['main']['App']['PullDocTemplates']();
+}
+
+export function PushDocTemplates() {
+  return window['go']['main']['App']['PushDocTemplates']();
+}
+
 export function QueryAgentLogs(arg1) {
   return window['go']['main']['App']['QueryAgentLogs'](arg1);
 }

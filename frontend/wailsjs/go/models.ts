@@ -681,6 +681,25 @@ export namespace capture {
 
 }
 
+export namespace cloud {
+	
+	export class SyncResult {
+	    total: number;
+	    changed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.changed = source["changed"];
+	    }
+	}
+
+}
+
 export namespace crypto {
 	
 	export class Result {

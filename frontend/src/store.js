@@ -569,6 +569,20 @@ function autoSyncEnabled() {
   return !!s.autoSync && !!s.cloudToken && !!s.cloudURL
 }
 
+// 云同步是否已配置（有地址且已登录），供模板同步等场景判断
+export function cloudConfigured() {
+  const s = store.data.settings
+  return !!s.cloudURL && !!s.cloudToken
+}
+
+// 自动同步是否开启（模板库变更后是否自动上传）
+export function cloudSyncEnabled() {
+  return autoSyncEnabled()
+}
+
+// 云端承载「文档模板库」的保留项目 ID，不作为业务项目拉取
+export const DOC_TEMPLATES_PROJECT_ID = '__doc_templates__'
+
 let syncTimer = null
 // 编辑后防抖推送（默认 4 秒），避免频繁请求
 export function scheduleAutoSync() {
@@ -619,6 +633,7 @@ export async function autoPullOnStart() {
     const list = await cloudApi('/api/projects')
     if (!Array.isArray(list)) return
     for (const c of list) {
+      if (c.id === DOC_TEMPLATES_PROJECT_ID) continue // 模板库占位项目，不下沉为业务项目
       const existing = store.data.projects.find(x => x.id === c.id)
       if (!existing || (c.updatedAt && (!existing.updatedAt || c.updatedAt > existing.updatedAt))) {
         await autoPullProject(c.id)
