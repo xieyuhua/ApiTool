@@ -499,6 +499,21 @@ func TestSignTemplates(t *testing.T) {
 	if strings.Contains(DefaultSignTemplate(), "§") {
 		t.Fatal("验签模板中的占位符未还原为反引号")
 	}
+	// 每套模板都要带 Java / Go / PHP 示例代码
+	for _, tpl := range list {
+		for _, want := range []string{"```java", "```go", "```php", "<?php"} {
+			if !strings.Contains(tpl.Content, want) {
+				t.Fatalf("模板 %s 缺少 %s 示例", tpl.Key, want)
+			}
+		}
+	}
+	// PHP 示例的关键细节：排序必须用 SORT_STRING、JWT 用 firebase/php-jwt
+	if !strings.Contains(templateMD5Sorted, "ksort($params, SORT_STRING)") {
+		t.Fatal("MD5 模板缺少 PHP 排序示例")
+	}
+	if !strings.Contains(templateJWT, "Firebase\\JWT\\JWT") {
+		t.Fatal("JWT 模板缺少 PHP 示例")
+	}
 }
 
 // TestBusinessCodesAppendix 业务错误码附录在三种格式中都要正确输出。

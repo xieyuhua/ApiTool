@@ -94,7 +94,7 @@ const codeMD5 = "#### 3. 示例代码\n" +
 	"const sign = md5(stringA + '&key=' + appSecret).toUpperCase() // md5 需引入 js-md5\n" +
 	"```"
 
-var templateMD5Sorted = signDoc(rulesMD5, sampleMD5, codeMD5, signCodeTable, signNotesCommon)
+var templateMD5Sorted = signDoc(rulesMD5, sampleMD5, codeMD5, phpMD5, signCodeTable, signNotesCommon)
 
 // ---------------- 方案 B：RSA2（SHA256withRSA） ----------------
 
@@ -139,7 +139,7 @@ const notesRSA2 = "#### 5. 注意事项\n" +
 	"- 密钥轮换需保留旧公钥一个版本，避免切换期验签失败（业务码 10005）\n" +
 	"- 金额、时间等字段的格式化规则与签名参与规则必须写进文档，避免各方实现不一致"
 
-var templateRSA2 = signDoc(rulesRSA2, sampleRSA2, codeRSA2, signCodeTable, notesRSA2)
+var templateRSA2 = signDoc(rulesRSA2, sampleRSA2, codeRSA2, phpRSA2, signCodeTable, notesRSA2)
 
 // ---------------- 方案 C：HMAC-SHA256 规范化请求 ----------------
 
@@ -184,7 +184,7 @@ const notesHMAC = "#### 5. 注意事项\n" +
 	"- 网关转发不要改写 query 顺序与大小写，否则验签失败\n" +
 	"- `X-Nonce` 服务端缓存 5 分钟；生产环境建议开启 nonce 去重（错误码 10004）"
 
-var templateHMAC = signDoc(rulesHMAC, sampleHMAC, codeHMAC, signCodeTable, notesHMAC)
+var templateHMAC = signDoc(rulesHMAC, sampleHMAC, codeHMAC, phpHMAC, signCodeTable, notesHMAC)
 
 // ---------------- 方案 D：摘要 + 二次拼接（时间戳 / nonce） ----------------
 
@@ -218,7 +218,7 @@ const notesDigestNonce = "#### 5. 注意事项\n" +
 	"- `X-Nonce` 建议「时间戳 + 随机数」16 位，服务端用 Redis 做 5 分钟去重\n" +
 	"- 客户端与服务端必须同源校时（NTP），否则时间窗校验误伤正常请求"
 
-var templateDigestNonce = signDoc(rulesDigestNonce, sampleDigestNonce, codeDigestNonce, signCodeTable, notesDigestNonce)
+var templateDigestNonce = signDoc(rulesDigestNonce, sampleDigestNonce, codeDigestNonce, phpDigestNonce, signCodeTable, notesDigestNonce)
 
 // ---------------- 方案 E：JWT（HS256 / RS256） ----------------
 
@@ -263,7 +263,7 @@ const notesJWT = "#### 5. 注意事项\n" +
 	"- 时钟偏差容忍建议 60 秒，`exp` 与 `nbf` 同时校验\n" +
 	"- 令牌有效期越短越安全，建议配合 refresh_token 使用"
 
-var templateJWT = signDoc(rulesJWT, sampleJWT, codeJWT, authCodeTable, notesJWT)
+var templateJWT = signDoc(rulesJWT, sampleJWT, codeJWT, phpJWT, authCodeTable, notesJWT)
 
 // ---------------- 方案 F：国密 SM2 + SM3 ----------------
 
@@ -306,7 +306,65 @@ const notesSM2 = "#### 5. 注意事项\n" +
 	"- 客户端接入需内置国密库（Android / iOS / 小程序均有成熟 SDK）\n" +
 	"- 证书到期前提前 30 天双证书并行，避免批量验签失败"
 
-var templateSM2 = signDoc(rulesSM2, sampleSM2, codeSM2, signCodeTable, notesSM2)
+var templateSM2 = signDoc(rulesSM2, sampleSM2, codeSM2, phpSM2, signCodeTable, notesSM2)
+
+// ---------------- PHP 示例代码（各方案通用，跟在 Java / Go / 前端之后）----------------
+
+const phpMD5 = "```php\n" +
+	"<?php\n" +
+	"// 参数排序拼接 + MD5：务必用 SORT_STRING，避免 PHP 把 \"10\" 按数字排在 \"2\" 前面\n" +
+	"ksort($params, SORT_STRING);\n" +
+	"$pairs = [];\n" +
+	"foreach ($params as $k => $v) {\n" +
+	"    if ($v === null || $v === '' || in_array($k, ['sign', 'sign_type'], true)) {\n" +
+	"        continue;\n" +
+	"    }\n" +
+	"    $pairs[] = $k . '=' . $v;\n" +
+	"}\n" +
+	"$stringA = implode('&', $pairs);\n" +
+	"$sign = strtoupper(md5($stringA . '&key=' . $appSecret));\n" + "```"
+
+const phpRSA2 = "```php\n" +
+	"<?php\n" +
+	"// 私钥为 PKCS8 PEM（-----BEGIN PRIVATE KEY-----）\n" +
+	"openssl_sign($stringA, $rawSign, $privateKey, OPENSSL_ALGO_SHA256);\n" +
+	"$sign = base64_encode($rawSign);\n" +
+	"\n" +
+	"// 验签：openssl_verify 返回 1 通过、0 不匹配、-1 出错\n" +
+	"$ok = openssl_verify($stringA, base64_decode($sign), $publicKey, OPENSSL_ALGO_SHA256) === 1;\n" + "```"
+
+const phpHMAC = "```php\n" +
+	"<?php\n" +
+	"$canonical = implode(\"\\n\", [$method, $uri, $sortedQuery, $canonicalHeaders, hash('sha256', $body)]);\n" +
+	"$stringToSign = implode(\"\\n\", ['HMAC-SHA256', $timestamp, $nonce, hash('sha256', $canonical)]);\n" +
+	"$signature = strtoupper(hash_hmac('sha256', $stringToSign, $secretKey));\n" + "```"
+
+const phpDigestNonce = "```php\n" +
+	"<?php\n" +
+	"$digest = md5($stringA);                                  // 一次摘要：32 位小写\n" +
+	"$sign   = strtoupper(md5($digest . $appSecret . $timestamp . $nonce));\n" + "```"
+
+const phpJWT = "```php\n" +
+	"<?php\n" +
+	"// composer require firebase/php-jwt\n" +
+	"use Firebase\\JWT\\JWT;\n" +
+	"use Firebase\\JWT\\Key;\n" +
+	"\n" +
+	"$payload = [\n" +
+	"    'iss' => 'apitool', 'sub' => 'A001', 'aud' => 'open-api',\n" +
+	"    'iat' => time(), 'exp' => time() + 7200, 'jti' => bin2hex(random_bytes(8)),\n" +
+	"];\n" +
+	"$token = JWT::encode($payload, $secretKey, 'HS256');         // RS256 传私钥 PEM\n" +
+	"$claims = JWT::decode($token, new Key($publicKey, 'RS256')); // 验签 + 解析\n" + "```"
+
+const phpSM2 = "```php\n" +
+	"<?php\n" +
+	"// composer require lpilp/guomi（需 gmp 扩展；也可换 gmssl 扩展）\n" +
+	"use Rtgm\\sm\\RtSm2;\n" +
+	"\n" +
+	"$sm2  = new RtSm2('base64');    // 输出 Base64；对端要 DER 时改为 'der'\n" +
+	"$sign = $sm2->doSign($stringA, $privateKey, '1234567812345678'); // userId 需与对端一致\n" +
+	"// 验签：$ok = $sm2->verifySign($stringA, $sign, $publicKey, '1234567812345678');\n" + "```"
 
 // signTemplateList 预置验签模板清单（顺序即下拉顺序，首项为默认）。
 func signTemplateList() []DocSignTemplate {
