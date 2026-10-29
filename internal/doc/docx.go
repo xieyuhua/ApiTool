@@ -387,6 +387,9 @@ func buildDocxBody(title, rootID string, dirs []model.Directory, apis []model.Ap
 			} else {
 				b.dir(dirs, apis, rootID, 2, common, num)
 			}
+		case sectionBizCodes:
+			b.heading(1, num.section(s.ID, s.Title))
+			b.miniMarkdown(s.Content)
 		case sectionAppendix:
 			b.heading(1, num.section(s.ID, s.Title))
 			rows := make([][]docxCell, 0, len(commonStatusCodes))

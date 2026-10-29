@@ -1404,6 +1404,22 @@ export namespace model {
 		    return a;
 		}
 	}
+	export class DocCode {
+	    code: string;
+	    message: string;
+	    desc: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocCode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.message = source["message"];
+	        this.desc = source["desc"];
+	    }
+	}
 	export class DocRevision {
 	    version: string;
 	    date: string;
@@ -1471,6 +1487,7 @@ export namespace model {
 	    environment: boolean;
 	    commonHeaders: boolean;
 	    sign: string;
+	    businessCodes: DocCode[];
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1488,6 +1505,7 @@ export namespace model {
 	        this.environment = source["environment"];
 	        this.commonHeaders = source["commonHeaders"];
 	        this.sign = source["sign"];
+	        this.businessCodes = this.convertValues(source["businessCodes"], DocCode);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2052,6 +2070,7 @@ export namespace model {
 		    return a;
 		}
 	}
+	
 	
 	
 	

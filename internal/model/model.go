@@ -276,6 +276,15 @@ type DocLayout struct {
 	CommonHeaders bool `json:"commonHeaders"`
 	// Sign 加密与验签说明（Markdown 文本，空则不输出该章节）
 	Sign string `json:"sign"`
+	// BusinessCodes 附录：业务错误码（空则不输出该章节）
+	BusinessCodes []DocCode `json:"businessCodes"`
+}
+
+// DocCode 业务错误码条目（附录表格的一行）。
+type DocCode struct {
+	Code    string `json:"code"`    // 业务码，如 10001
+	Message string `json:"message"` // 含义
+	Desc    string `json:"desc"`    // 说明 / 排查建议
 }
 
 // DocCover 封面信息。

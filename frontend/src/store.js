@@ -437,6 +437,7 @@ async function loadInto() {
   if (typeof dl.environment !== 'boolean') dl.environment = true
   if (typeof dl.commonHeaders !== 'boolean') dl.commonHeaders = true
   if (typeof dl.sign !== 'string') dl.sign = ''
+  if (!Array.isArray(dl.businessCodes)) dl.businessCodes = []
   if (!Array.isArray(dl.revisions)) dl.revisions = []
   if (!Array.isArray(d.settings.docLayoutTemplates)) d.settings.docLayoutTemplates = []
   if (!d.settings.projectDocLayouts || typeof d.settings.projectDocLayouts !== 'object') d.settings.projectDocLayouts = {}

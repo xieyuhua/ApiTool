@@ -268,6 +268,8 @@ func buildHTML(title, rootID string, dirs []model.Directory, apis []model.ApiInf
 			body.WriteString(`</section>`)
 		case sectionAppendix:
 			body.WriteString(htmlStatusAppendix(s.ID, num.section(s.ID, s.Title), pb))
+		case sectionBizCodes:
+			body.WriteString(htmlChapter(num.section(s.ID, s.Title), s, pb))
 		}
 	}
 

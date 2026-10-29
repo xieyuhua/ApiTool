@@ -71,6 +71,8 @@ export function CreateAgentSession(arg1:string):Promise<string>;
 
 export function CreateShareLink(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
+export function DefaultDocBusinessCodes():Promise<Array<model.DocCode>>;
+
 export function DefaultDocConvention():Promise<string>;
 
 export function DefaultDocSign():Promise<string>;

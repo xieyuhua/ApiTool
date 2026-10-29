@@ -110,6 +110,10 @@ export function CreateShareLink(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateShareLink'](arg1, arg2, arg3, arg4);
 }
 
+export function DefaultDocBusinessCodes() {
+  return window['go']['main']['App']['DefaultDocBusinessCodes']();
+}
+
 export function DefaultDocConvention() {
   return window['go']['main']['App']['DefaultDocConvention']();
 }

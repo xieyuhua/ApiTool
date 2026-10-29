@@ -22,6 +22,7 @@ const (
 	sectionConvention docSectionKind = "convention" // 接口统一定义规范
 	sectionAPIs       docSectionKind = "apis"       // 接口正文
 	sectionAppendix   docSectionKind = "appendix"   // 附录（HTTP 状态码）
+	sectionBizCodes   docSectionKind = "bizCodes"   // 附录（业务错误码）
 )
 
 // docSection 导出文档中的一章。Content 为简化 Markdown（前言 / 规范正文）。
@@ -102,6 +103,12 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 	out = append(out, docSection{Kind: sectionAPIs, ID: "apis", Title: docTitle})
 	if layout.StatusCodes {
 		out = append(out, docSection{Kind: sectionAppendix, ID: "appendix-status", Title: "附录：HTTP 状态码"})
+	}
+	if len(layout.BusinessCodes) > 0 {
+		out = append(out, docSection{
+			Kind: sectionBizCodes, ID: "appendix-codes", Title: "附录：业务错误码",
+			Content: businessCodesMarkdown(layout.BusinessCodes),
+		})
 	}
 	return out
 }
@@ -206,19 +213,25 @@ func DocPresetList() []DocPreset {
 	return []DocPreset{
 		{Key: "internal", Label: "内部版", Tag: "推荐",
 			Desc:  "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
 		{Key: "external", Label: "对外版", Tag: "对外",
 			Desc:  "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方",
-			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
+			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
 		{Key: "rest", Label: "标准 RESTful 版", Tag: "通用",
 			Desc:  "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档",
-			Chips: []string{"目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
+			Chips: []string{"目录", "编号", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
 		{Key: "review", Label: "评审版", Tag: "评审",
 			Desc:  "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用",
-			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "接入地址", "公共请求头", "加密验签", "统一规范"}},
+			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "接入地址", "公共请求头", "加密验签", "统一规范", "错误码"}},
 		{Key: "micro", Label: "微服务版", Tag: "架构",
 			Desc:  "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同",
-			Chips: []string{"封面", "目录", "编号", "服务约定", "接入地址", "公共请求头", "加密验签", "统一规范", "附录"}},
+			Chips: []string{"封面", "目录", "编号", "服务约定", "接入地址", "公共请求头", "加密验签", "统一规范", "附录", "错误码"}},
+		{Key: "open", Label: "开放平台版", Tag: "开放",
+			Desc:  "封面 + 目录 + 接入地址 + 公共请求头 + RSA2 验签 + 统一规范 + 业务错误码，对外开放接口标准形态",
+			Chips: []string{"封面", "目录", "编号", "接入地址", "公共请求头", "RSA2 验签", "统一规范", "附录", "错误码"}},
+		{Key: "gov", Label: "金融 / 政务合规版", Tag: "合规",
+			Desc:  "封面 + 修订记录 + 目录 + 接入地址 + 公共请求头 + 国密 SM2 验签 + 统一规范 + 业务错误码，满足国密改造要求",
+			Chips: []string{"封面", "修订记录", "目录", "编号", "接入地址", "公共请求头", "国密验签", "统一规范", "错误码"}},
 		{Key: "minimal", Label: "精简版", Tag: "精简",
 			Desc:  "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查",
 			Chips: []string{"目录", "编号"}},
@@ -237,16 +250,19 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布"}}
 	case "external":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "对外接口文档", Version: "V1.0.0"}
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
 	case "rest":
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
 	case "review":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "接口评审稿", Version: "V0.9.0"}
 		base.Prefaces = []model.DocChapter{{
@@ -258,6 +274,7 @@ func DocPresetLayout(key string) model.DocLayout {
 		}}
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
+		base.BusinessCodes = DefaultBusinessCodes()
 		base.Revisions = []model.DocRevision{{Version: "V0.9.0", Date: today, Note: "提交评审"}}
 	case "micro":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "微服务接口文档", Version: "V1.0.0"}
@@ -272,6 +289,20 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
+	case "open":
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "开放平台接口文档", Version: "V1.0.0"}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, SignTemplateByKey("rsa2")
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
+	case "gov":
+		base.Cover = model.DocCover{Enabled: true, Subtitle: "金融 / 政务接口文档 · 国密合规", Version: "V1.0.0"}
+		base.Environment, base.CommonHeaders, base.Sign = true, true, SignTemplateByKey("sm2")
+		base.Convention = DefaultConventionTemplate()
+		base.StatusCodes = true
+		base.BusinessCodes = DefaultBusinessCodes()
+		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布（国密改造）"}}
 	default: // minimal：仅目录 + 接口正文
 	}
 	return base
@@ -290,6 +321,38 @@ func docChapterIntro() model.DocChapter {
 }
 
 // ---------------- 企业标准章节：接入地址 / 公共请求头 / 加密验签 ----------------
+
+// businessCodesMarkdown 把业务错误码渲染成 Markdown 表格（三种格式共用）。
+func businessCodesMarkdown(codes []model.DocCode) string {
+	var sb strings.Builder
+	sb.WriteString("业务错误码用于描述接口的业务处理结果，**HTTP 状态码表示传输层语义，业务码表示业务语义**，" +
+		"调用方应以响应体中的 `code` 为准。\n\n")
+	sb.WriteString("| 业务码 | 含义 | 说明 / 排查建议 |\n|---|---|---|\n")
+	for _, c := range codes {
+		sb.WriteString("| `" + mdCell(c.Code) + "` | " + mdCell(c.Message) + " | " + mdCell(c.Desc) + " |\n")
+	}
+	sb.WriteString("\n> 新增业务码请同步维护本文档，并保持「同码同义」；废弃码保留一段时间后再删除。\n")
+	return sb.String()
+}
+
+// DefaultBusinessCodes 返回内置的业务错误码起始表（用户可在面板中增删改）。
+func DefaultBusinessCodes() []model.DocCode {
+	out := make([]model.DocCode, len(defaultBusinessCodes))
+	copy(out, defaultBusinessCodes)
+	return out
+}
+
+var defaultBusinessCodes = []model.DocCode{
+	{Code: "0", Message: "成功", Desc: "业务处理成功，data 为业务数据"},
+	{Code: "10001", Message: "签名/鉴权失败", Desc: "缺少签名、签名不匹配、appId 无效或时间戳过期（详见「加密与验签」）"},
+	{Code: "40001", Message: "参数校验失败", Desc: "必填缺失、类型错误、长度或范围不合法，响应 data 中返回具体字段"},
+	{Code: "40101", Message: "未登录或登录已过期", Desc: "请重新获取 token 后重试"},
+	{Code: "40301", Message: "无访问权限", Desc: "当前账号 / 应用无该接口或该数据权限"},
+	{Code: "40401", Message: "资源不存在", Desc: "ID 不存在或已被删除"},
+	{Code: "40901", Message: "业务状态冲突", Desc: "重复提交、幂等键冲突、数据状态不允许该操作"},
+	{Code: "42901", Message: "请求过于频繁", Desc: "触发限流，按响应头 Retry-After 退避重试"},
+	{Code: "50001", Message: "系统内部错误", Desc: "服务端异常，可携带 traceId 反馈给平台排查"},
+}
 
 // EnrichDocLayout 依据项目环境与公共参数，补齐「接入地址 / 公共请求头 / 加密与验签」章节。
 // 这些内容来自项目真实配置，放在渲染前动态生成，Markdown / HTML(PDF) / Word 共用同一份文本。

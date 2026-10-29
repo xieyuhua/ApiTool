@@ -216,8 +216,8 @@ func TestDocNumbering(t *testing.T) {
 
 func TestDocPresets(t *testing.T) {
 	list := DocPresetList()
-	if len(list) != 6 {
-		t.Fatalf("预置模板数量 = %d, want 6", len(list))
+	if len(list) != 8 {
+		t.Fatalf("预置模板数量 = %d, want 8", len(list))
 	}
 	// 每个模板都要有标签与描述，且 key 唯一
 	seen := map[string]bool{}
@@ -247,6 +247,19 @@ func TestDocPresets(t *testing.T) {
 	}
 	if review := DocPresetLayout("review"); !review.Cover.Enabled || len(review.Revisions) == 0 {
 		t.Fatalf("评审版应带封面与修订记录: %+v", review)
+	}
+	// 开放平台版：RSA2 验签 + 业务错误码；金融合规版：SM2 验签 + 修订记录
+	open := DocPresetLayout("open")
+	if !open.Cover.Enabled || !strings.Contains(open.Sign, "SHA256withRSA") || len(open.BusinessCodes) == 0 {
+		t.Fatalf("开放平台版配置不符合预期: %+v", open)
+	}
+	gov := DocPresetLayout("gov")
+	if !strings.Contains(gov.Sign, "SM3") || len(gov.Revisions) == 0 || len(gov.BusinessCodes) == 0 {
+		t.Fatalf("金融合规版配置不符合预期: %+v", gov)
+	}
+	// 多数模板应内置业务错误码
+	if len(DocPresetLayout("internal").BusinessCodes) == 0 || len(DocPresetLayout("minimal").BusinessCodes) != 0 {
+		t.Fatal("业务错误码开关与预置配置不一致")
 	}
 	internal := DocPresetLayout("internal")
 	if !internal.Cover.Enabled || internal.Convention == "" || !internal.StatusCodes ||
@@ -485,6 +498,42 @@ func TestSignTemplates(t *testing.T) {
 	}
 	if strings.Contains(DefaultSignTemplate(), "§") {
 		t.Fatal("验签模板中的占位符未还原为反引号")
+	}
+}
+
+// TestBusinessCodesAppendix 业务错误码附录在三种格式中都要正确输出。
+func TestBusinessCodesAppendix(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	layout := model.DocLayout{Toc: true, BusinessCodes: DefaultBusinessCodes()}
+	layout.Numbering = true
+
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	for _, want := range []string{"附录：业务错误码", "10001", "参数校验失败", "42901", "请求过于频繁"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("HTML 业务错误码附录缺少 %q", want)
+		}
+	}
+	if !strings.Contains(html, `id="appendix-codes"`) {
+		t.Fatal("HTML 业务错误码附录缺少锚点")
+	}
+
+	md := buildMarkdown(title, rootID, dirs, apis, common, layout)
+	if !strings.Contains(md, "附录：业务错误码") || !strings.Contains(md, "| `40001` | 参数校验失败 |") {
+		t.Fatalf("Markdown 业务错误码附录缺失:\n%s", md)
+	}
+
+	parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
+	doc := parts["word/document.xml"]
+	for _, want := range []string{"附录：业务错误码", "参数校验失败", "请求过于频繁"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("Word 业务错误码附录缺少 %q", want)
+		}
+	}
+
+	// 空清单时不应出现该章节
+	empty := BuildHTMLWithLayout(title, rootID, dirs, apis, common, model.DocLayout{Toc: true})
+	if strings.Contains(empty, "附录：业务错误码") {
+		t.Fatal("未配置业务错误码时不应输出附录")
 	}
 }
 

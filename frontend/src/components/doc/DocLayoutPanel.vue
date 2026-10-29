@@ -3,7 +3,9 @@
 // 模板库（预置 + 我的模板）在「文档模板」页面维护，本组件只负责结构本身。
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DefaultDocConvention, DocSignTemplates, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
+import {
+  DefaultDocBusinessCodes, DefaultDocConvention, DocSignTemplates, PreviewDocWatermark,
+} from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
 const props = defineProps({
@@ -30,6 +32,7 @@ function normalize(v) {
   if (typeof v.environment !== 'boolean') v.environment = true
   if (typeof v.commonHeaders !== 'boolean') v.commonHeaders = true
   if (typeof v.sign !== 'string') v.sign = ''
+  if (!Array.isArray(v.businessCodes)) v.businessCodes = []
   if (typeof v.convention !== 'string') v.convention = ''
   if (!Array.isArray(v.prefaces)) v.prefaces = []
   if (!Array.isArray(v.revisions)) v.revisions = []
@@ -89,6 +92,31 @@ function fillSign(key) {
   if (String(dl.value.sign || '').trim() && !window.confirm(`当前已有验签说明，确定用「${tpl.label}」覆盖吗？`)) return
   dl.value.sign = tpl.content
   saveWithTip(`已填入验签模板：${tpl.label}`)
+}
+
+// ---------------- 业务错误码 ----------------
+function addCode() {
+  dl.value.businessCodes.push({ code: '', message: '', desc: '' })
+  save()
+}
+function removeCode(i) {
+  dl.value.businessCodes.splice(i, 1)
+  saveWithTip('已删除该错误码')
+}
+async function fillCodes() {
+  try {
+    if (dl.value.businessCodes.length && !window.confirm('当前已有错误码，确定用默认表覆盖吗？')) return
+    dl.value.businessCodes = await DefaultDocBusinessCodes()
+    saveWithTip('已填入默认业务错误码，可按项目实际修改')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+function clearCodes() {
+  if (!dl.value.businessCodes.length) return
+  if (!window.confirm('清空后文档不再输出「附录：业务错误码」，确定吗？')) return
+  dl.value.businessCodes = []
+  saveWithTip('已清空业务错误码')
 }
 
 // ---------------- 修订记录 ----------------
@@ -217,6 +245,23 @@ defineExpose({ preview })
       <el-form-item label="附录状态码">
         <el-switch v-model="dl.statusCodes" @change="save" />
         <span class="dl-hint">附上常用 HTTP 状态码的名称、含义与典型场景</span>
+      </el-form-item>
+
+      <el-form-item label="业务错误码">
+        <div style="width:100%">
+          <div>
+            <el-button size="small" @click="fillCodes">填入默认错误码</el-button>
+            <el-button size="small" @click="addCode">+ 添加</el-button>
+            <el-button size="small" :disabled="!dl.businessCodes.length" @click="clearCodes">清空</el-button>
+            <span class="dl-hint">{{ dl.businessCodes.length }} 条（附录「业务错误码」表格，0 表示成功）</span>
+          </div>
+          <div v-for="(c, i) in dl.businessCodes" :key="i" class="dl-rev">
+            <el-input v-model="c.code" placeholder="40001" style="width:100px" @change="save" />
+            <el-input v-model="c.message" placeholder="参数校验失败" style="width:180px" @change="save" />
+            <el-input v-model="c.desc" placeholder="说明 / 排查建议" style="width:330px" @change="save" />
+            <el-button link type="danger" @click="removeCode(i)">删除</el-button>
+          </div>
+        </div>
       </el-form-item>
 
       <el-form-item label="修订记录">

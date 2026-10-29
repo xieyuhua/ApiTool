@@ -144,6 +144,8 @@ func buildMarkdown(title, rootID string, dirs []model.Directory, apis []model.Ap
 			}
 		case sectionAppendix:
 			mdStatusCodes(&sb, num.section(s.ID, s.Title))
+		case sectionBizCodes:
+			sb.WriteString("## " + num.section(s.ID, s.Title) + "\n\n" + s.Content + "\n")
 		}
 	}
 	return sb.String()

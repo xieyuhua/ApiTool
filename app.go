@@ -339,6 +339,11 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
+// DefaultDocBusinessCodes 返回内置的业务错误码表（附录：业务错误码的初始内容）。
+func (a *App) DefaultDocBusinessCodes() []model.DocCode {
+	return doc.DefaultBusinessCodes()
+}
+
 // DocSignTemplates 返回预置验签模板清单（MD5 排序拼接等），前端下拉选择后填入「加密与验签」。
 func (a *App) DocSignTemplates() []doc.DocSignTemplate {
 	return doc.SignTemplateList()
