@@ -221,7 +221,7 @@ func TestDocPresets(t *testing.T) {
 	// 每个模板都要有标签与描述，且 key 唯一
 	seen := map[string]bool{}
 	for _, p := range list {
-		if p.Key == "" || p.Label == "" || p.Desc == "" || p.Tag == "" {
+		if p.Key == "" || p.Label == "" || p.Desc == "" || p.Tag == "" || len(p.Chips) == 0 {
 			t.Fatalf("模板字段不完整: %+v", p)
 		}
 		if seen[p.Key] {

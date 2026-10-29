@@ -184,27 +184,34 @@ func (n docNumbering) api(id, name string) string {
 
 // DocPreset 一套预置文档结构（只含 Key/Label/Desc，具体配置由 DocPresetLayout 生成）。
 type DocPreset struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Desc  string `json:"desc"`
-	Tag   string `json:"tag"` // 适用场景标签，便于前端分组展示
+	Key   string   `json:"key"`
+	Label string   `json:"label"`
+	Desc  string   `json:"desc"`
+	Tag   string   `json:"tag"`   // 适用场景标签，便于前端分组展示
+	Chips []string `json:"chips"` // 章节构成（封面 / 目录 / 规范…），前端以标签形式展示
 }
 
 // DocPresetList 预置模板清单（供前端「模板库」展示，一键套用）。
 func DocPresetList() []DocPreset {
 	return []DocPreset{
 		{Key: "internal", Label: "内部版", Tag: "推荐",
-			Desc: "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作"},
+			Desc:  "封面 + 修订记录 + 目录 + 文档说明 + 统一规范 + 附录状态码，适合内部研发协作",
+			Chips: []string{"封面", "修订记录", "目录", "编号", "公共描述", "统一规范", "附录"}},
 		{Key: "external", Label: "对外版", Tag: "对外",
-			Desc: "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方"},
+			Desc:  "封面 + 目录 + 统一规范 + 附录状态码（不含修订记录），适合交付客户 / 合作方",
+			Chips: []string{"封面", "目录", "编号", "统一规范", "附录"}},
 		{Key: "rest", Label: "标准 RESTful 版", Tag: "通用",
-			Desc: "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档"},
+			Desc:  "目录 + 统一规范 + 附录状态码，不带封面，适合开放平台 / 网关文档",
+			Chips: []string{"目录", "编号", "统一规范", "附录"}},
 		{Key: "review", Label: "评审版", Tag: "评审",
-			Desc: "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用"},
+			Desc:  "封面 + 修订记录 + 目录 + 评审说明 + 统一规范，供接口评审会使用",
+			Chips: []string{"封面", "修订记录", "目录", "编号", "评审说明", "统一规范"}},
 		{Key: "micro", Label: "微服务版", Tag: "架构",
-			Desc: "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同"},
+			Desc:  "封面 + 目录 + 服务与调用约定 + 统一规范 + 附录状态码，适合多服务协同",
+			Chips: []string{"封面", "目录", "编号", "服务约定", "统一规范", "附录"}},
 		{Key: "minimal", Label: "精简版", Tag: "精简",
-			Desc: "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查"},
+			Desc:  "仅目录 + 接口正文，最快出稿，适合临时交付或内部速查",
+			Chips: []string{"目录", "编号"}},
 	}
 }
 

@@ -738,6 +738,7 @@ export namespace doc {
 	    label: string;
 	    desc: string;
 	    tag: string;
+	    chips: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new DocPreset(source);
@@ -749,6 +750,7 @@ export namespace doc {
 	        this.label = source["label"];
 	        this.desc = source["desc"];
 	        this.tag = source["tag"];
+	        this.chips = source["chips"];
 	    }
 	}
 

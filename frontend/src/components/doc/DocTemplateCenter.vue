@@ -1,20 +1,23 @@
 <script setup>
 // 文档模板（企业级排版）：模板库（预置 + 我的模板）＋ 结构表单。
-// 独立菜单页，便于团队统一维护接口文档的章节结构与规范模板。
+// 独立菜单页，便于团队统一维护接口文档的章节结构与规范模板；支持模板导出/导入 JSON。
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
 } from '../../../wailsjs/go/main/App'
-import { store, saveNow, reloadStore } from '../../store'
+import { store, saveNow, reloadStore, buildDirTree } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
 
 const presets = ref([])
 const applying = ref('')
 const panelRef = ref(null)
+const scopeDirId = ref('')      // 预览用的目录范围（空 = 全部接口）
+const fileInput = ref(null)
 
 const dl = computed(() => store.data.settings.docLayout)
 const myTemplates = computed(() => store.data.settings.docLayoutTemplates || [])
+const dirTree = computed(() => buildDirTree())
 
 // normalize 补齐字段（后端返回的 null 数组转成可用结构）
 function normalize(v) {
@@ -67,8 +70,7 @@ async function applyPreset(p) {
   if (applying.value) return
   applying.value = p.key
   try {
-    const layout = await DocPresetLayout(p.key)
-    await applyLayout(layout, p.label)
+    await applyLayout(await DocPresetLayout(p.key), p.label)
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
@@ -111,6 +113,61 @@ async function removeTemplate(tpl) {
   }
 }
 
+// ---------------- 模板导出 / 导入（JSON，便于团队共享） ----------------
+function exportTemplates() {
+  const payload = {
+    kind: 'apitool-doc-templates',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    templates: [
+      { name: `当前结构-${new Date().toISOString().slice(0, 10)}`, layout: dl.value },
+      ...myTemplates.value.map(t => ({ name: t.name, layout: t.layout })),
+    ],
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `doc-templates-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success(`已导出 ${payload.templates.length} 套模板`)
+}
+
+function pickImport() {
+  fileInput.value?.click()
+}
+
+// parseTemplates 兼容三种文件形态：{templates:[...]} / [...] / 单个 layout 对象
+function parseTemplates(data) {
+  const pick = arr => arr.filter(x => x && x.layout).map(x => ({ name: String(x.name || '导入模板'), layout: x.layout }))
+  if (Array.isArray(data)) return pick(data)
+  if (data && Array.isArray(data.templates)) return pick(data.templates)
+  if (data && (data.toc !== undefined || data.cover !== undefined || data.convention !== undefined)) {
+    return [{ name: '导入模板', layout: data }]
+  }
+  throw new Error('无法识别的模板文件（应为导出的 doc-templates-*.json）')
+}
+
+async function onImportFile(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  try {
+    const items = parseTemplates(JSON.parse(await file.text()))
+    if (!items.length) throw new Error('文件中没有可导入的模板')
+    for (const it of items) {
+      await SaveDocLayoutTemplate(it.name, JSON.stringify(it.layout))
+    }
+    await reloadStore()
+    normalize(dl.value)
+    ElMessage.success(`已导入 ${items.length} 套模板`)
+  } catch (err) {
+    ElMessage.error('导入失败：' + String(err && err.message ? err.message : err))
+  } finally {
+    e.target.value = ''
+  }
+}
+
 function preview() {
   panelRef.value?.preview?.()
 }
@@ -127,7 +184,14 @@ function preview() {
       </div>
 
       <div class="card">
-        <div class="card-title">模板库（一键套用）</div>
+        <div class="card-title">
+          模板库（一键套用）
+          <span class="tpl-ops">
+            <el-button size="small" @click="exportTemplates">⬇ 导出模板</el-button>
+            <el-button size="small" @click="pickImport">⬆ 导入模板</el-button>
+            <input ref="fileInput" type="file" accept="application/json,.json" hidden @change="onImportFile" />
+          </span>
+        </div>
         <div class="tpl-grid">
           <div v-for="p in presets" :key="p.key" class="tpl-card" :class="{ busy: applying === p.key }"
             @click="applyPreset(p)">
@@ -136,6 +200,9 @@ function preview() {
               <el-tag size="small" effect="plain" type="info">{{ p.tag }}</el-tag>
             </div>
             <div class="tpl-desc">{{ p.desc }}</div>
+            <div class="tpl-chips">
+              <el-tag v-for="c in (p.chips || [])" :key="c" size="small" effect="plain" class="tpl-chip">{{ c }}</el-tag>
+            </div>
           </div>
         </div>
       </div>
@@ -153,10 +220,12 @@ function preview() {
         <div class="tpl-hint">最多保存 20 套；同名保存会覆盖旧模板。点击标签即可套用。</div>
       </div>
 
-      <DocLayoutPanel ref="panelRef" :dir-id="''" />
+      <DocLayoutPanel ref="panelRef" :dir-id="scopeDirId" />
 
       <div class="tpl-actions">
-        <el-button type="primary" plain @click="preview">👁 预览整份文档</el-button>
+        <el-tree-select v-model="scopeDirId" :data="dirTree" check-strictly :render-after-expand="false"
+          style="width:260px" placeholder="预览范围（默认全部接口）" default-expand-all clearable />
+        <el-button type="primary" plain style="margin-left:10px" @click="preview">👁 预览整份文档</el-button>
         <span class="tpl-hint" style="margin-left:10px">用当前结构与水印在浏览器打开，Ctrl+P 可看打印分页</span>
       </div>
     </div>
@@ -166,16 +235,19 @@ function preview() {
 <style scoped>
 .tpl-lead { font-size: 13px; color: #4e5969; line-height: 1.9; margin-bottom: 14px; }
 .tpl-current { color: #165dff; margin-top: 4px; }
-.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.tpl-ops { float: right; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .tpl-card { border: 1px solid #e5e6eb; border-radius: 10px; padding: 14px; cursor: pointer; transition: all .15s; background: #fff; }
 .tpl-card:hover { border-color: #165dff; box-shadow: 0 2px 10px rgba(22, 93, 255, .12); }
 .tpl-card.busy { opacity: .5; pointer-events: none; }
 .tpl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tpl-name { font-weight: 600; font-size: 14px; }
 .tpl-desc { font-size: 12px; color: #86909c; line-height: 1.7; }
+.tpl-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tpl-chip { color: #4e5969; }
 .tpl-mine { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tpl-tag { cursor: pointer; }
 .tpl-empty { font-size: 12px; color: #86909c; }
 .tpl-hint { font-size: 12px; color: #86909c; margin-top: 8px; }
-.tpl-actions { display: flex; align-items: center; margin: 4px 0 24px; }
+.tpl-actions { display: flex; align-items: center; margin: 4px 0 24px; flex-wrap: wrap; }
 </style>
