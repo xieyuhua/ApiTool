@@ -35,6 +35,16 @@ type docSection struct {
 	Revisions []model.DocRevision
 }
 
+// EffectiveDocLayout 返回实际生效的文档结构：项目级覆盖优先，其次用「文档模板」的全局配置。
+func EffectiveDocLayout(data model.AppData, proj model.Project) model.DocLayout {
+	if proj.ID != "" {
+		if l, ok := data.Settings.ProjectDocLayouts[proj.ID]; ok {
+			return l
+		}
+	}
+	return data.Settings.DocLayout
+}
+
 // normalizeDocLayout 补齐排版配置的默认值：封面标题/日期为空时用文档标题与当天日期；
 // 去掉标题为空的前言章节，避免出现空章节。
 func normalizeDocLayout(layout model.DocLayout, docTitle string, now time.Time) model.DocLayout {

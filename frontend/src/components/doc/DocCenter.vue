@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
-import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab } from '../../store'
+import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab, currentProject } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 import DocWatermarkPanel from './DocWatermarkPanel.vue'
 
@@ -48,7 +48,9 @@ async function doExport(format) {
 
 // 文档结构摘要（配置入口在「文档模板」菜单）
 const layoutSummary = computed(() => {
-  const v = store.data.settings.docLayout || {}
+  // 项目级覆盖优先，其次用全局「文档模板」配置
+  const pid = currentProject()?.id
+  const v = (pid && store.data.settings.projectDocLayouts?.[pid]) || store.data.settings.docLayout || {}
   const parts = []
   if (v.cover?.enabled) parts.push('封面')
   if (v.revisions?.length) parts.push(`修订记录 ${v.revisions.length} 条`)
@@ -198,7 +200,9 @@ const formats = [
           Word / PDF / HTML / Markdown 共用同一套配置。
         </div>
         <div class="layout-now">
-          <span>当前结构：<b>{{ layoutSummary }}</b></span>
+          <span>当前结构：<b>{{ layoutSummary }}</b>
+            <span style="color:#86909c">（{{ currentProject()?.id && store.data.settings.projectDocLayouts?.[currentProject().id] ? '项目级覆盖' : '全局配置' }}）</span>
+          </span>
           <el-button size="small" type="primary" plain @click="goTemplates">📐 去配置文档模板</el-button>
         </div>
       </div>

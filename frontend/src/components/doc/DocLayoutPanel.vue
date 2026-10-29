@@ -4,14 +4,16 @@
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DefaultDocConvention, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
-import { store, saveNow } from '../../store'
+import { saveNow } from '../../store'
 
 const props = defineProps({
+  // 要编辑的文档结构对象：全局配置或项目级覆盖（由「文档模板」页面决定）
+  layout: { type: Object, required: true },
   dirId: { type: String, default: '' },
   apiId: { type: String, default: '' },
 })
 
-const dl = computed(() => store.data.settings.docLayout)
+const dl = computed(() => props.layout)
 const previewing = ref(false)
 
 // normalize 补齐字段：老数据或后端返回的 null 数组都要转成可用结构

@@ -1,12 +1,12 @@
 <script setup>
 // 文档模板（企业级排版）：模板库（预置 + 我的模板）＋ 结构表单。
 // 独立菜单页，便于团队统一维护接口文档的章节结构与规范模板；支持模板导出/导入 JSON。
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
 } from '../../../wailsjs/go/main/App'
-import { store, saveNow, reloadStore, buildDirTree } from '../../store'
+import { store, saveNow, reloadStore, buildDirTree, currentProject } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
 
 const presets = ref([])
@@ -15,7 +15,16 @@ const panelRef = ref(null)
 const scopeDirId = ref('')      // 预览用的目录范围（空 = 全部接口）
 const fileInput = ref(null)
 
-const dl = computed(() => store.data.settings.docLayout)
+// 作用范围：global 全局配置（默认，所有项目共用）；project 当前项目覆盖
+const scope = ref('global')
+const project = computed(() => currentProject())
+const projectOverride = computed(() => {
+  const id = project.value?.id
+  if (!id) return null
+  return store.data.settings.projectDocLayouts?.[id] || null
+})
+const globalLayout = computed(() => store.data.settings.docLayout)
+const dl = computed(() => (scope.value === 'project' && projectOverride.value) ? projectOverride.value : globalLayout.value)
 const myTemplates = computed(() => store.data.settings.docLayoutTemplates || [])
 const dirTree = computed(() => buildDirTree())
 
@@ -33,6 +42,27 @@ function normalize(v) {
   if (!Array.isArray(v.prefaces)) v.prefaces = []
   if (!Array.isArray(v.revisions)) v.revisions = []
   return v
+}
+
+// 切到「当前项目」时，若项目尚无覆盖，则复制一份全局配置作为起点
+watch(scope, async (v) => {
+  if (v !== 'project') return
+  if (!project.value) { ElMessage.warning('没有可用的项目'); scope.value = 'global'; return }
+  if (projectOverride.value) return
+  if (!store.data.settings.projectDocLayouts) store.data.settings.projectDocLayouts = {}
+  store.data.settings.projectDocLayouts[project.value.id] = JSON.parse(JSON.stringify(globalLayout.value))
+  normalize(store.data.settings.projectDocLayouts[project.value.id])
+  await saveNow()
+})
+
+// 清除项目级覆盖，恢复使用全局配置
+async function clearProjectOverride() {
+  const id = project.value?.id
+  if (!id || !projectOverride.value) return
+  if (!window.confirm('清除后该项目将改用「全局配置」的文档结构，确定吗？')) return
+  delete store.data.settings.projectDocLayouts[id]
+  await saveNow()
+  ElMessage.success('已恢复为全局配置')
 }
 
 onMounted(async () => {
@@ -180,7 +210,16 @@ function preview() {
       <div class="tpl-lead">
         统一维护导出文档的章节结构（封面 / 修订记录 / 目录 / 公共描述 / 统一定义规范 / 附录）与规范模板，
         文档中心导出 Word / PDF / HTML / Markdown 时都会套用这里的配置。
-        <div class="tpl-current">当前结构：<b>{{ summary }}</b></div>
+        <div class="tpl-scope">
+          <span class="tpl-scope-label">配置作用范围：</span>
+          <el-radio-group v-model="scope" size="small">
+            <el-radio-button value="global">全局配置（所有项目）</el-radio-button>
+            <el-radio-button value="project">仅当前项目（{{ project?.name || '无项目' }}）</el-radio-button>
+          </el-radio-group>
+          <el-button v-if="scope === 'project' && projectOverride" size="small" link type="primary"
+            style="margin-left:8px" @click="clearProjectOverride">清除项目覆盖，恢复全局</el-button>
+        </div>
+        <div class="tpl-current">当前结构：<b>{{ summary }}</b>（{{ scope === 'project' ? '项目级覆盖' : '全局配置' }}）</div>
       </div>
 
       <div class="card">
@@ -220,7 +259,7 @@ function preview() {
         <div class="tpl-hint">最多保存 20 套；同名保存会覆盖旧模板。点击标签即可套用。</div>
       </div>
 
-      <DocLayoutPanel ref="panelRef" :dir-id="scopeDirId" />
+      <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" />
 
       <div class="tpl-actions">
         <el-tree-select v-model="scopeDirId" :data="dirTree" check-strictly :render-after-expand="false"
@@ -234,6 +273,8 @@ function preview() {
 
 <style scoped>
 .tpl-lead { font-size: 13px; color: #4e5969; line-height: 1.9; margin-bottom: 14px; }
+.tpl-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+.tpl-scope-label { font-size: 13px; color: #4e5969; }
 .tpl-current { color: #165dff; margin-top: 4px; }
 .tpl-ops { float: right; }
 .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }

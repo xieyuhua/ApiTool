@@ -246,6 +246,8 @@ type Settings struct {
 	DocLayout DocLayout `json:"docLayout"`
 	// 用户保存的自定义文档结构模板（一键套用）
 	DocLayoutTemplates []DocLayoutTemplate `json:"docLayoutTemplates"`
+	// 项目级文档结构覆盖：key 为项目 ID，未命中表示沿用全局「文档模板」配置
+	ProjectDocLayouts map[string]DocLayout `json:"projectDocLayouts,omitempty"`
 	// 分享文档是否套用「文档结构」与「导出水印」
 	ShareDocLayout    bool `json:"shareDocLayout"`
 	ShareDocWatermark bool `json:"shareDocWatermark"`

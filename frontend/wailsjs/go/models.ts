@@ -1523,6 +1523,7 @@ export namespace model {
 	    watermark: DocWatermark;
 	    docLayout: DocLayout;
 	    docLayoutTemplates: DocLayoutTemplate[];
+	    projectDocLayouts?: Record<string, DocLayout>;
 	    shareDocLayout: boolean;
 	    shareDocWatermark: boolean;
 	
@@ -1551,6 +1552,7 @@ export namespace model {
 	        this.watermark = this.convertValues(source["watermark"], DocWatermark);
 	        this.docLayout = this.convertValues(source["docLayout"], DocLayout);
 	        this.docLayoutTemplates = this.convertValues(source["docLayoutTemplates"], DocLayoutTemplate);
+	        this.projectDocLayouts = this.convertValues(source["projectDocLayouts"], DocLayout, true);
 	        this.shareDocLayout = source["shareDocLayout"];
 	        this.shareDocWatermark = source["shareDocWatermark"];
 	    }

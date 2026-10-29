@@ -185,7 +185,7 @@ func shareLayout(data model.AppData) (model.DocLayout, model.DocWatermark, model
 	var layout model.DocLayout
 	var wm model.DocWatermark
 	if data.Settings.ShareDocLayout {
-		layout = data.Settings.DocLayout
+		layout = doc.EffectiveDocLayout(data, proj)
 	}
 	if data.Settings.ShareDocWatermark {
 		wm = doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())

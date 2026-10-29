@@ -436,6 +436,7 @@ async function loadInto() {
   if (typeof dl.statusCodes !== 'boolean') dl.statusCodes = false
   if (!Array.isArray(dl.revisions)) dl.revisions = []
   if (!Array.isArray(d.settings.docLayoutTemplates)) d.settings.docLayoutTemplates = []
+  if (!d.settings.projectDocLayouts || typeof d.settings.projectDocLayouts !== 'object') d.settings.projectDocLayouts = {}
   if (typeof d.settings.shareDocLayout !== 'boolean') d.settings.shareDocLayout = false
   if (typeof d.settings.shareDocWatermark !== 'boolean') d.settings.shareDocWatermark = false
   d.plugins ||= { connections: [] }

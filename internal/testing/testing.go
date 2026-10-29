@@ -964,13 +964,13 @@ func (e *Engine) ExportTestReport(reportJSON string, format string) (string, err
 	// 需要水印的格式：水印文字中的 {{date}}/{{project}} 等占位符在此展开
 	if format == "pdf" || format == "word" || format == "docx" {
 		data := e.host.ReadData()
-		project := ""
+		proj := model.Project{}
 		if idx := store.ActiveProjectIndex(data); idx >= 0 {
-			project = data.Projects[idx].Name
+			proj = data.Projects[idx]
 		}
-		wm := doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), project, time.Now())
-		// 报告沿用「文档结构」里的封面配置（其余章节不适用于报告）
-		cover := data.Settings.DocLayout.Cover
+		wm := doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
+		// 报告沿用「文档结构」里的封面配置（项目级覆盖优先，其余章节不适用于报告）
+		cover := doc.EffectiveDocLayout(data, proj).Cover
 		if format == "pdf" {
 			if err := doc.WriteHTMLToPDF(doc.BuildTestReportHTMLForExportWithCover(r, wm, cover), path); err != nil {
 				return "", err

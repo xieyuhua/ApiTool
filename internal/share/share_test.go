@@ -57,4 +57,23 @@ func TestBuildHTMLByAPIShareOptions(t *testing.T) {
 			t.Fatalf("分享 HTML 缺少内容 %q", want)
 		}
 	}
+
+	// 项目级覆盖优先：该项目改用「无封面 + 附录」的结构
+	data = st.GetData()
+	data.Settings.ProjectDocLayouts = map[string]model.DocLayout{
+		data.Projects[0].ID: {Toc: true, StatusCodes: true},
+	}
+	if err := st.SaveData(data); err != nil {
+		t.Fatalf("保存项目级结构失败: %v", err)
+	}
+	proj, err := BuildHTMLByAPI(st, "", "a1")
+	if err != nil {
+		t.Fatalf("项目级结构的分享 HTML 构建失败: %v", err)
+	}
+	if strings.Contains(proj, `id="cover"`) {
+		t.Fatal("项目级结构未覆盖封面配置")
+	}
+	if !strings.Contains(proj, "附录：HTTP 状态码") {
+		t.Fatal("项目级结构未生效（缺附录状态码）")
+	}
 }

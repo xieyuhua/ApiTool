@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"apitool/internal/model"
+	"apitool/internal/store"
 )
 
 // fixedTime 让章节顺序断言不受当前时间影响。
@@ -299,6 +300,65 @@ func TestDocPresetsRender(t *testing.T) {
 		if layout.Toc && !strings.Contains(parts["word/document.xml"], "TOC ") {
 			t.Fatalf("[%s] DOCX 缺少目录域", p.Key)
 		}
+	}
+}
+
+// TestEffectiveDocLayout 项目级覆盖优先于全局配置。
+func TestEffectiveDocLayout(t *testing.T) {
+	data := model.AppData{Settings: model.Settings{DocLayout: model.DocLayout{Toc: true}}}
+	proj := model.Project{ID: "p1", Name: "订单中心"}
+	if got := EffectiveDocLayout(data, proj); !got.Toc || got.Numbering || got.StatusCodes {
+		t.Fatalf("无项目覆盖时应使用全局配置: %+v", got)
+	}
+	data.Settings.ProjectDocLayouts = map[string]model.DocLayout{
+		proj.ID: {Numbering: true, StatusCodes: true},
+	}
+	got := EffectiveDocLayout(data, proj)
+	if !got.Numbering || !got.StatusCodes || got.Toc {
+		t.Fatalf("项目覆盖未生效: %+v", got)
+	}
+	// 其他项目仍使用全局配置
+	if other := EffectiveDocLayout(data, model.Project{ID: "other"}); !other.Toc || other.StatusCodes {
+		t.Fatalf("其他项目不应受影响: %+v", other)
+	}
+}
+
+// TestLoadDocScopeUsesProjectLayout 导出范围解析时，项目级文档结构优先。
+func TestLoadDocScopeUsesProjectLayout(t *testing.T) {
+	st := store.New(t.TempDir(), "test", "")
+	t.Cleanup(func() { _ = st.Close() })
+
+	_, _, _, apis, _ := sampleScope()
+	data := st.GetData()
+	data.Projects[0].Apis = apis
+	data.Settings.DocLayout = model.DocLayout{Toc: true}
+	data.Settings.ProjectDocLayouts = map[string]model.DocLayout{
+		data.Projects[0].ID: {Numbering: true, StatusCodes: true},
+	}
+	if err := st.SaveData(data); err != nil {
+		t.Fatalf("保存测试数据失败: %v", err)
+	}
+
+	scope, err := loadDocScope(st, "", "")
+	if err != nil {
+		t.Fatalf("loadDocScope 失败: %v", err)
+	}
+	if !scope.Layout.Numbering || !scope.Layout.StatusCodes || scope.Layout.Toc {
+		t.Fatalf("导出未使用项目级结构: %+v", scope.Layout)
+	}
+
+	// 清除覆盖后回落到全局配置
+	data = st.GetData()
+	data.Settings.ProjectDocLayouts = nil
+	if err := st.SaveData(data); err != nil {
+		t.Fatalf("保存测试数据失败: %v", err)
+	}
+	scope, err = loadDocScope(st, "", "")
+	if err != nil {
+		t.Fatalf("loadDocScope 失败: %v", err)
+	}
+	if !scope.Layout.Toc || scope.Layout.StatusCodes {
+		t.Fatalf("清除覆盖后未回落全局: %+v", scope.Layout)
 	}
 }
 

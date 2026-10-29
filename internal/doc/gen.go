@@ -102,7 +102,7 @@ func loadDocScope(s *store.Store, dirID, apiID string) (docScopeData, error) {
 		Common:  project.Common,
 		Watermark: ExpandWatermark(
 			NormalizeWatermark(data.Settings.Watermark), project.Name, time.Now()),
-		Layout: data.Settings.DocLayout,
+		Layout: EffectiveDocLayout(data, project),
 	}
 	if apiID == "" {
 		scope.RootID = dirID
