@@ -418,26 +418,6 @@ func mdCell(s string) string {
 	return s
 }
 
-// DefaultSignTemplate 内置的「加密与验签」说明模板（HMAC-SHA256 签名 + 可选报文加密）。
-func DefaultSignTemplate() string { return defaultSignTemplate }
-
-const defaultSignTemplate = "#### 1. 请求签名\n" +
-	"- 待签名字符串：`HTTPMethod` + `\\n` + `Path` + `\\n` + 按 key 升序拼接的 query + `\\n` + `X-Timestamp` + `\\n` + `X-Nonce`\n" +
-	"- 算法：`HMAC-SHA256`，密钥为平台分配的 `appSecret`，输出**大写十六进制**\n" +
-	"- 需携带的请求头：`X-App-Id`（应用标识）、`X-Timestamp`（毫秒时间戳）、`X-Nonce`（随机串）、`X-Sign`（签名值）\n" +
-	"- 防重放：时间戳与服务端相差超过 5 分钟即拒绝；同一 `X-Nonce` 在 5 分钟内不可重复使用\n\n" +
-	"```text\n" +
-	"Method: POST\nPath: /user-center/users\nQuery: page=1&size=20\n" +
-	"Timestamp: 1730000000000\nNonce: 8f2c1e\nSign: 9C1B7F...\n" +
-	"```\n\n" +
-	"#### 2. 报文加密（如需）\n" +
-	"- 请求体整体加密：`AES-128-CBC`，`key` 取 `appSecret` 前 16 字节，`iv` 随机 16 字节并以 `X-Iv` 传递\n" +
-	"- 加密后请求体形如 `{\"encrypted\": true, \"data\": \"<base64>\"}`，服务端解密后再解析\n" +
-	"- 响应加密同上，客户端先解密再按业务结构解析\n\n" +
-	"#### 3. 参数校验约定\n" +
-	"- 所有金额单位为「分」；时间统一 `yyyy-MM-dd HH:mm:ss`（东八区）\n" +
-	"- 签名失败统一返回 HTTP 200 + 业务码 `10003`；时间戳过期返回 `10004`\n"
-
 const defaultConventionTemplate = `#### 1. 命名与路径
 - 路径全部小写，单词间用短横线：` + "`/user-center/users/{id}`" + `
 - 资源名用复数；动作由 HTTP 方法表达，不写进路径（避免 ` + "`/getUser`" + `）

@@ -3,7 +3,7 @@
 // 模板库（预置 + 我的模板）在「文档模板」页面维护，本组件只负责结构本身。
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DefaultDocConvention, DefaultDocSign, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
+import { DefaultDocConvention, DocSignTemplates, PreviewDocWatermark } from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
 const props = defineProps({
@@ -15,6 +15,7 @@ const props = defineProps({
 
 const dl = computed(() => props.layout)
 const previewing = ref(false)
+const signTemplates = ref([]) // 后端返回的预置验签模板清单
 
 // normalize 补齐字段：老数据或后端返回的 null 数组都要转成可用结构
 function normalize(v) {
@@ -35,7 +36,10 @@ function normalize(v) {
   return v
 }
 
-onMounted(() => normalize(dl.value))
+onMounted(async () => {
+  normalize(dl.value)
+  try { signTemplates.value = (await DocSignTemplates()) || [] } catch { signTemplates.value = [] }
+})
 
 async function save() {
   try {
@@ -78,14 +82,13 @@ async function fillConvention() {
 }
 
 // ---------------- 加密与验签 ----------------
-async function fillSign() {
-  try {
-    if (String(dl.value.sign || '').trim() && !window.confirm('当前已有验签说明，确定用默认模板覆盖吗？')) return
-    dl.value.sign = await DefaultDocSign()
-    saveWithTip('已填入默认验签模板，可按实际算法修改')
-  } catch (e) {
-    ElMessage.error(String(e))
-  }
+// 按所选模板填入（默认 MD5 参数排序拼接，含示例代码与错误码）
+function fillSign(key) {
+  const tpl = signTemplates.value.find(t => t.key === key)
+  if (!tpl) return
+  if (String(dl.value.sign || '').trim() && !window.confirm(`当前已有验签说明，确定用「${tpl.label}」覆盖吗？`)) return
+  dl.value.sign = tpl.content
+  saveWithTip(`已填入验签模板：${tpl.label}`)
 }
 
 // ---------------- 修订记录 ----------------
@@ -167,8 +170,20 @@ defineExpose({ preview })
       <el-form-item label="加密与验签">
         <div style="width:100%">
           <div style="margin-bottom:6px">
-            <el-button size="small" @click="fillSign">填入默认验签模板</el-button>
-            <span class="dl-hint">签名算法、请求头（X-Sign / X-Timestamp / X-Nonce）、防重放、报文加密</span>
+            <el-dropdown trigger="click" @command="fillSign">
+              <el-button size="small">填入验签模板 ▾</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="t in signTemplates" :key="t.key" :command="t.key">
+                    <div class="sign-item">
+                      <b>{{ t.label }}</b>
+                      <span>{{ t.desc }}</span>
+                    </div>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <span class="dl-hint">签名规则 + 示例代码（Java / Go / 前端）+ 验签错误码，填入后可自行修改</span>
           </div>
           <el-input v-model="dl.sign" type="textarea" :rows="6" class="dl-md"
             placeholder="留空则不输出该章节；可点「填入默认验签模板」后修改" @change="save" />
@@ -233,5 +248,7 @@ defineExpose({ preview })
 .dl-chapter { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .dl-chapter :deep(.el-input) { align-self: flex-start; }
 .dl-md :deep(textarea) { font-family: Consolas, 'Courier New', monospace; font-size: 12.5px; }
+.sign-item { display: flex; flex-direction: column; line-height: 1.5; }
+.sign-item span { font-size: 11px; color: #86909c; }
 .dl-rev { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 </style>

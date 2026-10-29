@@ -424,7 +424,8 @@ func TestEnrichDocLayout(t *testing.T) {
 	}
 
 	signText := layout.Prefaces[2].Content
-	for _, want := range []string{"HMAC-SHA256", "X-Timestamp", "X-Nonce", "防重放", "AES-128-CBC"} {
+	for _, want := range []string{"ASCII", "MD5", "32 位大写", "&key=appSecret", "X-Sign", "X-Timestamp", "X-Nonce",
+		"示例代码", "10002", "签名不匹配", "nonce 重复", "```java", "```go", "```javascript"} {
 		if !strings.Contains(signText, want) {
 			t.Fatalf("加密验签章节缺少 %q", want)
 		}
@@ -460,6 +461,30 @@ func TestDocExportIsMonochrome(t *testing.T) {
 		if strings.Contains(styles, bad) {
 			t.Fatalf("Word 样式仍含彩色 %s", bad)
 		}
+	}
+}
+
+// TestSignTemplates 预置验签模板：清单可用、内容包含规则/示例/代码/错误码。
+func TestSignTemplates(t *testing.T) {
+	list := SignTemplateList()
+	if len(list) == 0 {
+		t.Fatal("验签模板清单为空")
+	}
+	seen := map[string]bool{}
+	for _, tpl := range list {
+		if tpl.Key == "" || tpl.Label == "" || tpl.Desc == "" || tpl.Content == "" {
+			t.Fatalf("验签模板字段不完整: %+v", tpl)
+		}
+		if seen[tpl.Key] {
+			t.Fatalf("验签模板 key 重复: %s", tpl.Key)
+		}
+		seen[tpl.Key] = true
+	}
+	if list[0].Content != DefaultSignTemplate() {
+		t.Fatal("默认验签模板应为清单首项")
+	}
+	if strings.Contains(DefaultSignTemplate(), "§") {
+		t.Fatal("验签模板中的占位符未还原为反引号")
 	}
 }
 

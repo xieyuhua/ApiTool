@@ -339,7 +339,12 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
-// DefaultDocSign 返回内置的「加密与验签」说明模板（签名算法 / 请求头 / 防重放 / 报文加密）。
+// DocSignTemplates 返回预置验签模板清单（MD5 排序拼接等），前端下拉选择后填入「加密与验签」。
+func (a *App) DocSignTemplates() []doc.DocSignTemplate {
+	return doc.SignTemplateList()
+}
+
+// DefaultDocSign 返回默认的「加密与验签」说明模板（MD5 参数排序拼接）。
 func (a *App) DefaultDocSign() string {
 	return doc.DefaultSignTemplate()
 }

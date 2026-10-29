@@ -89,6 +89,8 @@ export function DocPresetLayout(arg1:string):Promise<model.DocLayout>;
 
 export function DocPresets():Promise<Array<doc.DocPreset>>;
 
+export function DocSignTemplates():Promise<Array<doc.DocSignTemplate>>;
+
 export function Emit(arg1:string,arg2:Array<any>):Promise<void>;
 
 export function ExportAgentSession(arg1:string,arg2:string):Promise<string>;

@@ -146,6 +146,10 @@ export function DocPresets() {
   return window['go']['main']['App']['DocPresets']();
 }
 
+export function DocSignTemplates() {
+  return window['go']['main']['App']['DocSignTemplates']();
+}
+
 export function Emit(arg1, arg2) {
   return window['go']['main']['App']['Emit'](arg1, arg2);
 }

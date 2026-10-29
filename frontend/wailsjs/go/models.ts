@@ -772,6 +772,24 @@ export namespace doc {
 	        this.chips = source["chips"];
 	    }
 	}
+	export class DocSignTemplate {
+	    key: string;
+	    label: string;
+	    desc: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocSignTemplate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.desc = source["desc"];
+	        this.content = source["content"];
+	    }
+	}
 
 }
 
