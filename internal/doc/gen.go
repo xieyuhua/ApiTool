@@ -241,8 +241,8 @@ func PreviewHTML(s *store.Store, dirID string, apiID string, layoutJSON string) 
 		// 前端传入的是原始结构（未注入环境/公共头/验签等自动章节），这里按项目数据补齐
 		layout = EnrichDocLayout(l, proj.Environments, proj.Common)
 	}
-	return BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis,
-		scope.Common, scope.Watermark, layout), nil
+	return withPreviewScript(BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis,
+		scope.Common, scope.Watermark, layout)), nil
 }
 
 // PreviewTemplateHTML 生成「模板结构预览」HTML（不含具体接口），供前端弹窗内嵌展示。
@@ -279,7 +279,7 @@ func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, err
 	if strings.TrimSpace(name) == "" {
 		name = "current"
 	}
-	return BuildTemplatePreviewHTML(title, proj.Common, wm, layout), name, nil
+	return withPreviewScript(BuildTemplatePreviewHTML(title, proj.Common, wm, layout)), name, nil
 }
 
 // ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）

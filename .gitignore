@@ -11,3 +11,6 @@ wails_build.log
 build_frontend.log
 build_err.txt
 vet.txt
+
+# 本地临时导出/调试产物
+_tmp_out/

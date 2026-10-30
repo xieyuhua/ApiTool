@@ -131,6 +131,14 @@ const previewMode = ref('template') // template | full
 let previewSeq = 0
 const previewKey = ref(0)   // 每次预览换 key，强制 iframe 重新挂载
 
+// withTimeout 给预览 RPC 加超时，避免界面一直停在「正在加载」
+function withTimeout(promise, ms = 20000, tip = '加载超时') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(tip)), ms)),
+  ])
+}
+
 // openPreview 拉取「模板结构」预览 HTML 并在弹窗内用 iframe 展示（不含具体接口）
 async function openPreview(layout, title) {
   previewKey.value = ++previewSeq
@@ -140,7 +148,9 @@ async function openPreview(layout, title) {
   previewVisible.value = true
   previewLoading.value = true
   try {
-    const html = await PreviewDocTemplateHTML(JSON.stringify({ ...layout, name: title }))
+    const html = await withTimeout(
+      PreviewDocTemplateHTML(JSON.stringify({ ...layout, name: title })),
+      20000, '生成模板预览超时，请减少章节内容后重试')
     previewHTML.value = html || ''
     if (!html) ElMessage.warning('预览内容为空')
   } catch (e) {
@@ -152,6 +162,12 @@ async function openPreview(layout, title) {
 }
 
 // openFullPreview 弹窗预览「整份文档」：含所选范围内的全部接口（按当前模板与水印）
+function closePreview() {
+  previewVisible.value = false
+  previewLoading.value = false
+  previewHTML.value = ''
+}
+
 async function previewFullDoc() {
   if (previewing.value) return
   previewKey.value = ++previewSeq
@@ -162,9 +178,11 @@ async function previewFullDoc() {
   previewVisible.value = true
   previewLoading.value = true
   try {
-    // 先把表单改动落库，再把「当前编辑中的结构」一并传给后端，确保预览就是所选模板
-    await saveNow()
-    const html = await PreviewDocHTML(scopeDirId.value || '', '', JSON.stringify(dl.value))
+    // 结构以「当前编辑中的」为准直接传给后端；落库异步进行，避免大项目保存阻塞预览
+    saveNow().catch(() => {})
+    const html = await withTimeout(
+      PreviewDocHTML(scopeDirId.value || '', '', JSON.stringify(dl.value)),
+      30000, '生成文档预览超时：接口数量较多时可先选一个较小的目录范围再预览')
     previewHTML.value = html || ''
     if (!html) ElMessage.warning('预览内容为空（所选范围内可能没有接口）')
   } catch (e) {
@@ -595,7 +613,7 @@ function preview() {
       <DocWatermarkPanel :dir-id="scopeDirId" />
 
       <el-dialog v-model="previewVisible" :title="previewTitle" width="1080px" top="4vh" destroy-on-close>
-        <div v-loading="previewLoading" element-loading-text="正在生成预览…" class="preview-wrap">
+        <div v-loading="previewLoading && !previewHTML" element-loading-text="正在生成预览…" class="preview-wrap">
           <iframe v-if="previewHTML" :key="previewKey" class="preview-frame" :srcdoc="previewHTML" />
         </div>
         <template #footer>
@@ -604,7 +622,7 @@ function preview() {
               ? '预览包含所选范围内的全部接口，与导出的 HTML / PDF 版式一致'
               : '预览只渲染章节结构，不含具体接口；实际导出会输出所选范围内的全部接口' }}
           </span>
-          <el-button type="primary" @click="previewVisible = false">关闭</el-button>
+          <el-button type="primary" @click="closePreview">关闭</el-button>
         </template>
       </el-dialog>
 

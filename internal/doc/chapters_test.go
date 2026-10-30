@@ -240,7 +240,8 @@ func TestPreviewHTMLUsesPassedLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("预览失败: %v", err)
 	}
-	for _, want := range []string{"我选的模板", "附录：HTTP 状态码", "接入地址（环境）", `id="api-a1"`} {
+	for _, want := range []string{"我选的模板", "附录：HTTP 状态码", "接入地址（环境）", `id="api-a1"`,
+		"scrollIntoView", "preventDefault"} { // 预览 HTML 注入锚点跳转脚本，弹窗里点目录才能跳
 		if !strings.Contains(html, want) {
 			t.Fatalf("预览未使用传入的结构，缺少 %q", want)
 		}

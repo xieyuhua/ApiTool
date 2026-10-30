@@ -233,6 +233,25 @@ func BuildHTMLForExportWithLayout(title, rootID string, dirs []model.Directory, 
 	return buildHTML(title, rootID, dirs, apis, common, wm, layout)
 }
 
+// previewAnchorScript 让弹窗（iframe / srcdoc）里的目录点击一定生效：
+// 拦截 #anchor 点击并 scrollIntoView，避免 about:srcdoc 下 fragment 导航失效。
+const previewAnchorScript = `<script>(function(){` +
+	`document.addEventListener('click',function(e){` +
+	`var t=e.target;while(t&&t.tagName!=='A'){t=t.parentElement;}` +
+	`if(!t)return;var h=t.getAttribute('href')||'';if(h.charAt(0)!=='#')return;` +
+	`var el=h.length>1?document.getElementById(h.slice(1)):null;if(!el)return;` +
+	`e.preventDefault();el.scrollIntoView({behavior:'smooth',block:'start'});` +
+	`});` +
+	`})();</script>`
+
+// withPreviewScript 在 </body> 前注入锚点跳转脚本（仅预览用，导出文件不受影响）。
+func withPreviewScript(html string) string {
+	if i := strings.LastIndex(html, "</body>"); i >= 0 {
+		return html[:i] + previewAnchorScript + html[i:]
+	}
+	return html + previewAnchorScript
+}
+
 // BuildTemplatePreviewHTML 生成「模板结构预览」HTML：只渲染章节结构（封面 / 目录 / 前言 / 规范 / 附录…），
 // 接口正文用占位说明代替，便于快速核对模板版式而不夹带任何具体接口。
 func BuildTemplatePreviewHTML(title string, common model.CommonParams, wm model.DocWatermark, layout model.DocLayout) string {
