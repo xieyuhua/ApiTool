@@ -4,7 +4,6 @@ package doc
 
 import (
 	"html"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -88,83 +87,9 @@ const (
 	labelRespFields    = "响应参数"
 	labelReqExample    = "请求示例"
 	labelRespExample   = "响应示例"
-	labelCurlSample    = "调用示例（cURL）"
 	// labelAPISection 企业文档中「接口正文」章节标题（Markdown / HTML / DOCX 一致）
 	labelAPISection = "接口正文"
 )
-
-// curlSample 依据接口定义生成可直接复制的 cURL 命令（含公共请求头与公共参数）。
-// 只做「所见即所得」的拼装：变量占位符（如 {{token}}）保持原样，由调用方替换。
-func curlSample(api model.ApiInfo, common model.CommonParams) string {
-	if strings.TrimSpace(api.URL) == "" {
-		return ""
-	}
-	method := strings.ToUpper(strings.TrimSpace(api.Method))
-	if method == "" {
-		method = "GET"
-	}
-	// 查询参数：接口自身 + 公共参数（接口同名优先）
-	var qs []string
-	seen := map[string]bool{}
-	addQuery := func(kvs []model.KV) {
-		for _, kv := range kvs {
-			key := strings.TrimSpace(kv.Key)
-			if key == "" || seen[key] {
-				continue
-			}
-			seen[key] = true
-			val := strings.TrimSpace(kv.Value)
-			if val == "" {
-				qs = append(qs, url.QueryEscape(key)+"={{ "+key+" }}")
-				continue
-			}
-			qs = append(qs, url.QueryEscape(key)+"="+url.QueryEscape(val))
-		}
-	}
-	addQuery(api.Query)
-	addQuery(common.Query)
-
-	u := strings.TrimSpace(api.URL)
-	if len(qs) > 0 {
-		sep := "?"
-		if strings.Contains(u, "?") {
-			sep = "&"
-		}
-		u += sep + strings.Join(qs, "&")
-	}
-
-	var sb strings.Builder
-	sb.WriteString("curl -X " + method + " '" + u + "'")
-	headers := make([][2]string, 0, len(api.Headers)+len(common.Headers)+2)
-	if ct := contentTypeOf(api); ct != "" {
-		headers = append(headers, [2]string{"Content-Type", ct})
-	}
-	seenH := map[string]bool{"content-type": true}
-	addHeaders := func(kvs []model.KV) {
-		for _, kv := range kvs {
-			key := strings.TrimSpace(kv.Key)
-			if key == "" || seenH[strings.ToLower(key)] {
-				continue
-			}
-			seenH[strings.ToLower(key)] = true
-			headers = append(headers, [2]string{key, strings.TrimSpace(kv.Value)})
-		}
-	}
-	addHeaders(api.Headers)
-	addHeaders(common.Headers)
-	for _, h := range headers {
-		val := h[1]
-		if val == "" {
-			val = "{{ " + h[0] + " }}"
-		}
-		sb.WriteString(" \\\n  -H '" + h[0] + ": " + val + "'")
-	}
-	if api.BodyType == "json" && strings.TrimSpace(api.Body) != "" {
-		body := strings.ReplaceAll(api.Body, "'", "'\\''")
-		sb.WriteString(" \\\n  -d '" + body + "'")
-	}
-	return sb.String()
-}
 
 // contentTypeOf 返回接口实际使用的 Content-Type。
 func contentTypeOf(api model.ApiInfo) string {

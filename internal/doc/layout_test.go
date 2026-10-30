@@ -614,7 +614,6 @@ func TestEnterpriseChapters(t *testing.T) {
 	for _, want := range []string{
 		"接入指引（快速开始）", "术语表", "附录：数据字典", "技术支持与联系",
 		"appSecret", "gender", "api@example.com", "工作日 2 小时内响应",
-		"调用示例（cURL）", "curl -X GET", "curl -X POST",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("HTML 缺少 %q", want)
@@ -628,7 +627,7 @@ func TestEnterpriseChapters(t *testing.T) {
 	}
 
 	md := buildMarkdown(title, rootID, dirs, apis, common, layout)
-	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系", "```bash", "curl -X GET"} {
+	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("Markdown 缺少 %q", want)
 		}
@@ -636,7 +635,7 @@ func TestEnterpriseChapters(t *testing.T) {
 
 	parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
 	doc := parts["word/document.xml"]
-	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系", "curl -X GET"} {
+	for _, want := range []string{"术语表", "附录：数据字典", "技术支持与联系"} {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("Word 缺少 %q", want)
 		}
@@ -648,34 +647,6 @@ func TestEnterpriseChapters(t *testing.T) {
 		if strings.Contains(off, bad) {
 			t.Fatalf("关闭开关后仍输出 %q", bad)
 		}
-	}
-}
-
-// TestCurlSample 依据接口定义生成可复制的 cURL。
-func TestCurlSample(t *testing.T) {
-	api := model.ApiInfo{
-		ID: "a1", Name: "创建用户", Method: "post", URL: "https://api.example.com/users",
-		BodyType: "json", Body: `{"name":"张三"}`,
-		Headers: []model.KV{{Key: "X-Tenant-Id", Value: "t1"}},
-		Query:   []model.KV{{Key: "debug", Value: "1"}},
-	}
-	common := model.CommonParams{
-		Headers: []model.KV{{Key: "X-App-Id", Value: ""}},
-		Query:   []model.KV{{Key: "appId", Value: "A001"}},
-	}
-	got := curlSample(api, common)
-	for _, want := range []string{
-		"curl -X POST 'https://api.example.com/users?debug=1&appId=A001'",
-		"-H 'Content-Type: application/json'", "-H 'X-Tenant-Id: t1'", "-H 'X-App-Id: {{ X-App-Id }}'",
-		`-d '{"name":"张三"}'`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("cURL 缺少 %q:\n%s", want, got)
-		}
-	}
-	// 无 URL 的接口不生成示例
-	if curlSample(model.ApiInfo{Method: "get"}, model.CommonParams{}) != "" {
-		t.Fatal("空地址不应生成 cURL")
 	}
 }
 

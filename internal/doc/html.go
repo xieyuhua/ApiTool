@@ -93,9 +93,6 @@ func htmlApi(sb *strings.Builder, api model.ApiInfo, dirName string, common mode
 	if body := responseSampleBody(api); body != "" {
 		sb.WriteString(`<h4>响应示例</h4><pre>` + html.EscapeString(body) + `</pre>`)
 	}
-	if curl := curlSample(api, common); curl != "" {
-		sb.WriteString(`<h4>` + labelCurlSample + `</h4><pre>` + html.EscapeString(curl) + `</pre>`)
-	}
 	sb.WriteString(`</div>`)
 }
 
@@ -296,7 +293,7 @@ func buildHTMLOpt(title, rootID string, dirs []model.Directory, apis []model.Api
 			if apisPlaceholder {
 				body.WriteString(`<div class="api"><p class="desc">模板预览不包含具体接口。</p>` +
 					`<p class="desc">实际导出时，这里会按所选范围输出每个接口的：请求参数 / 响应参数、请求与响应示例、` +
-					`公共请求头与公共参数、以及「调用示例（cURL）」。</p></div>`)
+					`公共请求头与公共参数。</p></div>`)
 				break
 			}
 			if dirs == nil && len(apis) == 1 && rootID == "" {

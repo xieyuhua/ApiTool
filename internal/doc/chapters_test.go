@@ -206,7 +206,7 @@ func TestPreviewHTMLIncludesAPIs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("整份文档预览失败: %v", err)
 	}
-	for _, want := range []string{"对外接口文档", `id="toc"`, "附录：HTTP 状态码", `id="api-a1"`, "查询用户列表", "调用示例（cURL）"} {
+	for _, want := range []string{"对外接口文档", `id="toc"`, "附录：HTTP 状态码", `id="api-a1"`, "查询用户列表"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("整份文档预览缺少 %q", want)
 		}

@@ -327,7 +327,7 @@ const chapterOptions = [
     apply: l => { l.support = l.support || {}; l.support.enabled = true },
     clear: l => { if (l.support) l.support.enabled = false } },
   { key: 'apis', label: '接口正文（真实接口）', type: 'flag', locked: true,
-    desc: '所选范围内的全部真实接口：请求/响应参数、示例、cURL（必选，可拖动调整位置）',
+    desc: '所选范围内的全部真实接口：请求/响应参数、请求与响应示例（必选，可拖动调整位置）',
     apply: () => {}, clear: () => {} },
 ]
 

@@ -371,7 +371,7 @@ defineExpose({ preview })
 
       <el-form-item label="接入指引">
         <el-switch v-model="dl.quickStart" @change="save" />
-        <span class="dl-hint">生成「接入指引（快速开始）」：申请凭证 → 选择环境 → 公共头 → 签名 → 调用示例</span>
+        <span class="dl-hint">生成「接入指引（快速开始）」：申请凭证 → 选择环境 → 公共头 → 签名 → 调用与排错</span>
       </el-form-item>
 
       <el-form-item label="术语表">

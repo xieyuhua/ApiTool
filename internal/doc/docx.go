@@ -321,10 +321,6 @@ func (b *docxBuilder) api(api model.ApiInfo, level int, common model.CommonParam
 		b.heading(3, labelReqExample)
 		b.code(api.Body)
 	}
-	if curl := curlSample(api, common); curl != "" {
-		b.text("DocH4", labelCurlSample)
-		b.code(curl)
-	}
 	if body := responseSampleBody(api); body != "" {
 		b.heading(3, labelRespExample)
 		b.code(body)

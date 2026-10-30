@@ -414,15 +414,6 @@ const quickStartChapter = "#### 1. 申请应用凭证\n" +
 	"#### 5. 发起调用并处理响应\n" +
 	"- 以 HTTP 状态码判断传输层结果，以响应体 `code` 判断业务结果（见「附录：业务错误码」）\n" +
 	"- 失败时按 `message` 与 `traceId` 排查，必要时带 `traceId` 联系技术支持\n\n" +
-	"```bash\n" +
-	"curl -X POST 'https://api.example.com/user-center/users' \\\n" +
-	"  -H 'Content-Type: application/json' \\\n" +
-	"  -H 'X-App-Id: {{appId}}' \\\n" +
-	"  -H 'X-Timestamp: {{timestamp}}' \\\n" +
-	"  -H 'X-Nonce: {{nonce}}' \\\n" +
-	"  -H 'X-Sign: {{sign}}' \\\n" +
-	"  -d '{\"page\": 1, \"pageSize\": 20}'\n" +
-	"```\n\n" +
 	"> 建议先用「接口调试」页跑通单个接口，再按本文档批量接入。"
 
 // glossaryChapter 把术语表渲染成 Markdown 表格。
