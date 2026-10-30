@@ -4,9 +4,9 @@ import { ElMessage } from 'element-plus'
 import {
   BuildSharedHTML, BuildSharedTitle, ExportDoc, ShareDoc,
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
-  SyncShareBackend,
+  SyncShareBackend, RefreshShares,
 } from '../../../wailsjs/go/main/App'
-import { store, cloudBase, saveNow } from '../../store'
+import { store, cloudBase, saveNow, currentProject } from '../../store'
 
 const props = defineProps({
   dirId: { type: String, default: '' },
@@ -15,8 +15,21 @@ const props = defineProps({
 const visible = defineModel('visible')
 const tab = ref('code')
 
-// ---------------- 分享设置（文档结构 / 水印） ----------------
+// ---------------- 分享设置（文档结构跟随文档模板 / 水印可选） ----------------
 const settings = store.data.settings
+
+// 当前模板名（分享结构始终跟随「文档模板」）
+const templateName = computed(() => {
+  const pid = currentProject()?.id
+  const override = pid ? store.data.settings.projectDocLayouts?.[pid] : null
+  const v = override || store.data.settings.docLayout || {}
+  return v.name || '自定义结构'
+})
+
+function goTemplates() {
+  visible.value = false
+  store.view = 'templates'
+}
 
 async function toggleShareOption() {
   try {
@@ -24,6 +37,18 @@ async function toggleShareOption() {
     ElMessage.success('分享设置已保存（重新生成网页代码或在线链接后生效）')
   } catch (e) {
     ElMessage.error(String(e))
+  }
+}
+
+// refreshLocalShares 让进程内的本地分享链接按最新模板重建内容
+async function refreshLocalShares(silent = false) {
+  try {
+    const n = await RefreshShares()
+    if (n > 0 && !silent) ElMessage.success(`已按最新模板刷新 ${n} 条本地分享链接`)
+    return n
+  } catch (e) {
+    if (!silent) ElMessage.error('刷新失败：' + String(e))
+    return 0
   }
 }
 
@@ -114,6 +139,7 @@ watch(visible, async (v) => {
   if (v) {
     result.value = ''; resultToken.value = ''
     try { syncShare.value = await SyncShareBackend() } catch { syncShare.value = { url: '', token: '', running: false } }
+    refreshLocalShares(true)
     refresh(); buildCode()
   }
 })
@@ -226,10 +252,11 @@ function fmtExpire(exp) {
 <template>
   <el-dialog v-model="visible" title="分享接口文档" width="720px" top="6vh">
     <div class="share-opts">
-      <span class="so-title">分享内容：</span>
-      <el-checkbox v-model="settings.shareDocLayout" @change="toggleShareOption">套用「文档结构」</el-checkbox>
+      <span class="so-title">分享结构：</span>
+      <b>{{ templateName }}</b>
+      <el-button link type="primary" size="small" @click="goTemplates">去「文档模板」调整</el-button>
       <el-checkbox v-model="settings.shareDocWatermark" @change="toggleShareOption">添加导出水印</el-checkbox>
-      <span class="so-hint">开启后，网页代码 / 在线链接会带上封面、目录与前言等章节（及水印），与导出文件保持一致</span>
+      <span class="so-hint">分享内容始终按「文档模板」当前选中的模板生成（封面 / 目录 / 前言 / 规范 / 附录等），与导出文件一致</span>
     </div>
     <el-tabs v-model="tab">
       <!-- 网页代码 -->
@@ -262,6 +289,13 @@ function fmtExpire(exp) {
           style="margin-bottom:14px"
           title="本地临时分享服务"
           description="未启动内置同步服务且未配置云同步，将由本工具临时本地服务托管（随机端口，应用退出后失效）。建议在「设置」中启动内置同步服务以获得稳定的局域网分享地址。" />
+
+        <div class="link-refresh">
+          <el-button size="small" @click="refreshLocalShares(false)">♻ 按最新模板刷新本地链接</el-button>
+          <span class="so-hint">
+            已发布的同步 / 云端链接是发布当时的快照；模板调整后请重新「生成分享链接」以发布新内容
+          </span>
+        </div>
 
         <el-form label-width="90px">
           <el-form-item label="访问密码">
@@ -310,6 +344,7 @@ function fmtExpire(exp) {
 .share-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; padding: 8px 10px; background: #f7f8fa; border-radius: 8px; }
 .so-title { font-size: 13px; color: #4e5969; }
 .so-hint { font-size: 12px; color: #86909c; }
+.link-refresh { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .code-tip { font-size: 12.5px; color: #4e5969; background: #f2f3f5; border-radius: 6px; padding: 10px 12px; line-height: 1.7; margin-bottom: 12px; }
 .code-tip code { background: #e5e6eb; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; color: #165dff; }
 .code-loading { color: #86909c; font-size: 13px; padding: 30px 0; text-align: center; }
