@@ -184,3 +184,35 @@ func TestListChaptersSwitches(t *testing.T) {
 	}
 	_ = html3
 }
+
+// TestPreviewHTMLIncludesAPIs 整份文档预览要同时包含模板章节与具体接口内容。
+func TestPreviewHTMLIncludesAPIs(t *testing.T) {
+	st := store.New(t.TempDir(), "t", "")
+	t.Cleanup(func() { _ = st.Close() })
+
+	data := st.GetData()
+	data.Projects[0].Apis = []model.ApiInfo{
+		{ID: "a1", Name: "查询用户列表", Method: "get", URL: "https://api.example.com/users"},
+	}
+	data.Settings.DocLayout = model.DocLayout{
+		Toc: true, Numbering: true, StatusCodes: true,
+		Cover: model.DocCover{Enabled: true, Subtitle: "对外接口文档"},
+	}
+	if err := st.SaveData(data); err != nil {
+		t.Fatal(err)
+	}
+
+	html, err := PreviewHTML(st, "", "")
+	if err != nil {
+		t.Fatalf("整份文档预览失败: %v", err)
+	}
+	for _, want := range []string{"对外接口文档", `id="toc"`, "附录：HTTP 状态码", `id="api-a1"`, "查询用户列表", "调用示例（cURL）"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("整份文档预览缺少 %q", want)
+		}
+	}
+	// 与模板预览区分：这里不应出现占位说明
+	if strings.Contains(html, "模板预览不包含具体接口") {
+		t.Fatal("整份文档预览不应出现模板占位说明")
+	}
+}

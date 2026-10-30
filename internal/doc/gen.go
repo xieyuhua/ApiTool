@@ -220,6 +220,16 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 	return path, nil
 }
 
+// PreviewHTML 生成完整文档 HTML（含所选范围内的全部接口、按当前模板与水印），供前端弹窗预览。
+func PreviewHTML(s *store.Store, dirID string, apiID string) (string, error) {
+	scope, err := loadDocScope(s, dirID, apiID)
+	if err != nil {
+		return "", err
+	}
+	return BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis,
+		scope.Common, scope.Watermark, scope.Layout), nil
+}
+
 // PreviewTemplateHTML 生成「模板结构预览」HTML（不含具体接口），供前端弹窗内嵌展示。
 // layoutJSON 为空时使用当前生效结构（全局配置或项目级覆盖）。
 func PreviewTemplateHTML(s *store.Store, layoutJSON string) (string, error) {

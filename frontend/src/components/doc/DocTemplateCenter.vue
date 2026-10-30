@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
   PullDocTemplates, PushDocTemplates, PreviewDocTemplate, PreviewDocTemplateHTML,
+  PreviewDocHTML, ShareDoc,
   RenameDocLayoutTemplate, DuplicateDocLayoutTemplate,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
@@ -127,9 +128,11 @@ const previewLoading = ref(false)
 const previewTitle = ref('模板预览')
 const previewHTML = ref('')
 const previewing = ref('')
+const previewMode = ref('template') // template | full
 
-// openPreview 拉取预览 HTML 并在弹窗内用 iframe 展示
+// openPreview 拉取「模板结构」预览 HTML 并在弹窗内用 iframe 展示（不含具体接口）
 async function openPreview(layout, title) {
+  previewMode.value = 'template'
   previewTitle.value = `模板预览 · ${title}（不含具体接口）`
   previewHTML.value = ''
   previewVisible.value = true
@@ -143,6 +146,28 @@ async function openPreview(layout, title) {
     previewVisible.value = false
   } finally {
     previewLoading.value = false
+  }
+}
+
+// openFullPreview 弹窗预览「整份文档」：含所选范围内的全部接口（按当前模板与水印）
+async function previewFullDoc() {
+  if (previewing.value) return
+  previewing.value = 'full'
+  previewMode.value = 'full'
+  previewTitle.value = '预览整份文档（含接口）'
+  previewHTML.value = ''
+  previewVisible.value = true
+  previewLoading.value = true
+  try {
+    const html = await PreviewDocHTML(scopeDirId.value || '', '')
+    previewHTML.value = html || ''
+    if (!html) ElMessage.warning('预览内容为空（所选范围内可能没有接口）')
+  } catch (e) {
+    ElMessage.error('预览失败：' + String(e))
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+    previewing.value = ''
   }
 }
 
@@ -183,10 +208,12 @@ async function previewCurrent() {
   }
 }
 
-// 弹窗内的「在浏览器打开」：写入临时文件并调用系统浏览器（便于打印 PDF）
+// 弹窗内的「在浏览器打开」：模板预览写临时文件；整份文档直接打开（含接口，便于打印 PDF）
 async function openInBrowser() {
   try {
-    const path = await PreviewDocTemplate(JSON.stringify({ ...dl.value, name: activeName.value }))
+    const path = previewMode.value === 'full'
+      ? await ShareDoc(scopeDirId.value || '', '')
+      : await PreviewDocTemplate(JSON.stringify({ ...dl.value, name: activeName.value }))
     if (path) ElMessage.success('已在浏览器打开：' + path)
   } catch (e) {
     ElMessage.error(String(e))
@@ -569,7 +596,7 @@ function preview() {
         </div>
       </div>
 
-      <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" />
+      <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" @preview-full="previewFullDoc" />
 
       <DocWatermarkPanel :dir-id="scopeDirId" />
 
@@ -578,8 +605,12 @@ function preview() {
           <iframe v-if="previewHTML" class="preview-frame" :srcdoc="previewHTML" />
         </div>
         <template #footer>
-          <span class="tpl-hint" style="margin-right:auto">预览只渲染章节结构，不含具体接口；实际导出会输出所选范围内的全部接口</span>
-          <el-button @click="openInBrowser">在浏览器打开</el-button>
+          <span class="tpl-hint" style="margin-right:auto">
+            {{ previewMode === 'full'
+              ? '预览包含所选范围内的全部接口，与导出的 HTML / PDF 版式一致'
+              : '预览只渲染章节结构，不含具体接口；实际导出会输出所选范围内的全部接口' }}
+          </span>
+          <el-button @click="openInBrowser">{{ previewMode === 'full' ? '在浏览器打开（可打印为 PDF）' : '在浏览器打开' }}</el-button>
           <el-button type="primary" @click="previewVisible = false">关闭</el-button>
         </template>
       </el-dialog>
@@ -588,7 +619,7 @@ function preview() {
         <el-tree-select v-model="scopeDirId" :data="dirTree" check-strictly :render-after-expand="false"
           style="width:260px" placeholder="预览范围（默认全部接口）" default-expand-all clearable />
         <el-button plain style="margin-left:10px" :loading="previewing === 'current'" @click="previewCurrent">👁 预览当前模板（不含接口）</el-button>
-        <el-button type="primary" plain style="margin-left:8px" @click="preview">👁 预览整份文档（含接口）</el-button>
+        <el-button type="primary" plain style="margin-left:8px" :loading="previewing === 'full'" @click="previewFullDoc">👁 预览整份文档（含接口）</el-button>
         <span class="tpl-hint" style="margin-left:10px">用当前结构与水印在浏览器打开，Ctrl+P 可看打印分页</span>
       </div>
     </div>

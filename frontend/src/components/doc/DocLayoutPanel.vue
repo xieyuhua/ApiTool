@@ -5,7 +5,7 @@ import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   DefaultDocBusinessCodes, DefaultDocConvention, DefaultDocEnums, DefaultDocGlossary,
-  DocSignTemplates, PreviewDocWatermark,
+  DocSignTemplates,
 } from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
@@ -18,6 +18,8 @@ const props = defineProps({
 
 const dl = computed(() => props.layout)
 const previewing = ref(false)
+// 预览交给「文档模板」页面统一用弹窗展示
+const emit = defineEmits(['preview-full'])
 const signTemplates = ref([]) // 后端返回的预置验签模板清单
 
 // normalize 补齐字段：老数据或后端返回的 null 数组都要转成可用结构
@@ -191,12 +193,12 @@ function removeRevision(i) {
 }
 
 // ---------------- 预览 ----------------
+// 先保存配置，再由页面弹窗渲染「整份文档（含接口）」
 async function preview() {
   previewing.value = true
   try {
     await saveNow()
-    const path = await PreviewDocWatermark(props.dirId || '', props.apiId || '')
-    if (path) ElMessage.success('已在浏览器打开预览：' + path)
+    emit('preview-full')
   } catch (e) {
     ElMessage.error(String(e))
   } finally {
@@ -422,7 +424,7 @@ defineExpose({ preview })
 
       <el-form-item label="效果预览">
         <el-button size="small" type="primary" plain :loading="previewing" @click="preview">👁 预览整份文档</el-button>
-        <span class="dl-hint">用当前结构与水印在浏览器打开，按 Ctrl+P 可看打印分页效果</span>
+        <span class="dl-hint">弹窗内按当前结构与水印渲染（含所选范围的接口），可再「在浏览器打开」打印 PDF</span>
       </el-form-item>
     </el-form>
   </div>

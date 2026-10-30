@@ -344,6 +344,11 @@ func (a *App) RefreshShares() (int, error) {
 	return share.RefreshAllShares(a.store)
 }
 
+// PreviewDocHTML 生成完整文档预览 HTML（含接口、按当前模板与水印），供前端弹窗内嵌展示。
+func (a *App) PreviewDocHTML(dirID string, apiID string) (string, error) {
+	return doc.PreviewHTML(a.store, dirID, apiID)
+}
+
 // PreviewDocTemplateHTML 生成模板结构预览 HTML（不含具体接口），供前端弹窗内嵌展示。
 func (a *App) PreviewDocTemplateHTML(layoutJSON string) (string, error) {
 	return doc.PreviewTemplateHTML(a.store, layoutJSON)
