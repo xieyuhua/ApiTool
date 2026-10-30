@@ -7,6 +7,7 @@ import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
   PullDocTemplates, PushDocTemplates, PreviewDocTemplateHTML, PreviewDocHTML,
   RenameDocLayoutTemplate, DuplicateDocLayoutTemplate,
+  DefaultDocConvention, DefaultDocGlossary, DefaultDocEnums, DefaultDocBusinessCodes, DocSignTemplates,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
@@ -268,30 +269,136 @@ function chipsOf(l) {
 
 // ---------------- 自定义模板：新建 / 重命名 / 复制 / 自动回写 ----------------
 // 新建模板：可复制当前结构或从空白开始，创建后立即设为当前模板
-async function newTemplate() {
-  let name = ''
+// ---------------- 新建模板：名称 + 结构勾选 ----------------
+// 可勾选的章节定义（apply 负责把该章节的开关/默认内容写进 layout）
+const chapterOptions = [
+  { key: 'cover', label: '作者封面', desc: '标题 / 副标题 / 作者 / 单位 / 版本 / 日期，单独一页', apply: l => { l.cover = l.cover || {}; l.cover.enabled = true } },
+  { key: 'revisions', label: '文档修订记录', desc: '版本 / 日期 / 作者 / 修订说明', apply: l => { l.revisionsOn = true; if (!l.revisions?.length) l.revisions = [{ version: 'V1.0.0', date: todayStr(), author: '', note: '首次发布' }] } },
+  { key: 'toc', label: '目录', desc: 'Word 为可更新域，PDF/HTML 为带锚点目录', apply: l => { l.toc = true } },
+  { key: 'numbering', label: '章节编号', desc: '1 / 1.1 / 1.1.1，三种格式一致', apply: l => { l.numbering = true } },
+  { key: 'quickStart', label: '接入指引（快速开始）', desc: '申请凭证 → 选环境 → 公共头 → 签名 → 调用与排错', apply: l => { l.quickStart = true } },
+  { key: 'environment', label: '接入地址（环境）', desc: '按项目环境变量生成测试/预发/生产地址表', apply: l => { l.environment = true } },
+  { key: 'commonHeaders', label: '公共请求头与公共参数', desc: '按项目「公共参数」生成表格', apply: l => { l.commonHeaders = true } },
+  { key: 'sign', label: '加密与验签', desc: '填充所选验签方案（默认 MD5 排序拼接）', apply: null, fill: 'sign' },
+  { key: 'glossary', label: '术语表', desc: '填充通用术语（appId / Nonce / 幂等 …）', apply: null, fill: 'glossary' },
+  { key: 'convention', label: '接口统一定义规范', desc: '填充默认团队规范模板', apply: null, fill: 'convention' },
+  { key: 'statusCodes', label: '附录：HTTP 状态码', desc: '常用状态码名称 / 含义 / 场景', apply: l => { l.statusCodes = true } },
+  { key: 'businessCodes', label: '附录：业务错误码', desc: '填充默认业务码表（0 / 40001 / 50001 …）', apply: null, fill: 'businessCodes' },
+  { key: 'enums', label: '附录：数据字典', desc: '填充默认枚举样例（status / gender）', apply: null, fill: 'enums' },
+  { key: 'support', label: '技术支持与联系', desc: '对接人 / 邮箱 / 群 / 工单 / 响应时效', apply: l => { l.support = l.support || {}; l.support.enabled = true } },
+]
+
+const newVisible = ref(false)
+const newBusy = ref(false)
+const newName = ref('')
+const newBase = ref('blank')     // blank | current
+const newChapters = ref(['toc', 'numbering'])
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// 按当前 layout 的开关状态反推勾选项（用于「复制当前结构」）
+function chaptersOf(l) {
+  const v = l || {}
+  const on = []
+  if (v.cover?.enabled) on.push('cover')
+  if (v.revisionsOn && (v.revisions || []).length) on.push('revisions')
+  if (v.toc) on.push('toc')
+  if (v.numbering) on.push('numbering')
+  if (v.quickStart) on.push('quickStart')
+  if (v.environment) on.push('environment')
+  if (v.commonHeaders) on.push('commonHeaders')
+  if (v.signOn && v.sign) on.push('sign')
+  if (v.glossaryOn && (v.glossary || []).length) on.push('glossary')
+  if (v.conventionOn && v.convention) on.push('convention')
+  if (v.statusCodes) on.push('statusCodes')
+  if (v.businessCodesOn && (v.businessCodes || []).length) on.push('businessCodes')
+  if (v.enumsOn && (v.enums || []).length) on.push('enums')
+  if (v.support?.enabled) on.push('support')
+  return on
+}
+
+function openNewTemplate() {
+  newName.value = ''
+  newBase.value = 'blank'
+  newChapters.value = ['toc', 'numbering']
+  newVisible.value = true
+}
+
+watch(newBase, v => {
+  newChapters.value = v === 'current' ? chaptersOf(dl.value) : ['toc', 'numbering']
+})
+
+function toggleAllChapters(on) {
+  newChapters.value = on ? chapterOptions.map(c => c.key) : []
+}
+
+async function createTemplate() {
+  const name = String(newName.value || '').trim()
+  if (!name) { ElMessage.warning('请输入模板名称'); return }
+  if (myTemplates.value.some(t => t.name === name)) { ElMessage.warning('已存在同名模板，请换个名称'); return }
+  if (!newChapters.value.length) { ElMessage.warning('请至少勾选一个章节'); return }
+
+  newBusy.value = true
   try {
-    const r = await ElMessageBox.prompt('新模板名称（如「xx 事业部标准」「内部评审版」）', '新建自定义模板', {
-      inputPlaceholder: '模板名称', inputValidator: v => (v && v.trim() ? true : '请输入模板名称'),
-    })
-    name = (r.value || '').trim()
-  } catch { return }
-  if (myTemplates.value.some(t => t.name === name)) {
-    ElMessage.warning('已存在同名模板，请换个名称')
-    return
-  }
-  const copyCurrent = window.confirm('以「当前结构」为蓝本创建吗？\n确定 = 复制当前结构；取消 = 从空白模板（仅目录 + 编号）开始')
-  const base = copyCurrent ? dl.value : { toc: true, numbering: true }
-  const layout = normalize(JSON.parse(JSON.stringify(base)))
-  layout.name = name
-  try {
+    // 起点：空白 or 复制当前结构（只影响内容，开关由勾选决定）
+    const layout = normalize(JSON.parse(JSON.stringify(
+      newBase.value === 'current' ? dl.value : { toc: true, numbering: true })))
+    // 先把所有章节开关关掉，再按勾选打开
+    layout.toc = false
+    layout.numbering = false
+    layout.quickStart = false
+    layout.environment = false
+    layout.commonHeaders = false
+    layout.signOn = false
+    layout.conventionOn = false
+    layout.statusCodes = false
+    layout.glossaryOn = false
+    layout.enumsOn = false
+    layout.businessCodesOn = false
+    layout.revisionsOn = false
+    if (layout.cover) layout.cover.enabled = false
+    if (layout.support) layout.support.enabled = false
+
+    // 勾选了但内容为空的章节，填默认内容
+    for (const opt of chapterOptions) {
+      if (!newChapters.value.includes(opt.key)) continue
+      if (opt.apply) { opt.apply(layout); continue }
+      if (opt.fill === 'sign' && !String(layout.sign || '').trim()) {
+        const list = await DocSignTemplates().catch(() => [])
+        layout.sign = list?.[0]?.content || ''
+        layout.signOn = true
+      }
+      if (opt.fill === 'glossary' && !(layout.glossary || []).length) {
+        layout.glossary = await DefaultDocGlossary()
+        layout.glossaryOn = true
+      }
+      if (opt.fill === 'convention' && !String(layout.convention || '').trim()) {
+        layout.convention = await DefaultDocConvention()
+        layout.conventionOn = true
+      }
+      if (opt.fill === 'businessCodes' && !(layout.businessCodes || []).length) {
+        layout.businessCodes = await DefaultDocBusinessCodes()
+        layout.businessCodesOn = true
+      }
+      if (opt.fill === 'enums' && !(layout.enums || []).length) {
+        layout.enums = await DefaultDocEnums()
+        layout.enumsOn = true
+      }
+    }
+
+    layout.name = name
     await SaveDocLayoutTemplate(name, JSON.stringify(layout))
     await reloadStore()
     normalize(dl.value)
     await applyLayout(layout, name, true)
+    newVisible.value = false
     ElMessage.success('已创建模板：' + name)
   } catch (e) {
     ElMessage.error(String(e))
+  } finally {
+    newBusy.value = false
   }
 }
 
@@ -590,7 +697,7 @@ function preview() {
           </span>
         </div>
         <div style="margin-bottom:10px">
-          <el-button size="small" type="primary" plain @click="newTemplate">＋ 新建模板</el-button>
+          <el-button size="small" type="primary" plain @click="openNewTemplate">＋ 新建模板</el-button>
           <el-button size="small" @click="saveAsTemplate">把当前结构保存为模板</el-button>
         </div>
         <div v-if="myTemplates.length" class="tpl-grid">
@@ -625,6 +732,42 @@ function preview() {
       <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" @preview-full="previewFullDoc" />
 
       <DocWatermarkPanel :dir-id="scopeDirId" />
+
+      <el-dialog v-model="newVisible" title="新建文档模板" width="720px" top="6vh">
+        <el-form label-width="86px" label-position="left">
+          <el-form-item label="模板名称">
+            <el-input v-model="newName" placeholder="如：xx 事业部标准 / 内部评审版" style="width:320px" maxlength="40" show-word-limit />
+          </el-form-item>
+          <el-form-item label="结构起点">
+            <el-radio-group v-model="newBase">
+              <el-radio-button value="blank">空白模板</el-radio-button>
+              <el-radio-button value="current">复制当前结构</el-radio-button>
+            </el-radio-group>
+            <span class="tpl-hint" style="margin-left:8px">
+              {{ newBase === 'current' ? '沿用当前模板的文字/表格内容，勾选决定最终输出哪些章节' : '内容为空，勾选的章节会自动填入默认内容' }}
+            </span>
+          </el-form-item>
+          <el-form-item label="包含章节">
+            <div style="width:100%">
+              <div style="margin-bottom:8px">
+                <el-button size="small" link type="primary" @click="toggleAllChapters(true)">全选</el-button>
+                <el-button size="small" link @click="toggleAllChapters(false)">清空</el-button>
+                <span class="tpl-hint">已选 {{ newChapters.length }} / {{ chapterOptions.length }} 项</span>
+              </div>
+              <el-checkbox-group v-model="newChapters" class="new-chapters">
+                <el-checkbox v-for="c in chapterOptions" :key="c.key" :value="c.key" class="new-chapter">
+                  <span class="nc-label">{{ c.label }}</span>
+                  <span class="nc-desc">{{ c.desc }}</span>
+                </el-checkbox>
+              </el-checkbox-group>
+            </div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="newVisible = false">取消</el-button>
+          <el-button type="primary" :loading="newBusy" @click="createTemplate">创建并使用</el-button>
+        </template>
+      </el-dialog>
 
       <el-dialog v-model="previewVisible" :title="previewTitle" width="1080px" top="4vh" destroy-on-close>
         <div v-loading="previewLoading && !previewHTML" element-loading-text="正在生成预览…" class="preview-wrap">
@@ -671,6 +814,11 @@ function preview() {
 .tpl-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
 .tpl-card-ops { margin-top: 8px; text-align: right; }
 .tpl-mine-item { display: inline-flex; align-items: center; gap: 4px; }
+.new-chapters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; width: 100%; }
+.new-chapter { height: auto; margin-right: 0; align-items: flex-start; padding: 4px 0; }
+.new-chapter :deep(.el-checkbox__label) { display: flex; flex-direction: column; line-height: 1.5; white-space: normal; }
+.nc-label { font-size: 13px; }
+.nc-desc { font-size: 11.5px; color: #86909c; }
 .tpl-chip { color: #4e5969; }
 .tpl-mine { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tpl-tag { cursor: pointer; }
