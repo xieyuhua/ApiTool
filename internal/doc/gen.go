@@ -220,9 +220,29 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 	return path, nil
 }
 
-// PreviewTemplate 用指定文档结构渲染「模板结构预览」（不含具体接口）并在浏览器打开。
+// PreviewTemplateHTML 生成「模板结构预览」HTML（不含具体接口），供前端弹窗内嵌展示。
 // layoutJSON 为空时使用当前生效结构（全局配置或项目级覆盖）。
+func PreviewTemplateHTML(s *store.Store, layoutJSON string) (string, error) {
+	html, _, err := templatePreviewHTML(s, layoutJSON)
+	return html, err
+}
+
+// PreviewTemplate 生成「模板结构预览」并写入临时文件后用浏览器打开（弹窗外的备用打开方式）。
 func PreviewTemplate(ctx context.Context, s *store.Store, layoutJSON string) (string, error) {
+	html, name, err := templatePreviewHTML(s, layoutJSON)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(os.TempDir(), "apitool-template-preview-"+SanitizeFilename(name)+".html")
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	return path, nil
+}
+
+// templatePreviewHTML 解析生效结构 + 水印，渲染模板预览 HTML（返回 HTML 与模板名）。
+func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, error) {
 	data := s.GetData()
 	proj := model.Project{}
 	if idx := store.ActiveProjectIndex(data); idx >= 0 {
@@ -231,23 +251,22 @@ func PreviewTemplate(ctx context.Context, s *store.Store, layoutJSON string) (st
 	layout := EffectiveDocLayout(data, proj)
 	if strings.TrimSpace(layoutJSON) != "" {
 		if err := json.Unmarshal([]byte(layoutJSON), &layout); err != nil {
-			return "", fmt.Errorf("文档结构解析失败: %v", err)
+			return "", "", fmt.Errorf("文档结构解析失败: %v", err)
 		}
 	}
 	layout = EnrichDocLayout(layout, proj.Environments, proj.Common)
 	wm := ExpandWatermark(NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
-	html := BuildTemplatePreviewHTML("文档模板预览", proj.Common, wm, layout)
-
+	title := strings.TrimSpace(layout.Name)
+	if title == "" {
+		title = "文档模板预览"
+	} else {
+		title = "文档模板预览 · " + title
+	}
 	name := layout.Name
 	if strings.TrimSpace(name) == "" {
 		name = "current"
 	}
-	path := filepath.Join(os.TempDir(), "apitool-template-preview-"+SanitizeFilename(name)+".html")
-	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
-		return "", err
-	}
-	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
-	return path, nil
+	return BuildTemplatePreviewHTML(title, proj.Common, wm, layout), name, nil
 }
 
 // ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）

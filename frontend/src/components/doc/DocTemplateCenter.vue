@@ -5,7 +5,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
-  PullDocTemplates, PushDocTemplates, PreviewDocTemplate,
+  PullDocTemplates, PushDocTemplates, PreviewDocTemplate, PreviewDocTemplateHTML,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
@@ -120,16 +120,37 @@ const checks = computed(() => {
   return list
 })
 
-// ---------------- 模板预览（只渲染章节结构，不含具体接口）----------------
+// ---------------- 模板预览（弹窗内嵌，只渲染章节结构，不含具体接口）----------------
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const previewTitle = ref('模板预览')
+const previewHTML = ref('')
 const previewing = ref('')
+
+// openPreview 拉取预览 HTML 并在弹窗内用 iframe 展示
+async function openPreview(layout, title) {
+  previewTitle.value = `模板预览 · ${title}（不含具体接口）`
+  previewHTML.value = ''
+  previewVisible.value = true
+  previewLoading.value = true
+  try {
+    const html = await PreviewDocTemplateHTML(JSON.stringify({ ...layout, name: title }))
+    previewHTML.value = html || ''
+    if (!html) ElMessage.warning('预览内容为空')
+  } catch (e) {
+    ElMessage.error('预览失败：' + String(e))
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 async function previewPreset(p) {
   if (previewing.value) return
   previewing.value = p.key
   try {
     const layout = await DocPresetLayout(p.key)
-    layout.name = p.label
-    const path = await PreviewDocTemplate(JSON.stringify(layout))
-    if (path) ElMessage.success('已在浏览器打开模板预览（不含具体接口）')
+    await openPreview(layout, p.label)
   } catch (e) {
     ElMessage.error('预览失败：' + String(e))
   } finally {
@@ -141,8 +162,7 @@ async function previewTemplate(tpl) {
   if (previewing.value) return
   previewing.value = tpl.id
   try {
-    const path = await PreviewDocTemplate(JSON.stringify(tpl.layout))
-    if (path) ElMessage.success(`已在浏览器打开「${tpl.name}」预览（不含具体接口）`)
+    await openPreview(tpl.layout, tpl.name)
   } catch (e) {
     ElMessage.error('预览失败：' + String(e))
   } finally {
@@ -154,12 +174,21 @@ async function previewCurrent() {
   if (previewing.value) return
   previewing.value = 'current'
   try {
-    const path = await PreviewDocTemplate(JSON.stringify(dl.value))
-    if (path) ElMessage.success('已在浏览器打开当前模板预览（不含具体接口）')
+    await openPreview(dl.value, activeName.value)
   } catch (e) {
     ElMessage.error('预览失败：' + String(e))
   } finally {
     previewing.value = ''
+  }
+}
+
+// 弹窗内的「在浏览器打开」：写入临时文件并调用系统浏览器（便于打印 PDF）
+async function openInBrowser() {
+  try {
+    const path = await PreviewDocTemplate(JSON.stringify({ ...dl.value, name: activeName.value }))
+    if (path) ElMessage.success('已在浏览器打开：' + path)
+  } catch (e) {
+    ElMessage.error(String(e))
   }
 }
 
@@ -423,6 +452,17 @@ function preview() {
 
       <DocWatermarkPanel :dir-id="scopeDirId" />
 
+      <el-dialog v-model="previewVisible" :title="previewTitle" width="1080px" top="4vh" destroy-on-close>
+        <div v-loading="previewLoading" element-loading-text="正在生成预览…" class="preview-wrap">
+          <iframe v-if="previewHTML" class="preview-frame" :srcdoc="previewHTML" />
+        </div>
+        <template #footer>
+          <span class="tpl-hint" style="margin-right:auto">预览只渲染章节结构，不含具体接口；实际导出会输出所选范围内的全部接口</span>
+          <el-button @click="openInBrowser">在浏览器打开</el-button>
+          <el-button type="primary" @click="previewVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+
       <div class="tpl-actions">
         <el-tree-select v-model="scopeDirId" :data="dirTree" check-strictly :render-after-expand="false"
           style="width:260px" placeholder="预览范围（默认全部接口）" default-expand-all clearable />
@@ -460,4 +500,6 @@ function preview() {
 .tpl-empty { font-size: 12px; color: #86909c; }
 .tpl-hint { font-size: 12px; color: #86909c; margin-top: 8px; }
 .tpl-actions { display: flex; align-items: center; margin: 4px 0 24px; flex-wrap: wrap; }
+.preview-wrap { height: 76vh; background: #f7f8fa; border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; }
+.preview-frame { width: 100%; height: 100%; border: 0; background: #fff; }
 </style>

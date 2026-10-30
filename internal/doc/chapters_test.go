@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -75,5 +76,52 @@ func TestCheckedChaptersAlwaysRender(t *testing.T) {
 		if strings.Contains(plain, bad) {
 			t.Fatalf("零值配置不应输出 %q", bad)
 		}
+	}
+}
+
+// TestPreviewTemplateHTMLFromStore 弹窗预览入口：按传入的结构 JSON 渲染，且空 JSON 时用当前生效结构。
+func TestPreviewTemplateHTMLFromStore(t *testing.T) {
+	st := store.New(t.TempDir(), "t", "")
+	t.Cleanup(func() { _ = st.Close() })
+
+	data := st.GetData()
+	data.Projects[0].Apis = []model.ApiInfo{{ID: "a1", Name: "查询用户", Method: "get", URL: "https://x/y"}}
+	data.Settings.DocLayout = model.DocLayout{Toc: true, Numbering: true}
+	if err := st.SaveData(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// 传入指定模板（内部版）的结构 JSON
+	preset := DocPresetLayout("internal")
+	preset.Name = "内部版"
+	raw, err := json.Marshal(preset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := PreviewTemplateHTML(st, string(raw))
+	if err != nil {
+		t.Fatalf("预览渲染失败: %v", err)
+	}
+	for _, want := range []string{"文档模板预览 · 内部版", "接入指引（快速开始）", "术语表", "模板预览不包含具体接口"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("预览 HTML 缺少 %q", want)
+		}
+	}
+	if strings.Contains(html, `id="api-`) || strings.Contains(html, "查询用户") {
+		t.Fatal("预览不应包含具体接口")
+	}
+
+	// 空 JSON：使用当前生效结构（仅目录 + 正文）
+	html2, err := PreviewTemplateHTML(st, "")
+	if err != nil {
+		t.Fatalf("预览渲染失败: %v", err)
+	}
+	if !strings.Contains(html2, "模板预览不包含具体接口") {
+		t.Fatal("空 JSON 时应使用当前结构并输出占位说明")
+	}
+
+	// 非法 JSON 要报错而不是静默成功
+	if _, err := PreviewTemplateHTML(st, "{bad"); err == nil {
+		t.Fatal("非法结构 JSON 应返回错误")
 	}
 }

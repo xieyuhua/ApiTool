@@ -339,6 +339,11 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
+// PreviewDocTemplateHTML 生成模板结构预览 HTML（不含具体接口），供前端弹窗内嵌展示。
+func (a *App) PreviewDocTemplateHTML(layoutJSON string) (string, error) {
+	return doc.PreviewTemplateHTML(a.store, layoutJSON)
+}
+
 // PreviewDocTemplate 预览指定文档结构（只渲染章节，不含具体接口）并用浏览器打开。
 // layoutJSON 为空时使用当前生效结构。
 func (a *App) PreviewDocTemplate(layoutJSON string) (string, error) {

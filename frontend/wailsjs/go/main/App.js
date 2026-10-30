@@ -486,6 +486,10 @@ export function PreviewDocTemplate(arg1) {
   return window['go']['main']['App']['PreviewDocTemplate'](arg1);
 }
 
+export function PreviewDocTemplateHTML(arg1) {
+  return window['go']['main']['App']['PreviewDocTemplateHTML'](arg1);
+}
+
 export function PreviewDocWatermark(arg1, arg2) {
   return window['go']['main']['App']['PreviewDocWatermark'](arg1, arg2);
 }
