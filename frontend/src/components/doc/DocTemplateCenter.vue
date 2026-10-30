@@ -334,6 +334,8 @@ const chapterOptions = [
 const newVisible = ref(false)
 const newBusy = ref(false)
 const newName = ref('')
+const editingId = ref('')        // 非空表示在编辑已有模板
+const editingOldName = ref('')   // 原始名称（用于判断是否重命名）
 const newBase = ref('blank')     // blank | current
 const newChapters = ref(['toc', 'numbering', 'apis'])
 const newDraft = ref({})         // 正在编辑的模板草稿（含各章节内容）
@@ -434,13 +436,36 @@ function resetDraft() {
 }
 
 function openNewTemplate() {
+  editingId.value = ''
+  editingOldName.value = ''
   newName.value = ''
   newBase.value = 'blank'
   resetDraft()
   newVisible.value = true
 }
 
-watch(newBase, () => resetDraft())
+// 编辑已有模板：把该模板的结构与内容载入弹窗（章节勾选、顺序、内容都可改）
+function openEditTemplate(tpl) {
+  editingId.value = tpl.id
+  editingOldName.value = tpl.name
+  newName.value = tpl.name
+  newBase.value = 'current'
+  const layout = normalize(JSON.parse(JSON.stringify(tpl.layout || {})))
+  newDraft.value = layout
+  newChapters.value = chaptersOf(layout).filter(k => k !== 'apis').concat(['apis'])
+  const saved = Array.isArray(layout.sectionOrder) ? layout.sectionOrder : []
+  const order = []
+  for (const k of saved) if (chapterOptions.some(c => c.key === k)) order.push(k)
+  for (const c of chapterOptions) if (!order.includes(c.key)) order.push(c.key)
+  newOrder.value = order
+  newCleared.value = []
+  newVisible.value = true
+}
+
+watch(newBase, () => {
+  if (editingId.value) return   // 编辑已有模板时不要用当前结构覆盖草稿
+  resetDraft()
+})
 
 function toggleAllChapters(on) {
   newChapters.value = on
@@ -448,33 +473,57 @@ function toggleAllChapters(on) {
     : ['apis']  // 接口正文必选
 }
 
+// 把弹窗里的草稿整理成最终结构（补齐勾选章节的默认内容 + 写入章节顺序）
+async function buildLayoutFromDraft(name) {
+  const layout = newDraft.value
+  for (const opt of chapterOptions) {
+    if (!newChapters.value.includes(opt.key)) {
+      if (opt.clear) opt.clear(layout)
+      continue
+    }
+    if (opt.fillDefault) {
+      const isEmpty = opt.count ? opt.count(layout) === 0 : !String(layout[opt.field] || '').trim()
+      if (isEmpty && !newCleared.value.includes(opt.key)) await opt.fillDefault(layout)
+      else if (opt.flagField) layout[opt.flagField] = true
+    } else if (opt.apply) {
+      opt.apply(layout)
+    }
+  }
+  layout.sectionOrder = newOrder.value.filter(k => newChapters.value.includes(k) && k !== 'numbering')
+  layout.name = name
+  return layout
+}
+
 async function createTemplate() {
   const name = String(newName.value || '').trim()
   if (!name) { ElMessage.warning('请输入模板名称'); return }
-  if (myTemplates.value.some(t => t.name === name)) { ElMessage.warning('已存在同名模板，请换个名称'); return }
+  const dup = myTemplates.value.some(t => t.name === name && t.id !== editingId.value)
+  if (dup) { ElMessage.warning('已存在同名模板，请换个名称'); return }
   if (!newChapters.value.length) { ElMessage.warning('请至少勾选一个章节'); return }
 
   newBusy.value = true
   try {
-    const layout = newDraft.value
-    // 草稿可能只改了一部分内容，这里确保勾选项都有内容（空则补默认）
-    for (const opt of chapterOptions) {
-      if (!newChapters.value.includes(opt.key)) {
-        if (opt.clear) opt.clear(layout)
-        continue
+    // 编辑模式：先按原名称保存内容，再按需重命名
+    if (editingId.value) {
+      const layout = await buildLayoutFromDraft(editingOldName.value)
+      await SaveDocLayoutTemplate(editingOldName.value, JSON.stringify(layout))
+      if (name !== editingOldName.value) {
+        await RenameDocLayoutTemplate(editingId.value, name)
+        layout.name = name
       }
-      if (opt.fillDefault) {
-        const isEmpty = opt.count ? opt.count(layout) === 0 : !String(layout[opt.field] || '').trim()
-        if (isEmpty && !newCleared.value.includes(opt.key)) await opt.fillDefault(layout)
-        else if (opt.flagField) layout[opt.flagField] = true
-      } else if (opt.apply) {
-        opt.apply(layout)
+      // 正在使用的模板：同步更新当前结构
+      if (dl.value?.name === editingOldName.value || dl.value?.name === name) {
+        Object.assign(dl.value, normalize(JSON.parse(JSON.stringify(layout))))
+        await saveNow()
       }
+      await reloadStore()
+      normalize(dl.value)
+      newVisible.value = false
+      ElMessage.success('已保存模板：' + name)
+      return
     }
-    // 章节顺序：按拖拽顺序写入（numbering 不是章节，不参与）
-    layout.sectionOrder = newOrder.value.filter(k => newChapters.value.includes(k) && k !== 'numbering')
-    layout.name = name
 
+    const layout = await buildLayoutFromDraft(name)
     await SaveDocLayoutTemplate(name, JSON.stringify(layout))
     await reloadStore()
     normalize(dl.value)
@@ -835,6 +884,7 @@ function preview() {
             <div class="tpl-card-ops">
               <el-button link size="small" type="primary" :loading="previewing === tpl.id"
                 @click.stop="previewTemplate(tpl)">预览</el-button>
+              <el-button link size="small" type="primary" @click.stop="openEditTemplate(tpl)">编辑</el-button>
               <el-button link size="small" @click.stop="renameTemplate(tpl)">重命名</el-button>
               <el-button link size="small" @click.stop="duplicateTemplate(tpl)">复制</el-button>
               <el-button link size="small" type="danger" @click.stop="removeTemplate(tpl)">删除</el-button>
@@ -855,12 +905,13 @@ function preview() {
 
       <DocWatermarkPanel :dir-id="scopeDirId" />
 
-      <el-dialog v-model="newVisible" title="新建文档模板" width="720px" top="6vh">
+      <el-dialog v-model="newVisible" :title="editingId ? '编辑模板 · ' + editingOldName : '新建文档模板'"
+        width="720px" top="6vh">
         <el-form label-width="86px" label-position="left">
           <el-form-item label="模板名称">
             <el-input v-model="newName" placeholder="如：xx 事业部标准 / 内部评审版" style="width:320px" maxlength="40" show-word-limit />
           </el-form-item>
-          <el-form-item label="结构起点">
+          <el-form-item v-if="!editingId" label="结构起点">
             <el-radio-group v-model="newBase">
               <el-radio-button value="blank">空白模板</el-radio-button>
               <el-radio-button value="current">复制当前结构</el-radio-button>
@@ -909,7 +960,9 @@ function preview() {
         </el-form>
         <template #footer>
           <el-button @click="newVisible = false">取消</el-button>
-          <el-button type="primary" :loading="newBusy" @click="createTemplate">创建并使用</el-button>
+          <el-button type="primary" :loading="newBusy" @click="createTemplate">
+            {{ editingId ? '保存修改' : '创建并使用' }}
+          </el-button>
         </template>
       </el-dialog>
 
