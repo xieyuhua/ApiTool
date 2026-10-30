@@ -126,10 +126,21 @@ const previewVisible = ref(false)
 const previewLoading = ref(false)
 const previewTitle = ref('模板预览')
 const previewHTML = ref('')
+const previewSrc = ref('')   // Blob URL：比 srcdoc 更稳，且支持 #anchor 跳转
 const previewing = ref('')
 const previewMode = ref('template') // template | full
 let previewSeq = 0
 const previewKey = ref(0)   // 每次预览换 key，强制 iframe 重新挂载
+
+// setPreviewDoc 把预览 HTML 转成 Blob URL（超大文档用 srcdoc 容易导致渲染卡死）
+function setPreviewDoc(html) {
+  if (previewSrc.value) {
+    URL.revokeObjectURL(previewSrc.value)
+    previewSrc.value = ''
+  }
+  if (!html) return
+  previewSrc.value = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+}
 
 // withTimeout 给预览 RPC 加超时，避免界面一直停在「正在加载」
 function withTimeout(promise, ms = 20000, tip = '加载超时') {
@@ -152,6 +163,7 @@ async function openPreview(layout, title) {
       PreviewDocTemplateHTML(JSON.stringify({ ...layout, name: title })),
       20000, '生成模板预览超时，请减少章节内容后重试')
     previewHTML.value = html || ''
+    setPreviewDoc(html)
     if (!html) ElMessage.warning('预览内容为空')
   } catch (e) {
     ElMessage.error('预览失败：' + String(e))
@@ -166,6 +178,7 @@ function closePreview() {
   previewVisible.value = false
   previewLoading.value = false
   previewHTML.value = ''
+  setPreviewDoc('')
 }
 
 async function previewFullDoc() {
@@ -184,6 +197,7 @@ async function previewFullDoc() {
       PreviewDocHTML(scopeDirId.value || '', '', JSON.stringify(dl.value)),
       30000, '生成文档预览超时：接口数量较多时可先选一个较小的目录范围再预览')
     previewHTML.value = html || ''
+    setPreviewDoc(html)
     if (!html) ElMessage.warning('预览内容为空（所选范围内可能没有接口）')
   } catch (e) {
     ElMessage.error('预览失败：' + String(e))
@@ -614,7 +628,7 @@ function preview() {
 
       <el-dialog v-model="previewVisible" :title="previewTitle" width="1080px" top="4vh" destroy-on-close>
         <div v-loading="previewLoading && !previewHTML" element-loading-text="正在生成预览…" class="preview-wrap">
-          <iframe v-if="previewHTML" :key="previewKey" class="preview-frame" :srcdoc="previewHTML" />
+          <iframe v-if="previewSrc" :key="previewKey" class="preview-frame" :src="previewSrc" />
         </div>
         <template #footer>
           <span class="tpl-hint" style="margin-right:auto">
