@@ -1,4 +1,5 @@
 <script setup>
+const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知构建'
 import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
 import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
@@ -216,6 +217,11 @@ const navs = [
 
   <ClipboardHistory v-if="clipVisible" @close="closeClip" />
 
+  <!-- 前端构建时间戳：确认当前运行的是哪次构建（改完需 wails build 才会生效） -->
+  <div class="build-badge" :title="'客户端版本 ' + (store.appVersion || '-') + '；前端构建时间 ' + buildStamp">
+    {{ buildStamp.slice(5) }}
+  </div>
+
   <div v-if="!store.loaded" class="boot-loading">
     <div class="spinner"></div>
     <div class="boot-text">正在加载接口数据…</div>
@@ -288,6 +294,8 @@ const navs = [
   width: 38px; height: 38px; border: 4px solid var(--border); border-top-color: var(--primary);
   border-radius: 50%; animation: spin .8s linear infinite;
 }
-.boot-loading .boot-text { color: var(--text-muted); font-size: 14px; }
+.boot-loading .build-badge { position: fixed; right: 10px; bottom: 6px; z-index: 30; font-size: 11px;
+  color: #c9cdd4; background: rgba(255,255,255,.75); border-radius: 8px; padding: 1px 6px; pointer-events: auto; }
+.boot-text { color: var(--text-muted); font-size: 14px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>
