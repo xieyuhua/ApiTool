@@ -486,8 +486,8 @@ export function PolishText(arg1) {
   return window['go']['main']['App']['PolishText'](arg1);
 }
 
-export function PreviewDocHTML(arg1, arg2) {
-  return window['go']['main']['App']['PreviewDocHTML'](arg1, arg2);
+export function PreviewDocHTML(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PreviewDocHTML'](arg1, arg2, arg3);
 }
 
 export function PreviewDocTemplateHTML(arg1) {

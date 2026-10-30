@@ -128,9 +128,12 @@ const previewTitle = ref('模板预览')
 const previewHTML = ref('')
 const previewing = ref('')
 const previewMode = ref('template') // template | full
+let previewSeq = 0
+const previewKey = ref(0)   // 每次预览换 key，强制 iframe 重新挂载
 
 // openPreview 拉取「模板结构」预览 HTML 并在弹窗内用 iframe 展示（不含具体接口）
 async function openPreview(layout, title) {
+  previewKey.value = ++previewSeq
   previewMode.value = 'template'
   previewTitle.value = `模板预览 · ${title}（不含具体接口）`
   previewHTML.value = ''
@@ -151,6 +154,7 @@ async function openPreview(layout, title) {
 // openFullPreview 弹窗预览「整份文档」：含所选范围内的全部接口（按当前模板与水印）
 async function previewFullDoc() {
   if (previewing.value) return
+  previewKey.value = ++previewSeq
   previewing.value = 'full'
   previewMode.value = 'full'
   previewTitle.value = '预览整份文档（含接口）'
@@ -158,7 +162,9 @@ async function previewFullDoc() {
   previewVisible.value = true
   previewLoading.value = true
   try {
-    const html = await PreviewDocHTML(scopeDirId.value || '', '')
+    // 先把表单改动落库，再把「当前编辑中的结构」一并传给后端，确保预览就是所选模板
+    await saveNow()
+    const html = await PreviewDocHTML(scopeDirId.value || '', '', JSON.stringify(dl.value))
     previewHTML.value = html || ''
     if (!html) ElMessage.warning('预览内容为空（所选范围内可能没有接口）')
   } catch (e) {
@@ -590,7 +596,7 @@ function preview() {
 
       <el-dialog v-model="previewVisible" :title="previewTitle" width="1080px" top="4vh" destroy-on-close>
         <div v-loading="previewLoading" element-loading-text="正在生成预览…" class="preview-wrap">
-          <iframe v-if="previewHTML" class="preview-frame" :srcdoc="previewHTML" />
+          <iframe v-if="previewHTML" :key="previewKey" class="preview-frame" :srcdoc="previewHTML" />
         </div>
         <template #footer>
           <span class="tpl-hint" style="margin-right:auto">

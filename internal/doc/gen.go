@@ -220,14 +220,29 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 	return path, nil
 }
 
-// PreviewHTML 生成完整文档 HTML（含所选范围内的全部接口、按当前模板与水印），供前端弹窗预览。
-func PreviewHTML(s *store.Store, dirID string, apiID string) (string, error) {
+// PreviewHTML 生成完整文档 HTML（含所选范围内的全部接口），供前端弹窗预览。
+// layoutJSON 非空时使用该结构（前端当前编辑中的模板，含未落库的改动），否则用当前生效结构。
+func PreviewHTML(s *store.Store, dirID string, apiID string, layoutJSON string) (string, error) {
 	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return "", err
 	}
+	layout := scope.Layout
+	if strings.TrimSpace(layoutJSON) != "" {
+		data := s.GetData()
+		proj := model.Project{}
+		if idx := store.ActiveProjectIndex(data); idx >= 0 {
+			proj = data.Projects[idx]
+		}
+		var l model.DocLayout
+		if err := json.Unmarshal([]byte(layoutJSON), &l); err != nil {
+			return "", fmt.Errorf("文档结构解析失败: %v", err)
+		}
+		// 前端传入的是原始结构（未注入环境/公共头/验签等自动章节），这里按项目数据补齐
+		layout = EnrichDocLayout(l, proj.Environments, proj.Common)
+	}
 	return BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis,
-		scope.Common, scope.Watermark, scope.Layout), nil
+		scope.Common, scope.Watermark, layout), nil
 }
 
 // PreviewTemplateHTML 生成「模板结构预览」HTML（不含具体接口），供前端弹窗内嵌展示。
@@ -246,6 +261,8 @@ func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, err
 	}
 	layout := EffectiveDocLayout(data, proj)
 	if strings.TrimSpace(layoutJSON) != "" {
+		// 传入了结构就以它为准（从零值解析，避免与库里的旧结构混合）
+		layout = model.DocLayout{}
 		if err := json.Unmarshal([]byte(layoutJSON), &layout); err != nil {
 			return "", "", fmt.Errorf("文档结构解析失败: %v", err)
 		}

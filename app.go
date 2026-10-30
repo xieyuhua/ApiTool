@@ -344,9 +344,10 @@ func (a *App) RefreshShares() (int, error) {
 	return share.RefreshAllShares(a.store)
 }
 
-// PreviewDocHTML 生成完整文档预览 HTML（含接口、按当前模板与水印），供前端弹窗内嵌展示。
-func (a *App) PreviewDocHTML(dirID string, apiID string) (string, error) {
-	return doc.PreviewHTML(a.store, dirID, apiID)
+// PreviewDocHTML 生成完整文档预览 HTML（含接口），供前端弹窗内嵌展示。
+// layoutJSON 非空时按传入的结构渲染（前端当前编辑中的模板），否则用当前生效结构。
+func (a *App) PreviewDocHTML(dirID string, apiID string, layoutJSON string) (string, error) {
+	return doc.PreviewHTML(a.store, dirID, apiID, layoutJSON)
 }
 
 // PreviewDocTemplateHTML 生成模板结构预览 HTML（不含具体接口），供前端弹窗内嵌展示。

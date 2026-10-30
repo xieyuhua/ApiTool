@@ -202,7 +202,7 @@ func TestPreviewHTMLIncludesAPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	html, err := PreviewHTML(st, "", "")
+	html, err := PreviewHTML(st, "", "", "")
 	if err != nil {
 		t.Fatalf("整份文档预览失败: %v", err)
 	}
@@ -214,5 +214,47 @@ func TestPreviewHTMLIncludesAPIs(t *testing.T) {
 	// 与模板预览区分：这里不应出现占位说明
 	if strings.Contains(html, "模板预览不包含具体接口") {
 		t.Fatal("整份文档预览不应出现模板占位说明")
+	}
+}
+
+// TestPreviewHTMLUsesPassedLayout 预览必须使用前端传入的「当前选中模板」结构，
+// 即使数据库里存的是另一套结构（修复「预览不是所选模板」的问题）。
+func TestPreviewHTMLUsesPassedLayout(t *testing.T) {
+	st := store.New(t.TempDir(), "t", "")
+	t.Cleanup(func() { _ = st.Close() })
+
+	data := st.GetData()
+	data.Projects[0].Apis = []model.ApiInfo{
+		{ID: "a1", Name: "查询用户列表", Method: "get", URL: "https://api.example.com/users"},
+	}
+	// 库里保存的是「精简结构」
+	data.Settings.DocLayout = model.DocLayout{Toc: true, Numbering: true}
+	if err := st.SaveData(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// 前端传入的是「我选的模板」：封面 + 附录状态码 + 接入地址
+	passed := `{"toc":true,"numbering":true,"statusCodes":true,"environment":true,
+		"cover":{"enabled":true,"subtitle":"我选的模板"},"signOn":false,"conventionOn":false}`
+	html, err := PreviewHTML(st, "", "", passed)
+	if err != nil {
+		t.Fatalf("预览失败: %v", err)
+	}
+	for _, want := range []string{"我选的模板", "附录：HTTP 状态码", "接入地址（环境）", `id="api-a1"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("预览未使用传入的结构，缺少 %q", want)
+		}
+	}
+	if strings.Contains(html, "接口统一定义规范") {
+		t.Fatal("传入 signOn/conventionOn=false 时不应输出规范章节")
+	}
+
+	// 不传结构时回退到库里保存的结构（无封面）
+	html2, err := PreviewHTML(st, "", "", "")
+	if err != nil {
+		t.Fatalf("预览失败: %v", err)
+	}
+	if strings.Contains(html2, "我选的模板") || strings.Contains(html2, "附录：HTTP 状态码") {
+		t.Fatal("未传结构时应使用持久化的精简结构")
 	}
 }
