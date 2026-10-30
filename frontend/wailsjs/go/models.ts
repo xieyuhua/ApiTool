@@ -1549,6 +1549,10 @@ export namespace model {
 	    enums: DocEnum[];
 	    support: DocSupport;
 	    name?: string;
+	    revisionsOn?: boolean;
+	    glossaryOn?: boolean;
+	    enumsOn?: boolean;
+	    businessCodesOn?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1574,6 +1578,10 @@ export namespace model {
 	        this.enums = this.convertValues(source["enums"], DocEnum);
 	        this.support = this.convertValues(source["support"], DocSupport);
 	        this.name = source["name"];
+	        this.revisionsOn = source["revisionsOn"];
+	        this.glossaryOn = source["glossaryOn"];
+	        this.enumsOn = source["enumsOn"];
+	        this.businessCodesOn = source["businessCodesOn"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

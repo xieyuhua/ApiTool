@@ -36,7 +36,7 @@ func TestBuildHTMLByAPIShareOptions(t *testing.T) {
 	}
 
 	data := st.GetData()
-	data.Settings.ShareDocLayout = true
+	// 分享结构始终跟随「文档模板」，无需额外开关
 	data.Settings.ShareDocWatermark = true
 	data.Settings.DocLayout = model.DocLayout{
 		Toc: true, Numbering: true,
@@ -76,4 +76,67 @@ func TestBuildHTMLByAPIShareOptions(t *testing.T) {
 	if !strings.Contains(proj, "附录：HTTP 状态码") {
 		t.Fatal("项目级结构未生效（缺附录状态码）")
 	}
+}
+
+// TestShareFollowsTemplateAfterChange 模板变更后，分享内容（含已有链接）要跟着变。
+func TestShareFollowsTemplateAfterChange(t *testing.T) {
+	st := newTestStore(t)
+
+	// 初始：分享不含附录状态码
+	before, err := BuildHTMLByAPI(st, "", "a1")
+	if err != nil {
+		t.Fatalf("分享 HTML 构建失败: %v", err)
+	}
+	if strings.Contains(before, "附录：HTTP 状态码") {
+		t.Fatal("初始分享不应包含状态码附录")
+	}
+
+	// 在「文档模板」里开启附录 + 封面（不打开任何分享开关）
+	data := st.GetData()
+	data.Settings.DocLayout = model.DocLayout{
+		Toc: true, Numbering: true, StatusCodes: true,
+		Cover: model.DocCover{Enabled: true, Subtitle: "对外文档"},
+	}
+	if err := st.SaveData(data); err != nil {
+		t.Fatalf("保存模板失败: %v", err)
+	}
+	after, err := BuildHTMLByAPI(st, "", "a1")
+	if err != nil {
+		t.Fatalf("分享 HTML 构建失败: %v", err)
+	}
+	if !strings.Contains(after, "附录：HTTP 状态码") || !strings.Contains(after, "对外文档") {
+		t.Fatal("分享内容未跟随最新文档模板")
+	}
+
+	// 已有分享链接也要能按最新模板刷新
+	token, _, err := CreateShare(st, "", "a1", "", 0)
+	if err != nil {
+		t.Fatalf("创建分享失败: %v", err)
+	}
+	shareMu.Lock()
+	old := shareItems[token].HTML
+	shareMu.Unlock()
+	if !strings.Contains(old, "附录：HTTP 状态码") {
+		t.Fatal("新建分享应包含当前模板内容")
+	}
+
+	data = st.GetData()
+	data.Settings.DocLayout = model.DocLayout{Toc: true, Numbering: true}
+	if err := st.SaveData(data); err != nil {
+		t.Fatalf("保存模板失败: %v", err)
+	}
+	n, err := RefreshAllShares(st)
+	if err != nil {
+		t.Fatalf("刷新分享失败: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("应至少刷新一条分享")
+	}
+	shareMu.Lock()
+	refreshed := shareItems[token].HTML
+	shareMu.Unlock()
+	if strings.Contains(refreshed, "附录：HTTP 状态码") {
+		t.Fatal("刷新后分享内容未跟随新模板")
+	}
+	_ = StopShare(token)
 }

@@ -84,9 +84,13 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 	if layout.Cover.Enabled {
 		out = append(out, docSection{Kind: sectionCover, ID: "cover", Cover: layout.Cover})
 	}
-	if len(layout.Revisions) > 0 {
+	if docFlagOn(layout.RevisionsOn, len(layout.Revisions) > 0) {
+		rows := layout.Revisions
+		if len(rows) == 0 {
+			rows = []model.DocRevision{{Version: "—", Date: "—", Author: "—", Note: "暂无修订记录（可在「文档模板 → 修订记录」中添加）"}}
+		}
 		out = append(out, docSection{
-			Kind: sectionRevisions, ID: "revisions", Title: "文档修订记录", Revisions: layout.Revisions,
+			Kind: sectionRevisions, ID: "revisions", Title: "文档修订记录", Revisions: rows,
 		})
 	}
 	if layout.Toc {
@@ -110,17 +114,19 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 	if layout.StatusCodes {
 		out = append(out, docSection{Kind: sectionAppendix, ID: "appendix-status", Title: "附录：HTTP 状态码"})
 	}
-	if len(layout.BusinessCodes) > 0 {
-		out = append(out, docSection{
-			Kind: sectionBizCodes, ID: "appendix-codes", Title: "附录：业务错误码",
-			Content: businessCodesMarkdown(layout.BusinessCodes),
-		})
+	if docFlagOn(layout.BusinessCodesOn, len(layout.BusinessCodes) > 0) {
+		content := "> 尚未维护「业务错误码」。可在「文档模板 → 业务错误码」中点「填入默认错误码」。\n"
+		if len(layout.BusinessCodes) > 0 {
+			content = businessCodesMarkdown(layout.BusinessCodes)
+		}
+		out = append(out, docSection{Kind: sectionBizCodes, ID: "appendix-codes", Title: "附录：业务错误码", Content: content})
 	}
-	if len(layout.Enums) > 0 {
-		out = append(out, docSection{
-			Kind: sectionEnums, ID: "appendix-enums", Title: "附录：数据字典",
-			Content: enumsMarkdown(layout.Enums),
-		})
+	if docFlagOn(layout.EnumsOn, len(layout.Enums) > 0) {
+		content := "> 尚未维护「数据字典」。可在「文档模板 → 数据字典」中添加字段枚举值。\n"
+		if len(layout.Enums) > 0 {
+			content = enumsMarkdown(layout.Enums)
+		}
+		out = append(out, docSection{Kind: sectionEnums, ID: "appendix-enums", Title: "附录：数据字典", Content: content})
 	}
 	if layout.Support.Enabled && supportHasContent(layout.Support) {
 		out = append(out, docSection{
@@ -261,7 +267,9 @@ func DocPresetLayout(key string) model.DocLayout {
 	today := time.Now().Format("2006-01-02")
 	base := model.DocLayout{Toc: true, Numbering: true,
 		QuickStart: true, Glossary: DefaultGlossary(), Enums: DefaultEnums(),
-		SignOn: boolPtr(true), ConventionOn: boolPtr(true)}
+		SignOn: boolPtr(true), ConventionOn: boolPtr(true),
+		RevisionsOn: boolPtr(false), GlossaryOn: boolPtr(true),
+		EnumsOn: boolPtr(true), BusinessCodesOn: boolPtr(true)}
 
 	switch key {
 	case "internal":
@@ -271,6 +279,7 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 		base.BusinessCodes = DefaultBusinessCodes()
+		base.RevisionsOn = boolPtr(true)
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布"}}
 	case "external":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "对外接口文档", Version: "V1.0.0"}
@@ -295,6 +304,7 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.Environment, base.CommonHeaders, base.Sign = true, true, DefaultSignTemplate()
 		base.Convention = DefaultConventionTemplate()
 		base.BusinessCodes = DefaultBusinessCodes()
+		base.RevisionsOn = boolPtr(true)
 		base.Revisions = []model.DocRevision{{Version: "V0.9.0", Date: today, Note: "提交评审"}}
 	case "micro":
 		base.Cover = model.DocCover{Enabled: true, Subtitle: "微服务接口文档", Version: "V1.0.0"}
@@ -322,9 +332,13 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.Convention = DefaultConventionTemplate()
 		base.StatusCodes = true
 		base.BusinessCodes = DefaultBusinessCodes()
+		base.RevisionsOn = boolPtr(true)
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布（国密改造）"}}
 	default: // minimal：仅目录 + 接口正文
-		return model.DocLayout{Toc: true, Numbering: true, SignOn: boolPtr(false), ConventionOn: boolPtr(false)}
+		return model.DocLayout{Toc: true, Numbering: true,
+			SignOn: boolPtr(false), ConventionOn: boolPtr(false),
+			RevisionsOn: boolPtr(false), GlossaryOn: boolPtr(false),
+			EnumsOn: boolPtr(false), BusinessCodesOn: boolPtr(false)}
 	}
 	return base
 }
@@ -529,8 +543,12 @@ func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common mo
 		}
 		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign})
 	}
-	if c := glossaryChapter(layout.Glossary); c != "" {
-		extra = append(extra, model.DocChapter{Title: "术语表", Content: c})
+	if docFlagOn(layout.GlossaryOn, len(layout.Glossary) > 0) {
+		content := "> 尚未维护「术语表」。可在「文档模板 → 术语表」中点「填入通用术语」。\n"
+		if c := glossaryChapter(layout.Glossary); c != "" {
+			content = c
+		}
+		extra = append(extra, model.DocChapter{Title: "术语表", Content: content})
 	}
 	if len(extra) == 0 {
 		return layout

@@ -103,7 +103,7 @@ const checks = computed(() => {
   const push = (label, ok, hint) => list.push({ label, ok, hint })
 
   if (v.cover?.enabled) push('封面', true)
-  if (v.revisions?.length) push(`修订记录 ${v.revisions.length} 条`, true)
+  if (v.revisionsOn) push(`修订记录 ${(v.revisions || []).length} 条`, (v.revisions || []).length > 0, '尚未填写修订记录，导出会输出「暂无修订记录」占位')
   if (v.toc) push('目录', true)
   if (v.quickStart) push('接入指引', true)
   if (v.environment) push('接入地址（环境）', envs.length > 0 && hasBaseURL,
@@ -112,10 +112,10 @@ const checks = computed(() => {
   if (v.commonHeaders) push('公共请求头', (common.headers || []).length + (common.query || []).length > 0,
     '当前项目未配置「公共参数」，导出会输出占位提示')
   if (v.signOn) push('加密与验签', String(v.sign || '').trim() !== '', '未填写验签内容，导出会输出占位提示')
-  if (v.glossary?.length) push(`术语表 ${v.glossary.length} 条`, true)
+  if (v.glossaryOn) push(`术语表 ${(v.glossary || []).length} 条`, (v.glossary || []).length > 0, '尚未填写术语表，导出会输出占位提示')
   if (v.conventionOn) push('统一定义规范', String(v.convention || '').trim() !== '', '未填写规范内容，导出会输出占位提示')
-  if (v.businessCodes?.length) push(`业务错误码 ${v.businessCodes.length} 条`, true)
-  if (v.enums?.length) push(`数据字典 ${v.enums.length} 条`, true)
+  if (v.businessCodesOn) push(`业务错误码 ${(v.businessCodes || []).length} 条`, (v.businessCodes || []).length > 0, '尚未维护业务错误码，导出会输出占位提示')
+  if (v.enumsOn) push(`数据字典 ${(v.enums || []).length} 条`, (v.enums || []).length > 0, '尚未维护数据字典，导出会输出占位提示')
   if (v.support?.enabled) push('技术支持与联系', true)
   return list
 })

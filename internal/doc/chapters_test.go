@@ -125,3 +125,62 @@ func TestPreviewTemplateHTMLFromStore(t *testing.T) {
 		t.Fatal("非法结构 JSON 应返回错误")
 	}
 }
+
+// TestListChaptersSwitches 列表型章节（修订记录 / 术语表 / 数据字典 / 业务错误码）的开关行为：
+// 关闭 → 整章不输出；开启但无内容 → 输出占位；有内容 + 开启 → 正常表格。
+func TestListChaptersSwitches(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+
+	// 1) 全部开启但都没有内容 → 输出章节 + 占位提示
+	on := true
+	layout := model.DocLayout{
+		Toc: true, Numbering: true,
+		RevisionsOn: &on, GlossaryOn: &on, EnumsOn: &on, BusinessCodesOn: &on,
+	}
+	layout = EnrichDocLayout(layout, nil, common)
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	for _, want := range []string{
+		"文档修订记录", "暂无修订记录",
+		"术语表", "尚未维护「术语表」",
+		"附录：数据字典", "尚未维护「数据字典」",
+		"附录：业务错误码", "尚未维护「业务错误码」",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("开启但无内容时应输出占位 %q", want)
+		}
+	}
+
+	// 2) 有内容但关闭开关 → 整章不输出
+	off := false
+	filled := model.DocLayout{
+		Toc: true, Numbering: true,
+		RevisionsOn: &off, GlossaryOn: &off, EnumsOn: &off, BusinessCodesOn: &off,
+		Revisions:     []model.DocRevision{{Version: "V1.0.0", Date: "2026-10-30", Note: "首次发布"}},
+		Glossary:      DefaultGlossary(),
+		Enums:         DefaultEnums(),
+		BusinessCodes: DefaultBusinessCodes(),
+	}
+	filled = EnrichDocLayout(filled, nil, common)
+	html2 := BuildHTMLWithLayout(title, rootID, dirs, apis, common, filled)
+	for _, bad := range []string{"文档修订记录", "术语表", "附录：数据字典", "附录：业务错误码"} {
+		if strings.Contains(html2, bad) {
+			t.Fatalf("关闭开关后不应输出 %q", bad)
+		}
+	}
+
+	// 3) 有内容 + 开启 → 输出表格内容
+	html3 := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	html3b := BuildHTMLWithLayout(title, rootID, dirs, apis, common, EnrichDocLayout(model.DocLayout{
+		Toc: true, GlossaryOn: &on, EnumsOn: &on, BusinessCodesOn: &on, RevisionsOn: &on,
+		Revisions:     []model.DocRevision{{Version: "V1.0.0", Note: "首次发布"}},
+		Glossary:      DefaultGlossary(),
+		Enums:         DefaultEnums(),
+		BusinessCodes: DefaultBusinessCodes(),
+	}, nil, common))
+	for _, want := range []string{"V1.0.0", "appSecret", "gender", "40001"} {
+		if !strings.Contains(html3b, want) {
+			t.Fatalf("有内容且开启时应输出 %q", want)
+		}
+	}
+	_ = html3
+}

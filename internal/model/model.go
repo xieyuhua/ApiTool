@@ -292,6 +292,11 @@ type DocLayout struct {
 	Support DocSupport `json:"support"`
 	// Name 当前套用的模板名称（仅用于界面展示与选择，不参与排版）
 	Name string `json:"name,omitempty"`
+	// 列表型章节开关；nil 表示按「是否有内容」自动判断（兼容旧数据）
+	RevisionsOn     *bool `json:"revisionsOn,omitempty"`     // 文档修订记录
+	GlossaryOn      *bool `json:"glossaryOn,omitempty"`      // 术语表
+	EnumsOn         *bool `json:"enumsOn,omitempty"`         // 附录：数据字典
+	BusinessCodesOn *bool `json:"businessCodesOn,omitempty"` // 附录：业务错误码
 }
 
 // DocTerm 术语表条目。

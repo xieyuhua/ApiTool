@@ -34,13 +34,16 @@ type ShareServerInfo struct {
 
 // ShareItem 单条分享记录（内存态，应用退出即失效）
 type ShareItem struct {
-	Token      string `json:"token"`
-	Title      string `json:"title"`
-	HTML       string `json:"-"`
-	Password   string `json:"-"`
-	HasPassword bool  `json:"hasPassword"`
-	ExpireAt   int64  `json:"expireAt"` // 过期 unix 秒，0 表示长期
-	CreatedAt  int64  `json:"createdAt"`
+	Token       string `json:"token"`
+	Title       string `json:"title"`
+	HTML        string `json:"-"`
+	Password    string `json:"-"`
+	HasPassword bool   `json:"hasPassword"`
+	ExpireAt    int64  `json:"expireAt"` // 过期 unix 秒，0 表示长期
+	CreatedAt   int64  `json:"createdAt"`
+	// 分享来源范围：模板/水印变更后按此范围重新生成内容
+	DirID string `json:"-"`
+	APIID string `json:"-"`
 }
 
 // ShareItemView 对外暴露的分享项视图（不含 HTML 与明文密码）
@@ -175,18 +178,17 @@ h3{margin:0 0 16px;font-size:16px;color:#1f2329}</style></head>
 <body><form method="get"><h3>该分享需要访问密码</h3>
 <input name="pwd" type="password" placeholder="请输入密码" autofocus/><button type="submit">查看</button></form></body></html>`
 
-// shareLayout 返回分享文档要套用的排版与水印配置（未启用时均为零值，输出保持简洁版）。
+// shareLayout 返回分享文档要套用的排版与水印配置。
+// 结构始终跟随「文档模板」当前配置（项目级覆盖优先），保证分享内容与导出文件一致；
+// 水印按「添加导出水印」开关决定（默认跟随设置，未开启则不加）。
 func shareLayout(data model.AppData) (model.DocLayout, model.DocWatermark, model.Project) {
 	idx := store.ActiveProjectIndex(data)
 	proj := model.Project{}
 	if idx >= 0 {
 		proj = data.Projects[idx]
 	}
-	var layout model.DocLayout
+	layout := doc.EnrichDocLayout(doc.EffectiveDocLayout(data, proj), proj.Environments, proj.Common)
 	var wm model.DocWatermark
-	if data.Settings.ShareDocLayout {
-		layout = doc.EnrichDocLayout(doc.EffectiveDocLayout(data, proj), proj.Environments, proj.Common)
-	}
 	if data.Settings.ShareDocWatermark {
 		wm = doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
 	}
@@ -196,9 +198,6 @@ func shareLayout(data model.AppData) (model.DocLayout, model.DocWatermark, model
 // buildShareHTML 构建分享用 HTML：可选套用「文档结构」与「导出水印」。
 func buildShareHTML(data model.AppData, title, dirID string, dirs []model.Directory, apis []model.ApiInfo) string {
 	layout, wm, proj := shareLayout(data)
-	if !data.Settings.ShareDocLayout && !data.Settings.ShareDocWatermark {
-		return doc.BuildHTML(title, dirID, dirs, apis, proj.Common)
-	}
 	return doc.BuildHTMLForExportWithLayout(title, dirID, dirs, apis, proj.Common, wm, layout)
 }
 
@@ -243,6 +242,8 @@ func CreateShare(s *store.Store, dirID, apiID, password string, expireMinutes in
 		Password:    password,
 		HasPassword: strings.TrimSpace(password) != "",
 		CreatedAt:   time.Now().Unix(),
+		DirID:       dirID,
+		APIID:       apiID,
 	}
 	if expireMinutes > 0 {
 		item.ExpireAt = time.Now().Add(time.Duration(expireMinutes) * time.Minute).Unix()
@@ -308,6 +309,32 @@ func BuildDoc(s *store.Store, scope, projectID, dirID, format string) (string, e
 	default:
 		return buildShareHTML(data, title, realDir, dirs, apis), nil
 	}
+}
+
+// RefreshAllShares 按最新「文档模板」重建全部分享链接的内容，返回刷新条数。
+// 模板或水印调整后调用，避免旧链接继续展示旧结构。
+func RefreshAllShares(s *store.Store) (int, error) {
+	shareMu.Lock()
+	items := make([]*ShareItem, 0, len(shareItems))
+	for _, it := range shareItems {
+		items = append(items, it)
+	}
+	shareMu.Unlock()
+
+	updated := 0
+	for _, it := range items {
+		_, html, err := htmlByAPI(s, it.DirID, it.APIID)
+		if err != nil {
+			continue // 该范围已无接口（被删除）时跳过，保留原内容
+		}
+		shareMu.Lock()
+		if cur, ok := shareItems[it.Token]; ok {
+			cur.HTML = html
+		}
+		shareMu.Unlock()
+		updated++
+	}
+	return updated, nil
 }
 
 // Refresh 重新生成当前分享文档并刷新托管内容（不重启服务）。

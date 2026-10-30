@@ -440,6 +440,10 @@ async function loadInto() {
   if (!Array.isArray(dl.businessCodes)) dl.businessCodes = []
   if (typeof dl.quickStart !== 'boolean') dl.quickStart = true
   if (dl.signOn === undefined || dl.signOn === null) dl.signOn = true
+  if (dl.revisionsOn === undefined || dl.revisionsOn === null) dl.revisionsOn = (dl.revisions || []).length > 0
+  if (dl.glossaryOn === undefined || dl.glossaryOn === null) dl.glossaryOn = (dl.glossary || []).length > 0
+  if (dl.enumsOn === undefined || dl.enumsOn === null) dl.enumsOn = (dl.enums || []).length > 0
+  if (dl.businessCodesOn === undefined || dl.businessCodesOn === null) dl.businessCodesOn = (dl.businessCodes || []).length > 0
   if (dl.conventionOn === undefined || dl.conventionOn === null) dl.conventionOn = true
   if (!Array.isArray(dl.glossary)) dl.glossary = []
   if (!Array.isArray(dl.enums)) dl.enums = []

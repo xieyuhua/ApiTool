@@ -36,6 +36,10 @@ function normalize(v) {
   if (!Array.isArray(v.businessCodes)) v.businessCodes = []
   if (typeof v.quickStart !== 'boolean') v.quickStart = true
   if (v.signOn === undefined || v.signOn === null) v.signOn = true
+  if (v.revisionsOn === undefined || v.revisionsOn === null) v.revisionsOn = (v.revisions || []).length > 0
+  if (v.glossaryOn === undefined || v.glossaryOn === null) v.glossaryOn = (v.glossary || []).length > 0
+  if (v.enumsOn === undefined || v.enumsOn === null) v.enumsOn = (v.enums || []).length > 0
+  if (v.businessCodesOn === undefined || v.businessCodesOn === null) v.businessCodesOn = (v.businessCodes || []).length > 0
   if (v.conventionOn === undefined || v.conventionOn === null) v.conventionOn = true
   if (!Array.isArray(v.glossary)) v.glossary = []
   if (!Array.isArray(v.enums)) v.enums = []
@@ -123,6 +127,7 @@ async function fillCodes() {
   try {
     if (dl.value.businessCodes.length && !window.confirm('当前已有错误码，确定用默认表覆盖吗？')) return
     dl.value.businessCodes = await DefaultDocBusinessCodes()
+    dl.value.businessCodesOn = true
     saveWithTip('已填入默认业务错误码，可按项目实际修改')
   } catch (e) {
     ElMessage.error(String(e))
@@ -148,6 +153,7 @@ async function fillGlossary() {
   try {
     if (dl.value.glossary.length && !window.confirm('当前已有术语，确定用默认术语表覆盖吗？')) return
     dl.value.glossary = await DefaultDocGlossary()
+    dl.value.glossaryOn = true
     saveWithTip('已填入通用术语表')
   } catch (e) {
     ElMessage.error(String(e))
@@ -165,6 +171,7 @@ async function fillEnums() {
   try {
     if (dl.value.enums.length && !window.confirm('当前已有枚举，确定用默认数据字典覆盖吗？')) return
     dl.value.enums = await DefaultDocEnums()
+    dl.value.enumsOn = true
     saveWithTip('已填入默认数据字典（按项目实际修改）')
   } catch (e) {
     ElMessage.error(String(e))
@@ -175,6 +182,7 @@ async function fillEnums() {
 function addRevision() {
   const today = new Date().toISOString().slice(0, 10)
   dl.value.revisions.push({ version: '', date: today, author: '', note: '' })
+  dl.value.revisionsOn = true
   save()
 }
 function removeRevision(i) {
@@ -314,6 +322,10 @@ defineExpose({ preview })
 
       <el-form-item label="术语表">
         <div style="width:100%">
+          <div style="margin-bottom:6px">
+            <el-switch v-model="dl.glossaryOn" @change="save" />
+            <span class="dl-hint">关闭后导出文档不输出「术语表」章节（内容仍保留）</span>
+          </div>
           <div>
             <el-button size="small" @click="fillGlossary">填入通用术语</el-button>
             <el-button size="small" @click="addTerm">+ 添加</el-button>
@@ -329,6 +341,10 @@ defineExpose({ preview })
 
       <el-form-item label="数据字典">
         <div style="width:100%">
+          <div style="margin-bottom:6px">
+            <el-switch v-model="dl.enumsOn" @change="save" />
+            <span class="dl-hint">关闭后导出文档不输出「附录：数据字典」章节（内容仍保留）</span>
+          </div>
           <div>
             <el-button size="small" @click="fillEnums">填入默认枚举</el-button>
             <el-button size="small" @click="addEnum">+ 添加</el-button>
@@ -366,6 +382,10 @@ defineExpose({ preview })
 
       <el-form-item label="业务错误码">
         <div style="width:100%">
+          <div style="margin-bottom:6px">
+            <el-switch v-model="dl.businessCodesOn" @change="save" />
+            <span class="dl-hint">关闭后导出文档不输出「附录：业务错误码」章节（内容仍保留）</span>
+          </div>
           <div>
             <el-button size="small" @click="fillCodes">填入默认错误码</el-button>
             <el-button size="small" @click="addCode">+ 添加</el-button>
@@ -382,7 +402,11 @@ defineExpose({ preview })
       </el-form-item>
 
       <el-form-item label="修订记录">
-        <div>
+        <div style="width:100%">
+          <div style="margin-bottom:6px">
+            <el-switch v-model="dl.revisionsOn" @change="save" />
+            <span class="dl-hint">关闭后导出文档不输出「文档修订记录」章节（内容仍保留）</span>
+          </div>
           <el-button size="small" @click="addRevision">+ 添加记录</el-button>
           <span class="dl-hint">{{ dl.revisions.length }} 条（版本 / 日期 / 作者 / 说明）</span>
           <div v-for="(r, i) in dl.revisions" :key="i" class="dl-rev">

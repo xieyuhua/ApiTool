@@ -275,6 +275,8 @@ export function ReadData():Promise<model.AppData>;
 
 export function RefreshShareDoc(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function RefreshShares():Promise<number>;
+
 export function RegisterWebUI(arg1:http.Handler):Promise<void>;
 
 export function RenameAgentSession(arg1:string,arg2:string):Promise<void>;

@@ -518,6 +518,10 @@ export function RefreshShareDoc(arg1, arg2, arg3) {
   return window['go']['main']['App']['RefreshShareDoc'](arg1, arg2, arg3);
 }
 
+export function RefreshShares() {
+  return window['go']['main']['App']['RefreshShares']();
+}
+
 export function RegisterWebUI(arg1) {
   return window['go']['main']['App']['RegisterWebUI'](arg1);
 }

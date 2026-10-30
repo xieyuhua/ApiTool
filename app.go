@@ -339,6 +339,11 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
+// RefreshShares 按最新「文档模板」重建全部分享链接内容，返回刷新条数。
+func (a *App) RefreshShares() (int, error) {
+	return share.RefreshAllShares(a.store)
+}
+
 // PreviewDocTemplateHTML 生成模板结构预览 HTML（不含具体接口），供前端弹窗内嵌展示。
 func (a *App) PreviewDocTemplateHTML(layoutJSON string) (string, error) {
 	return doc.PreviewTemplateHTML(a.store, layoutJSON)
