@@ -297,6 +297,9 @@ type DocLayout struct {
 	GlossaryOn      *bool `json:"glossaryOn,omitempty"`      // 术语表
 	EnumsOn         *bool `json:"enumsOn,omitempty"`         // 附录：数据字典
 	BusinessCodesOn *bool `json:"businessCodesOn,omitempty"` // 附录：业务错误码
+	// SectionOrder 自定义章节顺序（键名，如 cover / toc / apis / statusCodes）；
+	// 为空时用默认顺序，未列出的章节保持原相对位置追加在后
+	SectionOrder []string `json:"sectionOrder,omitempty"`
 }
 
 // DocTerm 术语表条目。
@@ -345,6 +348,9 @@ type DocCover struct {
 type DocChapter struct {
 	Title   string `json:"title"`
 	Content string `json:"content"` // 简化 Markdown（支持标题/列表/表格/代码块/段落）
+	// Key 章节键（quickStart / environment / commonHeaders / sign / glossary），
+	// 由后端自动生成的章节使用；用户自定义章节为空
+	Key string `json:"key,omitempty"`
 }
 
 // DocRevision 文档修订记录的一行。

@@ -17,6 +17,44 @@ const props = defineProps({
 })
 
 const dl = computed(() => props.layout)
+
+// ---------------- 章节顺序（可拖动调整，写入 layout.sectionOrder） ----------------
+const orderLabels = {
+  cover: '作者封面', revisions: '修订记录', toc: '目录', prefaces: '文档公共描述',
+  quickStart: '接入指引', environment: '接入地址（环境）', commonHeaders: '公共请求头',
+  sign: '加密与验签', glossary: '术语表', convention: '统一定义规范', apis: '接口正文',
+  statusCodes: '附录：状态码', businessCodes: '附录：业务错误码', enums: '附录：数据字典',
+  support: '技术支持与联系',
+}
+const defaultOrder = ['cover', 'revisions', 'toc', 'prefaces', 'quickStart', 'environment',
+  'commonHeaders', 'sign', 'glossary', 'convention', 'apis', 'statusCodes', 'businessCodes', 'enums', 'support']
+
+const orderKeys = computed(() => {
+  const saved = Array.isArray(dl.value?.sectionOrder) ? dl.value.sectionOrder : []
+  const out = []
+  for (const k of saved) if (orderLabels[k] && !out.includes(k)) out.push(k)
+  for (const k of defaultOrder) if (!out.includes(k)) out.push(k)
+  return out
+})
+
+const dragKey = ref('')
+function onOrderDragStart(k) { dragKey.value = k }
+function onOrderDrop(target) {
+  const from = dragKey.value
+  dragKey.value = ''
+  if (!from || from === target) return
+  const list = orderKeys.value.slice()
+  const i = list.indexOf(from), j = list.indexOf(target)
+  if (i < 0 || j < 0) return
+  list.splice(i, 1)
+  list.splice(j, 0, from)
+  dl.value.sectionOrder = list
+  save()
+}
+function resetOrder() {
+  dl.value.sectionOrder = defaultOrder.slice()
+  save()
+}
 const previewing = ref(false)
 // 预览交给「文档模板」页面统一用弹窗展示
 const emit = defineEmits(['preview-full'])
@@ -212,9 +250,23 @@ defineExpose({ preview })
 <template>
   <div class="card">
     <div class="card-title">文档结构（企业级排版）</div>
+    <div class="dl-order">
+      <div class="dl-order-head">
+        <span class="dl-order-title">章节顺序（拖动调整）</span>
+        <el-button link size="small" @click="resetOrder">恢复默认顺序</el-button>
+      </div>
+      <div class="order-list">
+        <span v-for="k in orderKeys" :key="k" class="order-chip" draggable="true"
+          :class="{ dragging: dragKey === k }" @dragstart="onOrderDragStart(k)" @dragover.prevent
+          @drop.prevent="onOrderDrop(k)" title="拖动调整位置">{{ orderLabels[k] }}</span>
+      </div>
+      <div class="dl-hint">未勾选的章节不会输出；这里的顺序同时作用于 Word / PDF / HTML / Markdown 与目录</div>
+    </div>
+
     <div class="dl-tip">
-      按需勾选要输出的章节，导出顺序为：封面 → 修订记录 → 目录 → 文档公共描述 → 接入指引 → 接入地址（环境）→
-      公共请求头 → 加密与验签 → 术语表 → 接口统一定义规范 → 接口正文 → 附录（状态码 / 业务错误码 / 数据字典）→ 技术支持与联系。
+      按需勾选要输出的章节；默认导出顺序为：封面 → 修订记录 → 目录 → 文档公共描述 → 接入指引 → 接入地址（环境）→
+      公共请求头 → 加密与验签 → 术语表 → 接口统一定义规范 → 接口正文 → 附录（状态码 / 业务错误码 / 数据字典）→ 技术支持与联系，
+      可在下方「章节顺序」里拖动自定义。
       <b>勾选的章节一定会输出</b>：项目里缺少环境变量、公共参数或验签内容时，会写入带提示的占位内容。
       Word / PDF / HTML / Markdown 共用同一套结构，配置自动保存。
     </div>
@@ -432,6 +484,13 @@ defineExpose({ preview })
 
 <style scoped>
 .dl-tip { font-size: 13px; color: #4e5969; margin-bottom: 12px; }
+.dl-order { background: #f7f8fa; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; }
+.dl-order-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.dl-order-title { font-size: 12.5px; color: #4e5969; font-weight: 600; }
+.order-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.order-chip { font-size: 12px; color: #1f2329; background: #fff; border: 1px solid #e5e6eb; border-radius: 14px;
+  padding: 2px 10px; cursor: grab; user-select: none; }
+.order-chip.dragging { opacity: .45; border-style: dashed; }
 .dl-hint { font-size: 12px; color: #86909c; margin-left: 10px; }
 .dl-chapter { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .dl-chapter :deep(.el-input) { align-self: flex-start; }

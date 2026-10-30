@@ -30,6 +30,7 @@ const (
 // docSection 导出文档中的一章。Content 为简化 Markdown（前言 / 规范正文）。
 type docSection struct {
 	Kind      docSectionKind
+	Key       string // 章节键（用于自定义排序）
 	ID        string // 锚点 / Word 书签名（目录链接用）
 	Title     string
 	Content   string
@@ -82,7 +83,7 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 	var out []docSection
 
 	if layout.Cover.Enabled {
-		out = append(out, docSection{Kind: sectionCover, ID: "cover", Cover: layout.Cover})
+		out = append(out, docSection{Kind: sectionCover, Key: "cover", ID: "cover", Cover: layout.Cover})
 	}
 	if docFlagOn(layout.RevisionsOn, len(layout.Revisions) > 0) {
 		rows := layout.Revisions
@@ -90,15 +91,20 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 			rows = []model.DocRevision{{Version: "—", Date: "—", Author: "—", Note: "暂无修订记录（可在「文档模板 → 修订记录」中添加）"}}
 		}
 		out = append(out, docSection{
-			Kind: sectionRevisions, ID: "revisions", Title: "文档修订记录", Revisions: rows,
+			Kind: sectionRevisions, Key: "revisions", ID: "revisions", Title: "文档修订记录", Revisions: rows,
 		})
 	}
 	if layout.Toc {
-		out = append(out, docSection{Kind: sectionTOC, ID: "toc", Title: "目录"})
+		out = append(out, docSection{Kind: sectionTOC, Key: "toc", ID: "toc", Title: "目录"})
 	}
 	for i, c := range layout.Prefaces {
+		key := strings.TrimSpace(c.Key)
+		if key == "" {
+			key = "prefaces"
+		}
 		out = append(out, docSection{
-			Kind: sectionPreface, ID: fmt.Sprintf("preface-%d", i+1), Title: c.Title, Content: c.Content, Chapter: c,
+			Kind: sectionPreface, Key: key, ID: fmt.Sprintf("preface-%d", i+1),
+			Title: c.Title, Content: c.Content, Chapter: c,
 		})
 	}
 	if docFlagOn(layout.ConventionOn, strings.TrimSpace(layout.Convention) != "") {
@@ -107,32 +113,70 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 			content = "> 尚未填写「接口统一定义规范」。可在「文档模板 → 统一定义规范」中填写，或点「填入默认模板」。"
 		}
 		out = append(out, docSection{
-			Kind: sectionConvention, ID: "convention", Title: "接口统一定义规范", Content: content,
+			Kind: sectionConvention, Key: "convention", ID: "convention", Title: "接口统一定义规范", Content: content,
 		})
 	}
-	out = append(out, docSection{Kind: sectionAPIs, ID: "apis", Title: docTitle})
+	out = append(out, docSection{Kind: sectionAPIs, Key: "apis", ID: "apis", Title: docTitle})
 	if layout.StatusCodes {
-		out = append(out, docSection{Kind: sectionAppendix, ID: "appendix-status", Title: "附录：HTTP 状态码"})
+		out = append(out, docSection{Kind: sectionAppendix, Key: "statusCodes", ID: "appendix-status", Title: "附录：HTTP 状态码"})
 	}
 	if docFlagOn(layout.BusinessCodesOn, len(layout.BusinessCodes) > 0) {
 		content := "> 尚未维护「业务错误码」。可在「文档模板 → 业务错误码」中点「填入默认错误码」。\n"
 		if len(layout.BusinessCodes) > 0 {
 			content = businessCodesMarkdown(layout.BusinessCodes)
 		}
-		out = append(out, docSection{Kind: sectionBizCodes, ID: "appendix-codes", Title: "附录：业务错误码", Content: content})
+		out = append(out, docSection{Kind: sectionBizCodes, Key: "businessCodes", ID: "appendix-codes", Title: "附录：业务错误码", Content: content})
 	}
 	if docFlagOn(layout.EnumsOn, len(layout.Enums) > 0) {
 		content := "> 尚未维护「数据字典」。可在「文档模板 → 数据字典」中添加字段枚举值。\n"
 		if len(layout.Enums) > 0 {
 			content = enumsMarkdown(layout.Enums)
 		}
-		out = append(out, docSection{Kind: sectionEnums, ID: "appendix-enums", Title: "附录：数据字典", Content: content})
+		out = append(out, docSection{Kind: sectionEnums, Key: "enums", ID: "appendix-enums", Title: "附录：数据字典", Content: content})
 	}
 	if layout.Support.Enabled && supportHasContent(layout.Support) {
 		out = append(out, docSection{
-			Kind: sectionSupport, ID: "support", Title: "技术支持与联系",
+			Kind: sectionSupport, Key: "support", ID: "support", Title: "技术支持与联系",
 			Content: supportMarkdown(layout.Support),
 		})
+	}
+	return orderSections(out, layout.SectionOrder)
+}
+
+// DefaultSectionOrder 默认章节顺序（键名）；前端「新建模板 / 章节顺序」按此展示与拖拽。
+func DefaultSectionOrder() []string {
+	return []string{
+		"cover", "revisions", "toc", "prefaces", "quickStart", "environment",
+		"commonHeaders", "sign", "glossary", "convention", "apis",
+		"statusCodes", "businessCodes", "enums", "support",
+	}
+}
+
+// orderSections 按 order 重排章节：先输出 order 中列出的键（同键保持原相对顺序），
+// 未列出的章节按原顺序追加，保证不丢章节。
+func orderSections(secs []docSection, order []string) []docSection {
+	if len(order) == 0 || len(secs) <= 1 {
+		return secs
+	}
+	used := make([]bool, len(secs))
+	out := make([]docSection, 0, len(secs))
+	for _, key := range order {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		for i, s := range secs {
+			if used[i] || s.Key != key {
+				continue
+			}
+			out = append(out, s)
+			used[i] = true
+		}
+	}
+	for i, s := range secs {
+		if !used[i] {
+			out = append(out, s)
+		}
 	}
 	return out
 }
@@ -524,16 +568,16 @@ var defaultBusinessCodes = []model.DocCode{
 func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common model.CommonParams) model.DocLayout {
 	extra := make([]model.DocChapter, 0, 5)
 	if layout.QuickStart {
-		extra = append(extra, model.DocChapter{Title: "接入指引（快速开始）", Content: quickStartChapter})
+		extra = append(extra, model.DocChapter{Title: "接入指引（快速开始）", Content: quickStartChapter, Key: "quickStart"})
 	}
 	if layout.Environment {
 		if c := envChapter(envs); c != "" {
-			extra = append(extra, model.DocChapter{Title: "接入地址（环境）", Content: c})
+			extra = append(extra, model.DocChapter{Title: "接入地址（环境）", Content: c, Key: "environment"})
 		}
 	}
 	if layout.CommonHeaders {
 		if c := headersChapter(common); c != "" {
-			extra = append(extra, model.DocChapter{Title: "公共请求头与公共参数", Content: c})
+			extra = append(extra, model.DocChapter{Title: "公共请求头与公共参数", Content: c, Key: "commonHeaders"})
 		}
 	}
 	if docFlagOn(layout.SignOn, strings.TrimSpace(layout.Sign) != "") {
@@ -541,14 +585,14 @@ func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common mo
 		if strings.TrimSpace(sign) == "" {
 			sign = "> 尚未填写「加密与验签」说明。可在「文档模板 → 加密与验签」中选择验签模板一键填入。"
 		}
-		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign})
+		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign, Key: "sign"})
 	}
 	if docFlagOn(layout.GlossaryOn, len(layout.Glossary) > 0) {
 		content := "> 尚未维护「术语表」。可在「文档模板 → 术语表」中点「填入通用术语」。\n"
 		if c := glossaryChapter(layout.Glossary); c != "" {
 			content = c
 		}
-		extra = append(extra, model.DocChapter{Title: "术语表", Content: content})
+		extra = append(extra, model.DocChapter{Title: "术语表", Content: content, Key: "glossary"})
 	}
 	if len(extra) == 0 {
 		return layout

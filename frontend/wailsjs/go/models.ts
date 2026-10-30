@@ -1495,6 +1495,7 @@ export namespace model {
 	export class DocChapter {
 	    title: string;
 	    content: string;
+	    key?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocChapter(source);
@@ -1504,6 +1505,7 @@ export namespace model {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.title = source["title"];
 	        this.content = source["content"];
+	        this.key = source["key"];
 	    }
 	}
 	export class DocCover {
@@ -1553,6 +1555,7 @@ export namespace model {
 	    glossaryOn?: boolean;
 	    enumsOn?: boolean;
 	    businessCodesOn?: boolean;
+	    sectionOrder?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1582,6 +1585,7 @@ export namespace model {
 	        this.glossaryOn = source["glossaryOn"];
 	        this.enumsOn = source["enumsOn"];
 	        this.businessCodesOn = source["businessCodesOn"];
+	        this.sectionOrder = source["sectionOrder"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

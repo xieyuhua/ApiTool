@@ -272,31 +272,129 @@ function chipsOf(l) {
 // 新建模板：可复制当前结构或从空白开始，创建后立即设为当前模板
 // ---------------- 新建模板：名称 + 结构勾选 ----------------
 // 可勾选的章节定义（apply 负责把该章节的开关/默认内容写进 layout）
+// 章节选项：type = flag（仅开关）/ text（可编辑文本）/ list（可维护列表）
+// fillDefault 提供内置默认内容；clear 清空内容并关闭开关
 const chapterOptions = [
-  { key: 'cover', label: '作者封面', desc: '标题 / 副标题 / 作者 / 单位 / 版本 / 日期，单独一页', apply: l => { l.cover = l.cover || {}; l.cover.enabled = true } },
-  { key: 'revisions', label: '文档修订记录', desc: '版本 / 日期 / 作者 / 修订说明', apply: l => { l.revisionsOn = true; if (!l.revisions?.length) l.revisions = [{ version: 'V1.0.0', date: todayStr(), author: '', note: '首次发布' }] } },
-  { key: 'toc', label: '目录', desc: 'Word 为可更新域，PDF/HTML 为带锚点目录', apply: l => { l.toc = true } },
-  { key: 'numbering', label: '章节编号', desc: '1 / 1.1 / 1.1.1，三种格式一致', apply: l => { l.numbering = true } },
-  { key: 'quickStart', label: '接入指引（快速开始）', desc: '申请凭证 → 选环境 → 公共头 → 签名 → 调用与排错', apply: l => { l.quickStart = true } },
-  { key: 'environment', label: '接入地址（环境）', desc: '按项目环境变量生成测试/预发/生产地址表', apply: l => { l.environment = true } },
-  { key: 'commonHeaders', label: '公共请求头与公共参数', desc: '按项目「公共参数」生成表格', apply: l => { l.commonHeaders = true } },
-  { key: 'sign', label: '加密与验签', desc: '填充所选验签方案（默认 MD5 排序拼接）', apply: null, fill: 'sign' },
-  { key: 'glossary', label: '术语表', desc: '填充通用术语（appId / Nonce / 幂等 …）', apply: null, fill: 'glossary' },
-  { key: 'convention', label: '接口统一定义规范', desc: '填充默认团队规范模板', apply: null, fill: 'convention' },
-  { key: 'statusCodes', label: '附录：HTTP 状态码', desc: '常用状态码名称 / 含义 / 场景', apply: l => { l.statusCodes = true } },
-  { key: 'businessCodes', label: '附录：业务错误码', desc: '填充默认业务码表（0 / 40001 / 50001 …）', apply: null, fill: 'businessCodes' },
-  { key: 'enums', label: '附录：数据字典', desc: '填充默认枚举样例（status / gender）', apply: null, fill: 'enums' },
-  { key: 'support', label: '技术支持与联系', desc: '对接人 / 邮箱 / 群 / 工单 / 响应时效', apply: l => { l.support = l.support || {}; l.support.enabled = true } },
+  { key: 'cover', label: '作者封面', type: 'flag', desc: '标题 / 副标题 / 作者 / 单位 / 版本 / 日期，单独一页',
+    apply: l => { l.cover = l.cover || {}; l.cover.enabled = true },
+    clear: l => { if (l.cover) l.cover.enabled = false } },
+  { key: 'revisions', label: '文档修订记录', type: 'list', desc: '版本 / 日期 / 作者 / 修订说明',
+    count: l => (l.revisions || []).length,
+    fillDefault: l => { l.revisions = [{ version: 'V1.0.0', date: todayStr(), author: '', note: '首次发布' }]; l.revisionsOn = true },
+    clear: l => { l.revisionsOn = false } },
+  { key: 'toc', label: '目录', type: 'flag', desc: 'Word 为可更新域，PDF/HTML 为带锚点目录',
+    apply: l => { l.toc = true }, clear: l => { l.toc = false } },
+  { key: 'numbering', label: '章节编号', type: 'flag', desc: '1 / 1.1 / 1.1.1，三种格式一致',
+    apply: l => { l.numbering = true }, clear: l => { l.numbering = false } },
+  { key: 'quickStart', label: '接入指引（快速开始）', type: 'flag', desc: '申请凭证 → 选环境 → 公共头 → 签名 → 调用与排错',
+    apply: l => { l.quickStart = true }, clear: l => { l.quickStart = false } },
+  { key: 'environment', label: '接入地址（环境）', type: 'flag', desc: '按项目环境变量生成测试/预发/生产地址表',
+    apply: l => { l.environment = true }, clear: l => { l.environment = false } },
+  { key: 'commonHeaders', label: '公共请求头与公共参数', type: 'flag', desc: '按项目「公共参数」生成表格',
+    apply: l => { l.commonHeaders = true }, clear: l => { l.commonHeaders = false } },
+  { key: 'sign', label: '加密与验签', type: 'text', field: 'sign', flagField: 'signOn',
+    desc: '可编辑签名规则 / 示例代码，支持一键填入内置验签方案',
+    fillDefault: async l => {
+      if (!String(l.sign || '').trim()) {
+        const list = await DocSignTemplates().catch(() => [])
+        l.sign = list?.[0]?.content || ''
+      }
+      l.signOn = true
+    },
+    clear: l => { l.signOn = false } },
+  { key: 'glossary', label: '术语表', type: 'list', desc: '术语解释，可一键填入通用术语后再增删改',
+    count: l => (l.glossary || []).length,
+    fillDefault: async l => { l.glossary = await DefaultDocGlossary(); l.glossaryOn = true },
+    clear: l => { l.glossaryOn = false } },
+  { key: 'convention', label: '接口统一定义规范', type: 'text', field: 'convention', flagField: 'conventionOn',
+    desc: '编写或一键填入默认团队规范',
+    fillDefault: async l => {
+      if (!String(l.convention || '').trim()) l.convention = await DefaultDocConvention()
+      l.conventionOn = true
+    },
+    clear: l => { l.conventionOn = false } },
+  { key: 'statusCodes', label: '附录：HTTP 状态码', type: 'flag', desc: '常用状态码名称 / 含义 / 场景',
+    apply: l => { l.statusCodes = true }, clear: l => { l.statusCodes = false } },
+  { key: 'businessCodes', label: '附录：业务错误码', type: 'list', desc: '业务码 / 含义 / 排查建议，可一键填入默认表',
+    count: l => (l.businessCodes || []).length,
+    fillDefault: async l => { l.businessCodes = await DefaultDocBusinessCodes(); l.businessCodesOn = true },
+    clear: l => { l.businessCodesOn = false } },
+  { key: 'enums', label: '附录：数据字典', type: 'list', desc: '字段 / 枚举值 / 含义，可一键填入默认枚举',
+    count: l => (l.enums || []).length,
+    fillDefault: async l => { l.enums = await DefaultDocEnums(); l.enumsOn = true },
+    clear: l => { l.enumsOn = false } },
+  { key: 'support', label: '技术支持与联系', type: 'flag', desc: '对接人 / 邮箱 / 群 / 工单 / 响应时效（创建后在表单填写）',
+    apply: l => { l.support = l.support || {}; l.support.enabled = true },
+    clear: l => { if (l.support) l.support.enabled = false } },
+  { key: 'apis', label: '接口正文（真实接口）', type: 'flag', locked: true,
+    desc: '所选范围内的全部真实接口：请求/响应参数、示例、cURL（必选，可拖动调整位置）',
+    apply: () => {}, clear: () => {} },
 ]
 
 const newVisible = ref(false)
 const newBusy = ref(false)
 const newName = ref('')
 const newBase = ref('blank')     // blank | current
-const newChapters = ref(['toc', 'numbering'])
+const newChapters = ref(['toc', 'numbering', 'apis'])
+const newDraft = ref({})         // 正在编辑的模板草稿（含各章节内容）
+const newCleared = ref([])       // 用户显式「清空内容」的章节，创建时不再自动补默认值
+const newOrder = ref(chapterOptions.map(c => c.key))   // 拖拽后的展示顺序
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
+}
+
+// 拖拽排序（原生 HTML5 DnD，无需额外依赖）
+const dragKey = ref('')
+function onDragStart(key) { dragKey.value = key }
+function onDrop(targetKey) {
+  const from = dragKey.value
+  dragKey.value = ''
+  if (!from || from === targetKey) return
+  const list = newOrder.value.slice()
+  const i = list.indexOf(from), j = list.indexOf(targetKey)
+  if (i < 0 || j < 0) return
+  list.splice(i, 1)
+  list.splice(j, 0, from)
+  newOrder.value = list
+}
+const orderedOptions = computed(() => newOrder.value.map(k => chapterOptions.find(c => c.key === k)).filter(Boolean))
+
+// 勾选 / 取消：勾上即打开该章节（内容为空时补默认），取消则关闭开关
+async function toggleChapter(opt, on) {
+  if (opt.locked) return
+  const l = newDraft.value
+  if (on) {
+    newCleared.value = newCleared.value.filter(k => k !== opt.key)
+    if (!newChapters.value.includes(opt.key)) newChapters.value.push(opt.key)
+    if (opt.fillDefault) await opt.fillDefault(l)
+    else if (opt.apply) opt.apply(l)
+  } else {
+    newChapters.value = newChapters.value.filter(k => k !== opt.key)
+    if (opt.clear) opt.clear(l)
+  }
+}
+
+// 单章「填入默认」/「清空内容」
+async function fillChapter(opt) {
+  try {
+    if (opt.fillDefault) await opt.fillDefault(newDraft.value)
+    else if (opt.apply) opt.apply(newDraft.value)
+    ElMessage.success('已填入默认内容')
+  } catch (e) { ElMessage.error(String(e)) }
+}
+function clearChapter(opt) {
+  if (!newCleared.value.includes(opt.key)) newCleared.value.push(opt.key)
+  if (opt.fillDefault) {
+    if (opt.key === 'glossary') newDraft.value.glossary = []
+    if (opt.key === 'businessCodes') newDraft.value.businessCodes = []
+    if (opt.key === 'enums') newDraft.value.enums = []
+    if (opt.key === 'revisions') newDraft.value.revisions = []
+    if (opt.key === 'sign') newDraft.value.sign = ''
+    if (opt.key === 'convention') newDraft.value.convention = ''
+  }
+  if (opt.clear) opt.clear(newDraft.value)
+  ElMessage.success('已清空该章节内容')
 }
 
 // 按当前 layout 的开关状态反推勾选项（用于「复制当前结构」）
@@ -317,22 +415,37 @@ function chaptersOf(l) {
   if (v.businessCodesOn && (v.businessCodes || []).length) on.push('businessCodes')
   if (v.enumsOn && (v.enums || []).length) on.push('enums')
   if (v.support?.enabled) on.push('support')
+  on.push('apis')
   return on
+}
+
+// 用「起点 + 当前勾选」重新构建草稿
+function resetDraft() {
+  newCleared.value = []
+  const base = newBase.value === 'current' ? dl.value : { toc: true, numbering: true }
+  newDraft.value = normalize(JSON.parse(JSON.stringify(base)))
+  newChapters.value = newBase.value === 'current' ? chaptersOf(dl.value) : ['toc', 'numbering', 'apis']
+  // 按库里的 sectionOrder 还原拖拽顺序（没有则默认）
+  const saved = Array.isArray(dl.value?.sectionOrder) ? dl.value.sectionOrder : []
+  const order = []
+  for (const k of saved) if (chapterOptions.some(c => c.key === k)) order.push(k)
+  for (const c of chapterOptions) if (!order.includes(c.key)) order.push(c.key)
+  newOrder.value = order
 }
 
 function openNewTemplate() {
   newName.value = ''
   newBase.value = 'blank'
-  newChapters.value = ['toc', 'numbering']
+  resetDraft()
   newVisible.value = true
 }
 
-watch(newBase, v => {
-  newChapters.value = v === 'current' ? chaptersOf(dl.value) : ['toc', 'numbering']
-})
+watch(newBase, () => resetDraft())
 
 function toggleAllChapters(on) {
-  newChapters.value = on ? chapterOptions.map(c => c.key) : []
+  newChapters.value = on
+    ? chapterOptions.map(c => c.key)
+    : ['apis']  // 接口正文必选
 }
 
 async function createTemplate() {
@@ -343,53 +456,25 @@ async function createTemplate() {
 
   newBusy.value = true
   try {
-    // 起点：空白 or 复制当前结构（只影响内容，开关由勾选决定）
-    const layout = normalize(JSON.parse(JSON.stringify(
-      newBase.value === 'current' ? dl.value : { toc: true, numbering: true })))
-    // 先把所有章节开关关掉，再按勾选打开
-    layout.toc = false
-    layout.numbering = false
-    layout.quickStart = false
-    layout.environment = false
-    layout.commonHeaders = false
-    layout.signOn = false
-    layout.conventionOn = false
-    layout.statusCodes = false
-    layout.glossaryOn = false
-    layout.enumsOn = false
-    layout.businessCodesOn = false
-    layout.revisionsOn = false
-    if (layout.cover) layout.cover.enabled = false
-    if (layout.support) layout.support.enabled = false
-
-    // 勾选了但内容为空的章节，填默认内容
+    const layout = newDraft.value
+    // 草稿可能只改了一部分内容，这里确保勾选项都有内容（空则补默认）
     for (const opt of chapterOptions) {
-      if (!newChapters.value.includes(opt.key)) continue
-      if (opt.apply) { opt.apply(layout); continue }
-      if (opt.fill === 'sign' && !String(layout.sign || '').trim()) {
-        const list = await DocSignTemplates().catch(() => [])
-        layout.sign = list?.[0]?.content || ''
-        layout.signOn = true
+      if (!newChapters.value.includes(opt.key)) {
+        if (opt.clear) opt.clear(layout)
+        continue
       }
-      if (opt.fill === 'glossary' && !(layout.glossary || []).length) {
-        layout.glossary = await DefaultDocGlossary()
-        layout.glossaryOn = true
-      }
-      if (opt.fill === 'convention' && !String(layout.convention || '').trim()) {
-        layout.convention = await DefaultDocConvention()
-        layout.conventionOn = true
-      }
-      if (opt.fill === 'businessCodes' && !(layout.businessCodes || []).length) {
-        layout.businessCodes = await DefaultDocBusinessCodes()
-        layout.businessCodesOn = true
-      }
-      if (opt.fill === 'enums' && !(layout.enums || []).length) {
-        layout.enums = await DefaultDocEnums()
-        layout.enumsOn = true
+      if (opt.fillDefault) {
+        const isEmpty = opt.count ? opt.count(layout) === 0 : !String(layout[opt.field] || '').trim()
+        if (isEmpty && !newCleared.value.includes(opt.key)) await opt.fillDefault(layout)
+        else if (opt.flagField) layout[opt.flagField] = true
+      } else if (opt.apply) {
+        opt.apply(layout)
       }
     }
-
+    // 章节顺序：按拖拽顺序写入（numbering 不是章节，不参与）
+    layout.sectionOrder = newOrder.value.filter(k => newChapters.value.includes(k) && k !== 'numbering')
     layout.name = name
+
     await SaveDocLayoutTemplate(name, JSON.stringify(layout))
     await reloadStore()
     normalize(dl.value)
@@ -786,17 +871,39 @@ function preview() {
           </el-form-item>
           <el-form-item label="包含章节">
             <div style="width:100%">
-              <div style="margin-bottom:8px">
+              <div style="margin-bottom:6px">
                 <el-button size="small" link type="primary" @click="toggleAllChapters(true)">全选</el-button>
                 <el-button size="small" link @click="toggleAllChapters(false)">清空</el-button>
-                <span class="tpl-hint">已选 {{ newChapters.length }} / {{ chapterOptions.length }} 项</span>
+                <span class="tpl-hint">已选 {{ newChapters.length }} / {{ chapterOptions.length }} 项；<b>可拖动左侧手柄调整章节顺序</b></span>
               </div>
-              <el-checkbox-group v-model="newChapters" class="new-chapters">
-                <el-checkbox v-for="c in chapterOptions" :key="c.key" :value="c.key" class="new-chapter">
-                  <span class="nc-label">{{ c.label }}</span>
-                  <span class="nc-desc">{{ c.desc }}</span>
-                </el-checkbox>
-              </el-checkbox-group>
+              <div class="chapter-list">
+                <div v-for="opt in orderedOptions" :key="opt.key" class="chapter-row"
+                  :class="{ dragging: dragKey === opt.key, off: !newChapters.includes(opt.key) }"
+                  draggable="true" @dragstart="onDragStart(opt.key)" @dragover.prevent @drop.prevent="onDrop(opt.key)">
+                  <span class="drag-handle" title="拖动调整顺序">⋮⋮</span>
+                  <el-checkbox :model-value="newChapters.includes(opt.key)" :disabled="opt.locked"
+                    @change="v => toggleChapter(opt, v)" />
+                  <div class="chapter-main">
+                    <div class="nc-label">
+                      {{ opt.label }}
+                      <el-tag v-if="opt.locked" size="small" type="info" effect="plain">必选</el-tag>
+                    </div>
+                    <div class="nc-desc">{{ opt.desc }}</div>
+
+                    <template v-if="newChapters.includes(opt.key)">
+                      <el-input v-if="opt.type === 'text'" v-model="newDraft[opt.field]" type="textarea" :rows="4"
+                        class="chapter-md" placeholder="支持简化 Markdown：#### 小标题 / - 列表 / 表格 / 代码块" />
+                      <div v-if="opt.type === 'text' || opt.type === 'list'" class="chapter-actions">
+                        <span v-if="opt.type === 'list'" class="tpl-hint">当前 {{ opt.count(newDraft) }} 条</span>
+                        <el-button link size="small" type="primary" @click="fillChapter(opt)">填入默认内容</el-button>
+                        <el-button v-if="opt.type === 'list' || opt.type === 'text'" link size="small"
+                          @click="clearChapter(opt)">清空内容</el-button>
+                        <span class="tpl-hint">更细的编辑（表格行）可在创建后的结构表单里维护</span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
             </div>
           </el-form-item>
         </el-form>
@@ -853,9 +960,16 @@ function preview() {
 .tpl-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
 .tpl-card-ops { margin-top: 8px; text-align: right; }
 .tpl-mine-item { display: inline-flex; align-items: center; gap: 4px; }
-.new-chapters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; width: 100%; }
-.new-chapter { height: auto; margin-right: 0; align-items: flex-start; padding: 4px 0; }
-.new-chapter :deep(.el-checkbox__label) { display: flex; flex-direction: column; line-height: 1.5; white-space: normal; }
+.chapter-list { width: 100%; max-height: 46vh; overflow: auto; border: 1px solid #e5e6eb; border-radius: 8px; padding: 6px 10px; }
+.chapter-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px dashed #f2f3f5; }
+.chapter-row:last-child { border-bottom: none; }
+.chapter-row.dragging { opacity: .5; background: #f7f8fa; }
+.chapter-row.off .nc-desc { color: #c9cdd4; }
+.drag-handle { cursor: grab; color: #c9cdd4; font-size: 12px; line-height: 22px; user-select: none; }
+.chapter-main { flex: 1; min-width: 0; }
+.chapter-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.chapter-md { margin-top: 6px; }
+.chapter-md :deep(textarea) { font-family: Consolas, 'Courier New', monospace; font-size: 12px; }
 .nc-label { font-size: 13px; }
 .nc-desc { font-size: 11.5px; color: #86909c; }
 .tpl-chip { color: #4e5969; }

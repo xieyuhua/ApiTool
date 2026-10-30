@@ -259,3 +259,64 @@ func TestPreviewHTMLUsesPassedLayout(t *testing.T) {
 		t.Fatal("未传结构时应使用持久化的精简结构")
 	}
 }
+
+// TestSectionOrderCustom 自定义章节顺序（拖动排序）在所有渲染器里生效。
+func TestSectionOrderCustom(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+	on := true
+	layout := model.DocLayout{
+		Toc: true, Numbering: true, StatusCodes: true, Support: model.DocSupport{
+			Enabled: true, Name: "张三", Email: "z@example.com",
+		},
+		Cover:        model.DocCover{Enabled: true, Subtitle: "封面副标题"},
+		Prefaces:     []model.DocChapter{{Title: "文档说明", Content: "- 概述"}},
+		GlossaryOn:   &on,
+		Glossary:     DefaultGlossary(),
+		ConventionOn: &on,
+		Convention:   "# 规范",
+		// 附录放到最前，接口正文提到规范之前
+		SectionOrder: []string{"statusCodes", "cover", "toc", "apis", "convention", "support", "glossary"},
+	}
+	layout = EnrichDocLayout(layout, nil, common)
+
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	idx := func(s string) int { return strings.Index(html, s) }
+	// 用元素 id 比较（目录里也有章节标题文本，不能按标题文本比较）
+	checks := []struct{ a, b, tip string }{
+		{`id="appendix-status"`, `id="cover"`, "状态码应在封面之前"},
+		{`id="cover"`, `id="toc"`, "封面应在目录之前"},
+		{`id="toc"`, `id="api-a1"`, "目录应在接口正文之前"},
+		{`id="api-a1"`, `id="convention"`, "接口正文应在统一规范之前"},
+		{`id="convention"`, `id="support"`, "规范应在技术支持之前"},
+	}
+	for _, c := range checks {
+		ia, ib := idx(c.a), idx(c.b)
+		if ia < 0 || ib < 0 {
+			t.Fatalf("缺少标记 %q 或 %q", c.a, c.b)
+		}
+		if ia > ib {
+			t.Fatalf("%s（%q 位置 %d > %q 位置 %d）", c.tip, c.a, ia, c.b, ib)
+		}
+	}
+
+	// Markdown 渲染同样遵循顺序（关掉目录，避免目录条目文本干扰位置比较）
+	mdLayout := layout
+	mdLayout.Toc = false
+	md := BuildMarkdownWithLayout(title, rootID, dirs, apis, common, mdLayout)
+	if !strings.Contains(md, "附录：HTTP 状态码") {
+		t.Fatal("Markdown 应包含状态码附录")
+	}
+	if strings.Index(md, "附录：HTTP 状态码") > strings.Index(md, "接口统一定义规范") {
+		t.Fatal("Markdown 也应遵循自定义顺序（状态码附录应在统一规范之前）")
+	}
+
+	// 空顺序 = 默认顺序（回归）
+	layout.SectionOrder = nil
+	def := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	if strings.Index(def, `id="cover"`) > strings.Index(def, `id="toc"`) {
+		t.Fatal("默认顺序应为封面在目录之前")
+	}
+	if strings.Index(def, `id="api-a1"`) < strings.Index(def, `id="convention"`) {
+		t.Fatal("默认顺序应为接口正文在统一规范之后")
+	}
+}
