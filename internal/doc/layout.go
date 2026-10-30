@@ -97,9 +97,13 @@ func buildDocSections(docTitle string, layout model.DocLayout, now time.Time) []
 			Kind: sectionPreface, ID: fmt.Sprintf("preface-%d", i+1), Title: c.Title, Content: c.Content, Chapter: c,
 		})
 	}
-	if layout.Convention != "" {
+	if docFlagOn(layout.ConventionOn, strings.TrimSpace(layout.Convention) != "") {
+		content := layout.Convention
+		if strings.TrimSpace(content) == "" {
+			content = "> 尚未填写「接口统一定义规范」。可在「文档模板 → 统一定义规范」中填写，或点「填入默认模板」。"
+		}
 		out = append(out, docSection{
-			Kind: sectionConvention, ID: "convention", Title: "接口统一定义规范", Content: layout.Convention,
+			Kind: sectionConvention, ID: "convention", Title: "接口统一定义规范", Content: content,
 		})
 	}
 	out = append(out, docSection{Kind: sectionAPIs, ID: "apis", Title: docTitle})
@@ -256,7 +260,8 @@ func DocPresetList() []DocPreset {
 func DocPresetLayout(key string) model.DocLayout {
 	today := time.Now().Format("2006-01-02")
 	base := model.DocLayout{Toc: true, Numbering: true,
-		QuickStart: true, Glossary: DefaultGlossary(), Enums: DefaultEnums()}
+		QuickStart: true, Glossary: DefaultGlossary(), Enums: DefaultEnums(),
+		SignOn: boolPtr(true), ConventionOn: boolPtr(true)}
 
 	switch key {
 	case "internal":
@@ -319,7 +324,7 @@ func DocPresetLayout(key string) model.DocLayout {
 		base.BusinessCodes = DefaultBusinessCodes()
 		base.Revisions = []model.DocRevision{{Version: "V1.0.0", Date: today, Note: "首次发布（国密改造）"}}
 	default: // minimal：仅目录 + 接口正文
-		return model.DocLayout{Toc: true, Numbering: true}
+		return model.DocLayout{Toc: true, Numbering: true, SignOn: boolPtr(false), ConventionOn: boolPtr(false)}
 	}
 	return base
 }
@@ -454,6 +459,20 @@ func supportMarkdown(s model.DocSupport) string {
 	return sb.String()
 }
 
+// docFlagOn 读取可空开关：
+//   - 显式 true  → 输出（内容为空时输出占位提示）
+//   - 显式 false → 不输出
+//   - nil（旧数据 / 未配置）→ 有内容才输出，保证零值 layout 不会凭空多出章节
+func docFlagOn(p *bool, hasContent bool) bool {
+	if p == nil {
+		return hasContent
+	}
+	return *p
+}
+
+// boolPtr 便于在预置模板里显式写入开关值。
+func boolPtr(v bool) *bool { return &v }
+
 // businessCodesMarkdown 把业务错误码渲染成 Markdown 表格（三种格式共用）。
 func businessCodesMarkdown(codes []model.DocCode) string {
 	var sb strings.Builder
@@ -503,7 +522,11 @@ func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common mo
 			extra = append(extra, model.DocChapter{Title: "公共请求头与公共参数", Content: c})
 		}
 	}
-	if sign := strings.TrimSpace(layout.Sign); sign != "" {
+	if docFlagOn(layout.SignOn, strings.TrimSpace(layout.Sign) != "") {
+		sign := layout.Sign
+		if strings.TrimSpace(sign) == "" {
+			sign = "> 尚未填写「加密与验签」说明。可在「文档模板 → 加密与验签」中选择验签模板一键填入。"
+		}
 		extra = append(extra, model.DocChapter{Title: "加密与验签", Content: sign})
 	}
 	if c := glossaryChapter(layout.Glossary); c != "" {
@@ -520,7 +543,8 @@ func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common mo
 // envChapter 把项目的环境列表渲染成「接入地址」表格。
 func envChapter(envs []model.Environment) string {
 	if len(envs) == 0 {
-		return ""
+		return "> 本项目尚未配置环境变量，暂无接入地址可输出。" +
+			"请在「设置 → 环境变量 / 环境管理」中添加各环境的 `baseUrl`（或 `host`、`domain`）后重新导出。\n"
 	}
 	var sb strings.Builder
 	sb.WriteString("| 环境 | 接口地址 | 说明 |\n|---|---|---|\n")
@@ -601,7 +625,8 @@ func headersChapter(common model.CommonParams) string {
 		sb.WriteString("\n")
 	}
 	if sb.Len() == 0 {
-		return ""
+		return "> 本项目尚未配置「公共参数」，暂无公共请求头 / 公共查询参数可输出。" +
+			"请在接口调试页的「公共参数」中添加后重新导出。\n"
 	}
 	sb.WriteString("> 以上取自项目「公共参数」，可在接口调试页统一维护，导出时自动写入文档。\n")
 	return sb.String()

@@ -233,9 +233,20 @@ func BuildHTMLForExportWithLayout(title, rootID string, dirs []model.Directory, 
 	return buildHTML(title, rootID, dirs, apis, common, wm, layout)
 }
 
+// BuildTemplatePreviewHTML 生成「模板结构预览」HTML：只渲染章节结构（封面 / 目录 / 前言 / 规范 / 附录…），
+// 接口正文用占位说明代替，便于快速核对模板版式而不夹带任何具体接口。
+func BuildTemplatePreviewHTML(title string, common model.CommonParams, wm model.DocWatermark, layout model.DocLayout) string {
+	return buildHTMLOpt(title, "", nil, nil, common, wm, layout, true)
+}
+
 // buildHTML 渲染自包含的 HTML 文档：按 layout 输出各章节，
 // wm 启用时额外叠加水印层（供 PDF 导出使用）。
 func buildHTML(title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, wm model.DocWatermark, layout model.DocLayout) string {
+	return buildHTMLOpt(title, rootID, dirs, apis, common, wm, layout, false)
+}
+
+// buildHTMLOpt apisPlaceholder 为 true 时，接口正文渲染为占位说明（模板预览用）。
+func buildHTMLOpt(title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, wm model.DocWatermark, layout model.DocLayout, apisPlaceholder bool) string {
 	now := time.Now()
 	sections := buildDocSections(title, layout, now)
 	num := buildDocNumbering(sections, dirs, apis, rootID, layout.Numbering)
@@ -260,8 +271,14 @@ func buildHTML(title, rootID string, dirs []model.Directory, apis []model.ApiInf
 			body.WriteString(htmlChapter(num.section(s.ID, s.Title), s, pb))
 		case sectionAPIs:
 			body.WriteString(`<section id="` + s.ID + `" class="doc-sec` + pageBreakClass(pb) + `">`)
-			if multi {
+			if multi || apisPlaceholder {
 				body.WriteString(`<h2 class="sec-title">` + htmlText(num.section(s.ID, labelAPISection)) + `</h2>`)
+			}
+			if apisPlaceholder {
+				body.WriteString(`<div class="api"><p class="desc">模板预览不包含具体接口。</p>` +
+					`<p class="desc">实际导出时，这里会按所选范围输出每个接口的：请求参数 / 响应参数、请求与响应示例、` +
+					`公共请求头与公共参数、以及「调用示例（cURL）」。</p></div>`)
+				break
 			}
 			if dirs == nil && len(apis) == 1 && rootID == "" {
 				htmlApi(&body, apis[0], "", common, num)

@@ -5,10 +5,11 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
-  PullDocTemplates, PushDocTemplates,
+  PullDocTemplates, PushDocTemplates, PreviewDocTemplate,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
+import DocWatermarkPanel from './DocWatermarkPanel.vue'
 
 const presets = ref([])
 const applying = ref('')
@@ -28,6 +29,9 @@ const projectOverride = computed(() => {
 })
 const globalLayout = computed(() => store.data.settings.docLayout)
 const dl = computed(() => (scope.value === 'project' && projectOverride.value) ? projectOverride.value : globalLayout.value)
+// 当前选中的模板名（导出即按它生成文档）
+const activeName = computed(() => dl.value?.name || '自定义结构')
+const isActive = p => dl.value?.name === p.label
 const myTemplates = computed(() => store.data.settings.docLayoutTemplates || [])
 const dirTree = computed(() => buildDirTree())
 
@@ -87,11 +91,85 @@ const summary = computed(() => {
   return parts.length ? parts.join(' · ') : '仅接口正文'
 })
 
+// 输出自检：逐项检查「勾选的章节」是否真的有数据（缺数据时导出会输出占位提示）
+const checks = computed(() => {
+  const v = dl.value || {}
+  const proj = project.value || {}
+  const envs = proj.environments || []
+  const common = proj.common || {}
+  const hasBaseURL = envs.some(e => (e.vars || []).some(x =>
+    x.enabled && String(x.value || '').trim() && /base_?url|host|domain/i.test(x.key || '')))
+  const list = []
+  const push = (label, ok, hint) => list.push({ label, ok, hint })
+
+  if (v.cover?.enabled) push('封面', true)
+  if (v.revisions?.length) push(`修订记录 ${v.revisions.length} 条`, true)
+  if (v.toc) push('目录', true)
+  if (v.quickStart) push('接入指引', true)
+  if (v.environment) push('接入地址（环境）', envs.length > 0 && hasBaseURL,
+    envs.length === 0 ? '当前项目还没有环境变量，导出会输出占位提示'
+      : (!hasBaseURL ? '环境变量里缺少 baseUrl / host / domain' : ''))
+  if (v.commonHeaders) push('公共请求头', (common.headers || []).length + (common.query || []).length > 0,
+    '当前项目未配置「公共参数」，导出会输出占位提示')
+  if (v.signOn) push('加密与验签', String(v.sign || '').trim() !== '', '未填写验签内容，导出会输出占位提示')
+  if (v.glossary?.length) push(`术语表 ${v.glossary.length} 条`, true)
+  if (v.conventionOn) push('统一定义规范', String(v.convention || '').trim() !== '', '未填写规范内容，导出会输出占位提示')
+  if (v.businessCodes?.length) push(`业务错误码 ${v.businessCodes.length} 条`, true)
+  if (v.enums?.length) push(`数据字典 ${v.enums.length} 条`, true)
+  if (v.support?.enabled) push('技术支持与联系', true)
+  return list
+})
+
+// ---------------- 模板预览（只渲染章节结构，不含具体接口）----------------
+const previewing = ref('')
+async function previewPreset(p) {
+  if (previewing.value) return
+  previewing.value = p.key
+  try {
+    const layout = await DocPresetLayout(p.key)
+    layout.name = p.label
+    const path = await PreviewDocTemplate(JSON.stringify(layout))
+    if (path) ElMessage.success('已在浏览器打开模板预览（不含具体接口）')
+  } catch (e) {
+    ElMessage.error('预览失败：' + String(e))
+  } finally {
+    previewing.value = ''
+  }
+}
+
+async function previewTemplate(tpl) {
+  if (previewing.value) return
+  previewing.value = tpl.id
+  try {
+    const path = await PreviewDocTemplate(JSON.stringify(tpl.layout))
+    if (path) ElMessage.success(`已在浏览器打开「${tpl.name}」预览（不含具体接口）`)
+  } catch (e) {
+    ElMessage.error('预览失败：' + String(e))
+  } finally {
+    previewing.value = ''
+  }
+}
+
+async function previewCurrent() {
+  if (previewing.value) return
+  previewing.value = 'current'
+  try {
+    const path = await PreviewDocTemplate(JSON.stringify(dl.value))
+    if (path) ElMessage.success('已在浏览器打开当前模板预览（不含具体接口）')
+  } catch (e) {
+    ElMessage.error('预览失败：' + String(e))
+  } finally {
+    previewing.value = ''
+  }
+}
+
 // 套用模板（预置或自定义），覆盖当前结构
 async function applyLayout(layout, name) {
   if (!window.confirm(`套用「${name}」会覆盖当前文档结构配置，确定继续吗？`)) return
   try {
-    Object.assign(dl.value, normalize(JSON.parse(JSON.stringify(layout))))
+    const next = normalize(JSON.parse(JSON.stringify(layout)))
+    next.name = name
+    Object.assign(dl.value, next)
     await saveNow()
     ElMessage.success('已套用模板：' + name)
   } catch (e) {
@@ -260,7 +338,19 @@ function preview() {
           <el-button v-if="scope === 'project' && projectOverride" size="small" link type="primary"
             style="margin-left:8px" @click="clearProjectOverride">清除项目覆盖，恢复全局</el-button>
         </div>
-        <div class="tpl-current">当前结构：<b>{{ summary }}</b>（{{ scope === 'project' ? '项目级覆盖' : '全局配置' }}）</div>
+        <div class="tpl-current">
+          当前使用模板：<b>{{ activeName }}</b>　结构：<b>{{ summary }}</b>
+          （{{ scope === 'project' ? '项目级覆盖' : '全局配置' }}）
+        </div>
+        <div class="tpl-check">
+          <span class="tpl-check-label">导出将输出：</span>
+          <el-tooltip v-for="(c, i) in checks" :key="i" :content="c.hint || '配置完整'" placement="top">
+            <el-tag size="small" :type="c.ok ? 'success' : 'warning'" effect="plain" class="tpl-check-tag">
+              {{ c.ok ? '✓' : '⚠' }} {{ c.label }}
+            </el-tag>
+          </el-tooltip>
+          <span v-if="!checks.length" class="tpl-empty">暂无章节，先套用一个模板或勾选章节</span>
+        </div>
       </div>
 
       <div class="card">
@@ -273,15 +363,20 @@ function preview() {
           </span>
         </div>
         <div class="tpl-grid">
-          <div v-for="p in presets" :key="p.key" class="tpl-card" :class="{ busy: applying === p.key }"
-            @click="applyPreset(p)">
+          <div v-for="p in presets" :key="p.key" class="tpl-card"
+            :class="{ busy: applying === p.key, active: isActive(p) }" @click="applyPreset(p)">
             <div class="tpl-head">
               <span class="tpl-name">{{ p.label }}</span>
               <el-tag size="small" effect="plain" type="info">{{ p.tag }}</el-tag>
+              <el-tag v-if="isActive(p)" size="small" type="success" effect="dark">使用中</el-tag>
             </div>
             <div class="tpl-desc">{{ p.desc }}</div>
             <div class="tpl-chips">
               <el-tag v-for="c in (p.chips || [])" :key="c" size="small" effect="plain" class="tpl-chip">{{ c }}</el-tag>
+            </div>
+            <div class="tpl-card-ops">
+              <el-button link size="small" type="primary" :loading="previewing === p.key"
+                @click.stop="previewPreset(p)">👁 预览版式</el-button>
             </div>
           </div>
         </div>
@@ -306,8 +401,13 @@ function preview() {
           </span>
         </div>
         <div class="tpl-mine">
-          <el-tag v-for="tpl in myTemplates" :key="tpl.id" class="tpl-tag" closable
-            @close="removeTemplate(tpl)" @click="applyTemplate(tpl)">{{ tpl.name }}</el-tag>
+          <span v-for="tpl in myTemplates" :key="tpl.id" class="tpl-mine-item">
+            <el-tag class="tpl-tag" closable
+              :type="dl.name === tpl.name ? 'success' : ''" :effect="dl.name === tpl.name ? 'dark' : 'light'"
+              @close="removeTemplate(tpl)" @click="applyTemplate(tpl)">{{ tpl.name }}</el-tag>
+            <el-button link size="small" type="primary" :loading="previewing === tpl.id"
+              @click="previewTemplate(tpl)">预览</el-button>
+          </span>
           <span v-if="!myTemplates.length" class="tpl-empty">暂无自定义模板，配置好结构后点右侧保存</span>
           <el-button size="small" type="primary" plain style="margin-left:auto" @click="saveAsTemplate">
             + 保存当前结构为模板
@@ -321,10 +421,13 @@ function preview() {
 
       <DocLayoutPanel ref="panelRef" :layout="dl" :dir-id="scopeDirId" />
 
+      <DocWatermarkPanel :dir-id="scopeDirId" />
+
       <div class="tpl-actions">
         <el-tree-select v-model="scopeDirId" :data="dirTree" check-strictly :render-after-expand="false"
           style="width:260px" placeholder="预览范围（默认全部接口）" default-expand-all clearable />
-        <el-button type="primary" plain style="margin-left:10px" @click="preview">👁 预览整份文档</el-button>
+        <el-button plain style="margin-left:10px" :loading="previewing === 'current'" @click="previewCurrent">👁 预览当前模板（不含接口）</el-button>
+        <el-button type="primary" plain style="margin-left:8px" @click="preview">👁 预览整份文档（含接口）</el-button>
         <span class="tpl-hint" style="margin-left:10px">用当前结构与水印在浏览器打开，Ctrl+P 可看打印分页</span>
       </div>
     </div>
@@ -336,15 +439,21 @@ function preview() {
 .tpl-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
 .tpl-scope-label { font-size: 13px; color: #4e5969; }
 .tpl-current { color: #165dff; margin-top: 4px; }
+.tpl-check { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tpl-check-label { font-size: 12px; color: #86909c; }
+.tpl-check-tag { cursor: default; }
 .tpl-ops { float: right; }
 .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .tpl-card { border: 1px solid #e5e6eb; border-radius: 10px; padding: 14px; cursor: pointer; transition: all .15s; background: #fff; }
 .tpl-card:hover { border-color: #165dff; box-shadow: 0 2px 10px rgba(22, 93, 255, .12); }
 .tpl-card.busy { opacity: .5; pointer-events: none; }
+.tpl-card.active { border-color: #00b42a; box-shadow: 0 0 0 1px #00b42a inset; }
 .tpl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tpl-name { font-weight: 600; font-size: 14px; }
 .tpl-desc { font-size: 12px; color: #86909c; line-height: 1.7; }
 .tpl-chips { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tpl-card-ops { margin-top: 8px; text-align: right; }
+.tpl-mine-item { display: inline-flex; align-items: center; gap: 4px; }
 .tpl-chip { color: #4e5969; }
 .tpl-mine { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tpl-tag { cursor: pointer; }

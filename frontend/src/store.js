@@ -439,6 +439,8 @@ async function loadInto() {
   if (typeof dl.sign !== 'string') dl.sign = ''
   if (!Array.isArray(dl.businessCodes)) dl.businessCodes = []
   if (typeof dl.quickStart !== 'boolean') dl.quickStart = true
+  if (dl.signOn === undefined || dl.signOn === null) dl.signOn = true
+  if (dl.conventionOn === undefined || dl.conventionOn === null) dl.conventionOn = true
   if (!Array.isArray(dl.glossary)) dl.glossary = []
   if (!Array.isArray(dl.enums)) dl.enums = []
   if (!dl.support || typeof dl.support !== 'object') dl.support = { enabled: false }

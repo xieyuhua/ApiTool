@@ -4,7 +4,6 @@ import { ElMessage } from 'element-plus'
 import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
 import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab, currentProject } from '../../store'
 import ShareDialog from './ShareDialog.vue'
-import DocWatermarkPanel from './DocWatermarkPanel.vue'
 
 const scopeDirId = ref('')
 const busy = ref(false)
@@ -46,6 +45,13 @@ async function doExport(format) {
   } finally { busy.value = false }
 }
 
+// 当前选中的模板名（在「文档模板」中套用后写入结构，此处只做展示）
+const activeTemplateName = computed(() => {
+  const pid = currentProject()?.id
+  const v = (pid && store.data.settings.projectDocLayouts?.[pid]) || store.data.settings.docLayout || {}
+  return v.name || '自定义结构'
+})
+
 // 文档结构摘要（配置入口在「文档模板」菜单）
 const layoutSummary = computed(() => {
   // 项目级覆盖优先，其次用全局「文档模板」配置
@@ -57,8 +63,16 @@ const layoutSummary = computed(() => {
   if (v.toc) parts.push('目录')
   if (v.numbering) parts.push('编号')
   if (v.prefaces?.length) parts.push(`公共描述 ${v.prefaces.length} 章`)
-  if (v.convention) parts.push('统一定义规范')
+  if (v.quickStart) parts.push('接入指引')
+  if (v.environment) parts.push('接入地址')
+  if (v.commonHeaders) parts.push('公共请求头')
+  if (v.signOn !== false && v.sign) parts.push('加密与验签')
+  if (v.glossary?.length) parts.push('术语表')
+  if (v.conventionOn !== false && v.convention) parts.push('统一定义规范')
   if (v.statusCodes) parts.push('附录状态码')
+  if (v.businessCodes?.length) parts.push('业务错误码')
+  if (v.enums?.length) parts.push('数据字典')
+  if (v.support?.enabled) parts.push('技术支持')
   return parts.length ? parts.join(' · ') : '仅接口正文'
 })
 
@@ -191,23 +205,12 @@ const formats = [
         <div style="color:#86909c; font-size:12px; margin-top:10px">
           PDF 由本机 Edge / Chrome 无头打印生成（约 1-2 秒），未安装时请改用「导出 HTML」后手动打印为 PDF。
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">企业级排版（文档结构 / 模板）</div>
-        <div class="layout-tip">
-          导出时的章节结构（封面 / 修订记录 / 目录 / 公共描述 / 统一定义规范 / 附录）由「文档模板」统一配置，
-          Word / PDF / HTML / Markdown 共用同一套配置。
-        </div>
         <div class="layout-now">
-          <span>当前结构：<b>{{ layoutSummary }}</b>
-            <span style="color:#86909c">（{{ currentProject()?.id && store.data.settings.projectDocLayouts?.[currentProject().id] ? '项目级覆盖' : '全局配置' }}）</span>
-          </span>
-          <el-button size="small" type="primary" plain @click="goTemplates">📐 去配置文档模板</el-button>
+          <span>文档结构 / 章节 / 导出水印均在「文档模板」中统一设置，导出即按<b>当前选中的模板</b>生成：</span>
+          <b>{{ activeTemplateName }}</b>
+          <el-button size="small" type="primary" plain @click="goTemplates">📐 去设置文档模板</el-button>
         </div>
       </div>
-
-      <DocWatermarkPanel :dir-id="scopeDirId" />
 
       <div class="card">
         <div class="card-title">测试报告（{{ reports.length }}）</div>

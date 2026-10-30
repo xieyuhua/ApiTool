@@ -35,6 +35,8 @@ function normalize(v) {
   if (typeof v.sign !== 'string') v.sign = ''
   if (!Array.isArray(v.businessCodes)) v.businessCodes = []
   if (typeof v.quickStart !== 'boolean') v.quickStart = true
+  if (v.signOn === undefined || v.signOn === null) v.signOn = true
+  if (v.conventionOn === undefined || v.conventionOn === null) v.conventionOn = true
   if (!Array.isArray(v.glossary)) v.glossary = []
   if (!Array.isArray(v.enums)) v.enums = []
   v.support = v.support || {}
@@ -50,6 +52,9 @@ function normalize(v) {
 
 onMounted(async () => {
   normalize(dl.value)
+  // 内容为空时不产生占位章节：开关默认关闭，填入模板后自动打开
+  if (!String(dl.value.convention || '').trim()) dl.value.conventionOn = false
+  if (!String(dl.value.sign || '').trim()) dl.value.signOn = false
   try { signTemplates.value = (await DocSignTemplates()) || [] } catch { signTemplates.value = [] }
 })
 
@@ -87,6 +92,7 @@ async function fillConvention() {
   try {
     if (String(dl.value.convention || '').trim() && !window.confirm('当前已有规范内容，确定用默认模板覆盖吗？')) return
     dl.value.convention = await DefaultDocConvention()
+    dl.value.conventionOn = true
     saveWithTip('已填入默认规范模板，可按团队要求修改')
   } catch (e) {
     ElMessage.error(String(e))
@@ -100,6 +106,7 @@ function fillSign(key) {
   if (!tpl) return
   if (String(dl.value.sign || '').trim() && !window.confirm(`当前已有验签说明，确定用「${tpl.label}」覆盖吗？`)) return
   dl.value.sign = tpl.content
+  dl.value.signOn = true
   saveWithTip(`已填入验签模板：${tpl.label}`)
 }
 
@@ -196,8 +203,10 @@ defineExpose({ preview })
   <div class="card">
     <div class="card-title">文档结构（企业级排版）</div>
     <div class="dl-tip">
-      按需勾选要输出的章节，导出顺序固定为：封面 → 修订记录 → 目录 → 文档公共描述 → 接口统一定义规范 → 接口正文 → 附录。
-      Word / PDF / HTML / Markdown 都会套用同一套结构，配置自动保存。
+      按需勾选要输出的章节，导出顺序为：封面 → 修订记录 → 目录 → 文档公共描述 → 接入指引 → 接入地址（环境）→
+      公共请求头 → 加密与验签 → 术语表 → 接口统一定义规范 → 接口正文 → 附录（状态码 / 业务错误码 / 数据字典）→ 技术支持与联系。
+      <b>勾选的章节一定会输出</b>：项目里缺少环境变量、公共参数或验签内容时，会写入带提示的占位内容。
+      Word / PDF / HTML / Markdown 共用同一套结构，配置自动保存。
     </div>
 
     <el-form label-width="104px" label-position="left">
@@ -243,6 +252,8 @@ defineExpose({ preview })
       <el-form-item label="加密与验签">
         <div style="width:100%">
           <div style="margin-bottom:6px">
+            <el-switch v-model="dl.signOn" @change="save" />
+            <span class="dl-hint" style="margin-right:10px">空内容时输出占位提示</span>
             <el-dropdown trigger="click" @command="fillSign">
               <el-button size="small">填入验签模板 ▾</el-button>
               <template #dropdown>
@@ -279,11 +290,15 @@ defineExpose({ preview })
       <el-form-item label="统一定义规范">
         <div style="width:100%">
           <div style="margin-bottom:6px">
+            <el-switch v-model="dl.conventionOn" @change="save" />
+            <span class="dl-hint">关闭后导出文档不输出「接口统一定义规范」章节（内容仍保留）</span>
+          </div>
+          <div style="margin-bottom:6px">
             <el-button size="small" @click="fillConvention">填入默认模板</el-button>
             <span class="dl-hint">命名与路径、请求/响应约定、鉴权、错误码、版本兼容等团队规范</span>
           </div>
           <el-input v-model="dl.convention" type="textarea" :rows="6" class="dl-md"
-            placeholder="留空则不输出该章节；可点「填入默认模板」后修改" @change="save" />
+            placeholder="可点「填入默认模板」后修改；内容为空时会输出占位提示" @change="save" />
         </div>
       </el-form-item>
 

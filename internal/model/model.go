@@ -274,8 +274,12 @@ type DocLayout struct {
 	Environment bool `json:"environment"`
 	// CommonHeaders 输出「公共请求头与公共参数」章节，取自项目公共参数
 	CommonHeaders bool `json:"commonHeaders"`
-	// Sign 加密与验签说明（Markdown 文本，空则不输出该章节）
+	// Sign 加密与验签说明（Markdown 文本）
 	Sign string `json:"sign"`
+	// SignOn 是否输出「加密与验签」章节；nil 视为开启（兼容旧数据）
+	SignOn *bool `json:"signOn,omitempty"`
+	// ConventionOn 是否输出「接口统一定义规范」章节；nil 视为开启（兼容旧数据）
+	ConventionOn *bool `json:"conventionOn,omitempty"`
 	// BusinessCodes 附录：业务错误码（空则不输出该章节）
 	BusinessCodes []DocCode `json:"businessCodes"`
 	// QuickStart 输出「接入指引（快速开始）」章节
@@ -286,6 +290,8 @@ type DocLayout struct {
 	Enums []DocEnum `json:"enums"`
 	// Support 技术支持与联系（Enabled 为 true 且至少填一项时输出）
 	Support DocSupport `json:"support"`
+	// Name 当前套用的模板名称（仅用于界面展示与选择，不参与排版）
+	Name string `json:"name,omitempty"`
 }
 
 // DocTerm 术语表条目。

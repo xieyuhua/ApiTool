@@ -2,9 +2,11 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"apitool/internal/model"
@@ -211,6 +213,36 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 	}
 	html := BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout)
 	path := filepath.Join(os.TempDir(), "apitool-watermark-preview-"+SanitizeFilename(scope.Title)+".html")
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	return path, nil
+}
+
+// PreviewTemplate 用指定文档结构渲染「模板结构预览」（不含具体接口）并在浏览器打开。
+// layoutJSON 为空时使用当前生效结构（全局配置或项目级覆盖）。
+func PreviewTemplate(ctx context.Context, s *store.Store, layoutJSON string) (string, error) {
+	data := s.GetData()
+	proj := model.Project{}
+	if idx := store.ActiveProjectIndex(data); idx >= 0 {
+		proj = data.Projects[idx]
+	}
+	layout := EffectiveDocLayout(data, proj)
+	if strings.TrimSpace(layoutJSON) != "" {
+		if err := json.Unmarshal([]byte(layoutJSON), &layout); err != nil {
+			return "", fmt.Errorf("文档结构解析失败: %v", err)
+		}
+	}
+	layout = EnrichDocLayout(layout, proj.Environments, proj.Common)
+	wm := ExpandWatermark(NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
+	html := BuildTemplatePreviewHTML("文档模板预览", proj.Common, wm, layout)
+
+	name := layout.Name
+	if strings.TrimSpace(name) == "" {
+		name = "current"
+	}
+	path := filepath.Join(os.TempDir(), "apitool-template-preview-"+SanitizeFilename(name)+".html")
 	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
 		return "", err
 	}

@@ -1541,11 +1541,14 @@ export namespace model {
 	    environment: boolean;
 	    commonHeaders: boolean;
 	    sign: string;
+	    signOn?: boolean;
+	    conventionOn?: boolean;
 	    businessCodes: DocCode[];
 	    quickStart: boolean;
 	    glossary: DocTerm[];
 	    enums: DocEnum[];
 	    support: DocSupport;
+	    name?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocLayout(source);
@@ -1563,11 +1566,14 @@ export namespace model {
 	        this.environment = source["environment"];
 	        this.commonHeaders = source["commonHeaders"];
 	        this.sign = source["sign"];
+	        this.signOn = source["signOn"];
+	        this.conventionOn = source["conventionOn"];
 	        this.businessCodes = this.convertValues(source["businessCodes"], DocCode);
 	        this.quickStart = source["quickStart"];
 	        this.glossary = this.convertValues(source["glossary"], DocTerm);
 	        this.enums = this.convertValues(source["enums"], DocEnum);
 	        this.support = this.convertValues(source["support"], DocSupport);
+	        this.name = source["name"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

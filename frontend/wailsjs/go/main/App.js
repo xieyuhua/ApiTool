@@ -482,6 +482,10 @@ export function PolishText(arg1) {
   return window['go']['main']['App']['PolishText'](arg1);
 }
 
+export function PreviewDocTemplate(arg1) {
+  return window['go']['main']['App']['PreviewDocTemplate'](arg1);
+}
+
 export function PreviewDocWatermark(arg1, arg2) {
   return window['go']['main']['App']['PreviewDocWatermark'](arg1, arg2);
 }

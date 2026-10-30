@@ -75,6 +75,11 @@ func TestDumpArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "enterprise-sample.docx"), entDOCX, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 模板预览（只渲染章节结构，不含具体接口）
+	previewHTML := BuildTemplatePreviewHTML(title, common, wm, layout)
+	if err := os.WriteFile(filepath.Join(dir, "template-preview.html"), []byte(previewHTML), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	entHTML := BuildHTMLForExportWithLayout(title, rootID, dirs, apis, common, wm, layout)
 	if err := os.WriteFile(filepath.Join(dir, "enterprise-sample.html"), []byte(entHTML), 0o644); err != nil {
 		t.Fatal(err)

@@ -679,6 +679,29 @@ func TestCurlSample(t *testing.T) {
 	}
 }
 
+// TestTemplatePreviewHTML 模板预览只渲染章节结构，不夹带任何具体接口。
+func TestTemplatePreviewHTML(t *testing.T) {
+	title, _, _, _, common := sampleScope()
+	layout := EnrichDocLayout(DocPresetLayout("internal"), sampleEnvironments(), common)
+
+	html := BuildTemplatePreviewHTML(title, common, model.DocWatermark{}, layout)
+	for _, want := range []string{
+		"文档修订记录", "目录", "接入指引（快速开始）", "接入地址（环境）",
+		"公共请求头与公共参数", "加密与验签", "术语表", "接口统一定义规范", "附录：HTTP 状态码",
+		"模板预览不包含具体接口",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("模板预览缺少章节 %q", want)
+		}
+	}
+	// 不得出现任何具体接口：接口锚点、接口名与目录节点都不应渲染
+	for _, bad := range []string{`id="api-`, "查询用户列表", "上传头像", `id="dir-`, `class="toc-api"`} {
+		if strings.Contains(html, bad) {
+			t.Fatalf("模板预览不应包含具体接口内容 %q", bad)
+		}
+	}
+}
+
 // ---------------- 测试辅助 ----------------
 
 func mustDOCX(t *testing.T, title, rootID string, dirs []model.Directory, apis []model.ApiInfo, common model.CommonParams, layout model.DocLayout) []byte {

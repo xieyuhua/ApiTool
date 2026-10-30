@@ -339,6 +339,12 @@ func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()
 }
 
+// PreviewDocTemplate 预览指定文档结构（只渲染章节，不含具体接口）并用浏览器打开。
+// layoutJSON 为空时使用当前生效结构。
+func (a *App) PreviewDocTemplate(layoutJSON string) (string, error) {
+	return doc.PreviewTemplate(a.ctx, a.store, layoutJSON)
+}
+
 // DefaultDocGlossary 返回内置的通用术语表（术语表章节初始内容）。
 func (a *App) DefaultDocGlossary() []model.DocTerm {
 	return doc.DefaultGlossary()
