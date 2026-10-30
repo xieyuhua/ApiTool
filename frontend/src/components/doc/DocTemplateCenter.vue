@@ -5,8 +5,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
-  PullDocTemplates, PushDocTemplates, PreviewDocTemplate, PreviewDocTemplateHTML,
-  PreviewDocHTML, ShareDoc,
+  PullDocTemplates, PushDocTemplates, PreviewDocTemplateHTML, PreviewDocHTML,
   RenameDocLayoutTemplate, DuplicateDocLayoutTemplate,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
@@ -208,17 +207,6 @@ async function previewCurrent() {
   }
 }
 
-// 弹窗内的「在浏览器打开」：模板预览写临时文件；整份文档直接打开（含接口，便于打印 PDF）
-async function openInBrowser() {
-  try {
-    const path = previewMode.value === 'full'
-      ? await ShareDoc(scopeDirId.value || '', '')
-      : await PreviewDocTemplate(JSON.stringify({ ...dl.value, name: activeName.value }))
-    if (path) ElMessage.success('已在浏览器打开：' + path)
-  } catch (e) {
-    ElMessage.error(String(e))
-  }
-}
 
 // chipsOf 生成模板的章节摘要（与预置模板卡片一致）
 function chipsOf(l) {
@@ -610,7 +598,6 @@ function preview() {
               ? '预览包含所选范围内的全部接口，与导出的 HTML / PDF 版式一致'
               : '预览只渲染章节结构，不含具体接口；实际导出会输出所选范围内的全部接口' }}
           </span>
-          <el-button @click="openInBrowser">{{ previewMode === 'full' ? '在浏览器打开（可打印为 PDF）' : '在浏览器打开' }}</el-button>
           <el-button type="primary" @click="previewVisible = false">关闭</el-button>
         </template>
       </el-dialog>

@@ -261,8 +261,6 @@ export function PolishText(arg1:agent.RunAgentArgs):Promise<string>;
 
 export function PreviewDocHTML(arg1:string,arg2:string):Promise<string>;
 
-export function PreviewDocTemplate(arg1:string):Promise<string>;
-
 export function PreviewDocTemplateHTML(arg1:string):Promise<string>;
 
 export function PreviewDocWatermark(arg1:string,arg2:string):Promise<string>;

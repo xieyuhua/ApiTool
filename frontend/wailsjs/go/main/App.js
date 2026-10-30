@@ -490,10 +490,6 @@ export function PreviewDocHTML(arg1, arg2) {
   return window['go']['main']['App']['PreviewDocHTML'](arg1, arg2);
 }
 
-export function PreviewDocTemplate(arg1) {
-  return window['go']['main']['App']['PreviewDocTemplate'](arg1);
-}
-
 export function PreviewDocTemplateHTML(arg1) {
   return window['go']['main']['App']['PreviewDocTemplateHTML'](arg1);
 }

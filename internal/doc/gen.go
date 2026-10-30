@@ -237,20 +237,6 @@ func PreviewTemplateHTML(s *store.Store, layoutJSON string) (string, error) {
 	return html, err
 }
 
-// PreviewTemplate 生成「模板结构预览」并写入临时文件后用浏览器打开（弹窗外的备用打开方式）。
-func PreviewTemplate(ctx context.Context, s *store.Store, layoutJSON string) (string, error) {
-	html, name, err := templatePreviewHTML(s, layoutJSON)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(os.TempDir(), "apitool-template-preview-"+SanitizeFilename(name)+".html")
-	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
-		return "", err
-	}
-	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
-	return path, nil
-}
-
 // templatePreviewHTML 解析生效结构 + 水印，渲染模板预览 HTML（返回 HTML 与模板名）。
 func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, error) {
 	data := s.GetData()
