@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DocPresets, DocPresetLayout, SaveDocLayoutTemplate, DeleteDocLayoutTemplate,
   PullDocTemplates, PushDocTemplates, PreviewDocTemplate, PreviewDocTemplateHTML,
+  RenameDocLayoutTemplate, DuplicateDocLayoutTemplate,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
@@ -192,9 +193,115 @@ async function openInBrowser() {
   }
 }
 
+// chipsOf 生成模板的章节摘要（与预置模板卡片一致）
+function chipsOf(l) {
+  const v = l || {}
+  const c = []
+  if (v.cover?.enabled) c.push('封面')
+  if (v.revisionsOn && v.revisions?.length) c.push(`修订记录 ${v.revisions.length}`)
+  if (v.toc) c.push('目录')
+  if (v.quickStart) c.push('接入指引')
+  if (v.environment) c.push('接入地址')
+  if (v.commonHeaders) c.push('公共请求头')
+  if (v.signOn && v.sign) c.push('加密验签')
+  if (v.glossaryOn && v.glossary?.length) c.push(`术语表 ${v.glossary.length}`)
+  if (v.conventionOn && v.convention) c.push('统一规范')
+  if (v.statusCodes) c.push('状态码')
+  if (v.businessCodesOn && v.businessCodes?.length) c.push(`错误码 ${v.businessCodes.length}`)
+  if (v.enumsOn && v.enums?.length) c.push(`数据字典 ${v.enums.length}`)
+  if (v.support?.enabled) c.push('技术支持')
+  return c
+}
+
+// ---------------- 自定义模板：新建 / 重命名 / 复制 / 自动回写 ----------------
+// 新建模板：可复制当前结构或从空白开始，创建后立即设为当前模板
+async function newTemplate() {
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt('新模板名称（如「xx 事业部标准」「内部评审版」）', '新建自定义模板', {
+      inputPlaceholder: '模板名称', inputValidator: v => (v && v.trim() ? true : '请输入模板名称'),
+    })
+    name = (r.value || '').trim()
+  } catch { return }
+  if (myTemplates.value.some(t => t.name === name)) {
+    ElMessage.warning('已存在同名模板，请换个名称')
+    return
+  }
+  const copyCurrent = window.confirm('以「当前结构」为蓝本创建吗？\n确定 = 复制当前结构；取消 = 从空白模板（仅目录 + 编号）开始')
+  const base = copyCurrent ? dl.value : { toc: true, numbering: true }
+  const layout = normalize(JSON.parse(JSON.stringify(base)))
+  layout.name = name
+  try {
+    await SaveDocLayoutTemplate(name, JSON.stringify(layout))
+    await reloadStore()
+    normalize(dl.value)
+    await applyLayout(layout, name, true)
+    ElMessage.success('已创建模板：' + name)
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+async function renameTemplate(tpl) {
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt('新的模板名称', '重命名模板', { inputValue: tpl.name })
+    name = (r.value || '').trim()
+  } catch { return }
+  if (!name || name === tpl.name) return
+  try {
+    await RenameDocLayoutTemplate(tpl.id, name)
+    if (dl.value?.name === tpl.name) {
+      dl.value.name = name
+      await saveNow()
+    }
+    await reloadStore()
+    normalize(dl.value)
+    ElMessage.success('已重命名为：' + name)
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+async function duplicateTemplate(tpl) {
+  try {
+    const copy = await DuplicateDocLayoutTemplate(tpl.id)
+    await reloadStore()
+    normalize(dl.value)
+    ElMessage.success('已复制为：' + copy.name)
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+// 当前模板是自定义模板时，编辑结构自动回写模板（防抖 + 快照去重，避免写库风暴）
+let syncTimer = null
+let lastSynced = ''
+function scheduleTemplateSync() {
+  const name = dl.value?.name
+  if (!name) return
+  if (!myTemplates.value.some(t => t.name === name)) return
+  const snapshot = JSON.stringify(dl.value)
+  if (snapshot === lastSynced) return
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(async () => {
+    try {
+      const cur = JSON.stringify(dl.value)
+      if (cur === lastSynced) return
+      await SaveDocLayoutTemplate(name, cur)
+      lastSynced = cur
+      await reloadStore()
+      normalize(dl.value)
+    } catch (e) {
+      console.warn('模板自动保存失败', e)
+    }
+  }, 1000)
+}
+watch(() => JSON.stringify(dl.value), scheduleTemplateSync)
+
 // 套用模板（预置或自定义），覆盖当前结构
-async function applyLayout(layout, name) {
-  if (!window.confirm(`套用「${name}」会覆盖当前文档结构配置，确定继续吗？`)) return
+async function applyLayout(layout, name, silent = false) {
+  if (!silent && !window.confirm(`套用「${name}」会覆盖当前文档结构配置，确定继续吗？`)) return
   try {
     const next = normalize(JSON.parse(JSON.stringify(layout)))
     next.name = name
@@ -429,21 +536,35 @@ function preview() {
             </el-tooltip>
           </span>
         </div>
-        <div class="tpl-mine">
-          <span v-for="tpl in myTemplates" :key="tpl.id" class="tpl-mine-item">
-            <el-tag class="tpl-tag" closable
-              :type="dl.name === tpl.name ? 'success' : ''" :effect="dl.name === tpl.name ? 'dark' : 'light'"
-              @close="removeTemplate(tpl)" @click="applyTemplate(tpl)">{{ tpl.name }}</el-tag>
-            <el-button link size="small" type="primary" :loading="previewing === tpl.id"
-              @click="previewTemplate(tpl)">预览</el-button>
-          </span>
-          <span v-if="!myTemplates.length" class="tpl-empty">暂无自定义模板，配置好结构后点右侧保存</span>
-          <el-button size="small" type="primary" plain style="margin-left:auto" @click="saveAsTemplate">
-            + 保存当前结构为模板
-          </el-button>
+        <div style="margin-bottom:10px">
+          <el-button size="small" type="primary" plain @click="newTemplate">＋ 新建模板</el-button>
+          <el-button size="small" @click="saveAsTemplate">把当前结构保存为模板</el-button>
+        </div>
+        <div v-if="myTemplates.length" class="tpl-grid">
+          <div v-for="tpl in myTemplates" :key="tpl.id" class="tpl-card" :class="{ active: dl.name === tpl.name }"
+            @click="applyTemplate(tpl)">
+            <div class="tpl-head">
+              <span class="tpl-name">{{ tpl.name }}</span>
+              <el-tag v-if="dl.name === tpl.name" size="small" type="success" effect="dark">使用中</el-tag>
+            </div>
+            <div class="tpl-chips">
+              <el-tag v-for="c in chipsOf(tpl.layout)" :key="c" size="small" effect="plain" class="tpl-chip">{{ c }}</el-tag>
+            </div>
+            <div class="tpl-card-ops">
+              <el-button link size="small" type="primary" :loading="previewing === tpl.id"
+                @click.stop="previewTemplate(tpl)">预览</el-button>
+              <el-button link size="small" @click.stop="renameTemplate(tpl)">重命名</el-button>
+              <el-button link size="small" @click.stop="duplicateTemplate(tpl)">复制</el-button>
+              <el-button link size="small" type="danger" @click.stop="removeTemplate(tpl)">删除</el-button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="tpl-empty">
+          还没有自定义模板：点「＋ 新建模板」，按自己的规范设计一套（章节、开关、术语表、错误码…全部可选），
+          或把当前结构「保存为模板」。
         </div>
         <div class="tpl-hint">
-          最多保存 20 套；同名保存会覆盖旧模板，点击标签即可套用。
+          最多 20 套；编辑「使用中」的自定义模板会自动回写该模板。点击卡片套用，支持预览 / 重命名 / 复制 / 删除。
           <span v-if="cloudReady && cloudSyncEnabled()">已开启自动同步：保存 / 删除模板后会自动上传云端。</span>
         </div>
       </div>

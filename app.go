@@ -463,6 +463,74 @@ func (a *App) PushDocTemplates() (cloud.SyncResult, error) {
 	return cloud.SyncResult{Total: len(tpls), Changed: len(tpls)}, nil
 }
 
+// RenameDocLayoutTemplate 重命名自定义模板（重名报错）。
+func (a *App) RenameDocLayoutTemplate(id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("模板名称不能为空")
+	}
+	data := a.store.GetData()
+	found := false
+	for i := range data.Settings.DocLayoutTemplates {
+		t := data.Settings.DocLayoutTemplates[i]
+		if t.ID == id {
+			found = true
+			continue
+		}
+		if t.Name == name {
+			return fmt.Errorf("已存在同名模板：%s", name)
+		}
+	}
+	if !found {
+		return fmt.Errorf("模板不存在")
+	}
+	for i := range data.Settings.DocLayoutTemplates {
+		if data.Settings.DocLayoutTemplates[i].ID == id {
+			data.Settings.DocLayoutTemplates[i].Name = name
+		}
+	}
+	return a.store.SaveData(data)
+}
+
+// DuplicateDocLayoutTemplate 复制一份自定义模板，返回新模板（名称为「原名 副本」）。
+func (a *App) DuplicateDocLayoutTemplate(id string) (model.DocLayoutTemplate, error) {
+	data := a.store.GetData()
+	var src *model.DocLayoutTemplate
+	for i := range data.Settings.DocLayoutTemplates {
+		if data.Settings.DocLayoutTemplates[i].ID == id {
+			src = &data.Settings.DocLayoutTemplates[i]
+			break
+		}
+	}
+	if src == nil {
+		return model.DocLayoutTemplate{}, fmt.Errorf("模板不存在")
+	}
+	if len(data.Settings.DocLayoutTemplates) >= maxDocTemplates {
+		return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 %d 个，请先删除不用的模板", maxDocTemplates)
+	}
+	name := src.Name + " 副本"
+	for i := 2; ; i++ {
+		exist := false
+		for _, t := range data.Settings.DocLayoutTemplates {
+			if t.Name == name {
+				exist = true
+				break
+			}
+		}
+		if !exist {
+			break
+		}
+		name = fmt.Sprintf("%s 副本 %d", src.Name, i)
+	}
+	tpl := model.DocLayoutTemplate{ID: util.GenID(), Name: name, Layout: src.Layout}
+	tpl.Layout.Name = name
+	data.Settings.DocLayoutTemplates = append(data.Settings.DocLayoutTemplates, tpl)
+	if err := a.store.SaveData(data); err != nil {
+		return model.DocLayoutTemplate{}, err
+	}
+	return tpl, nil
+}
+
 // DeleteDocLayoutTemplate 删除自定义文档结构模板
 func (a *App) DeleteDocLayoutTemplate(id string) error {
 	data := a.store.GetData()

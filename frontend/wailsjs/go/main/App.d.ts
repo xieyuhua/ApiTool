@@ -97,6 +97,8 @@ export function DocPresets():Promise<Array<doc.DocPreset>>;
 
 export function DocSignTemplates():Promise<Array<doc.DocSignTemplate>>;
 
+export function DuplicateDocLayoutTemplate(arg1:string):Promise<model.DocLayoutTemplate>;
+
 export function Emit(arg1:string,arg2:Array<any>):Promise<void>;
 
 export function ExportAgentSession(arg1:string,arg2:string):Promise<string>;
@@ -280,6 +282,8 @@ export function RefreshShares():Promise<number>;
 export function RegisterWebUI(arg1:http.Handler):Promise<void>;
 
 export function RenameAgentSession(arg1:string,arg2:string):Promise<void>;
+
+export function RenameDocLayoutTemplate(arg1:string,arg2:string):Promise<void>;
 
 export function ResetWebChatToken():Promise<agent.WebChatInfo>;
 

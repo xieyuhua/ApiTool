@@ -162,6 +162,10 @@ export function DocSignTemplates() {
   return window['go']['main']['App']['DocSignTemplates']();
 }
 
+export function DuplicateDocLayoutTemplate(arg1) {
+  return window['go']['main']['App']['DuplicateDocLayoutTemplate'](arg1);
+}
+
 export function Emit(arg1, arg2) {
   return window['go']['main']['App']['Emit'](arg1, arg2);
 }
@@ -528,6 +532,10 @@ export function RegisterWebUI(arg1) {
 
 export function RenameAgentSession(arg1, arg2) {
   return window['go']['main']['App']['RenameAgentSession'](arg1, arg2);
+}
+
+export function RenameDocLayoutTemplate(arg1, arg2) {
+  return window['go']['main']['App']['RenameDocLayoutTemplate'](arg1, arg2);
 }
 
 export function ResetWebChatToken() {
