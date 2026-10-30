@@ -297,6 +297,9 @@ type DocLayout struct {
 	GlossaryOn      *bool `json:"glossaryOn,omitempty"`      // 术语表
 	EnumsOn         *bool `json:"enumsOn,omitempty"`         // 附录：数据字典
 	BusinessCodesOn *bool `json:"businessCodesOn,omitempty"` // 附录：业务错误码
+	// QuickStartText 自定义「接入指引（快速开始）」正文（简化 Markdown）；
+	// 留空则使用内置默认引导
+	QuickStartText string `json:"quickStartText,omitempty"`
 	// SectionOrder 自定义章节顺序（键名，如 cover / toc / apis / statusCodes）；
 	// 为空时用默认顺序，未列出的章节保持原相对位置追加在后
 	SectionOrder []string `json:"sectionOrder,omitempty"`

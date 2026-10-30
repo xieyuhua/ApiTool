@@ -401,6 +401,9 @@ func docChapterIntro() model.DocChapter {
 
 // ---------------- 企业标准章节：接入地址 / 公共请求头 / 加密验签 ----------------
 
+// QuickStartDefaultText 内置「接入指引（快速开始）」正文，供前端「填入默认内容」。
+func QuickStartDefaultText() string { return quickStartChapter }
+
 // quickStartChapter 内置的「接入指引（快速开始）」正文。
 const quickStartChapter = "#### 1. 申请应用凭证\n" +
 	"- 向平台申请 `appId` 与 `appSecret`（或 RSA2 / SM2 密钥对），生产与测试环境需分别申请\n" +
@@ -559,7 +562,11 @@ var defaultBusinessCodes = []model.DocCode{
 func EnrichDocLayout(layout model.DocLayout, envs []model.Environment, common model.CommonParams) model.DocLayout {
 	extra := make([]model.DocChapter, 0, 5)
 	if layout.QuickStart {
-		extra = append(extra, model.DocChapter{Title: "接入指引（快速开始）", Content: quickStartChapter, Key: "quickStart"})
+		content := strings.TrimSpace(layout.QuickStartText)
+		if content == "" {
+			content = quickStartChapter
+		}
+		extra = append(extra, model.DocChapter{Title: "接入指引（快速开始）", Content: content, Key: "quickStart"})
 	}
 	if layout.Environment {
 		if c := envChapter(envs); c != "" {

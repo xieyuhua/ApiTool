@@ -320,3 +320,36 @@ func TestSectionOrderCustom(t *testing.T) {
 		t.Fatal("默认顺序应为接口正文在统一规范之后")
 	}
 }
+
+// TestQuickStartCustomText 接入指引可自行编写：填了自定义正文就不再输出内置默认引导。
+func TestQuickStartCustomText(t *testing.T) {
+	title, rootID, dirs, apis, common := sampleScope()
+
+	// 1) 留空 → 使用内置默认引导
+	def := EnrichDocLayout(model.DocLayout{Toc: true, QuickStart: true}, nil, common)
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, def)
+	if !strings.Contains(html, "申请应用凭证") {
+		t.Fatal("留空时应输出内置默认接入指引")
+	}
+
+	// 2) 自定义正文 → 完全替换
+	custom := EnrichDocLayout(model.DocLayout{
+		Toc: true, QuickStart: true,
+		QuickStartText: "#### 1. 找对接人要 appId\n- 内部 OA 提交申请\n\n#### 2. 用测试环境联调\n- 网关地址见群公告",
+	}, nil, common)
+	html2 := BuildHTMLWithLayout(title, rootID, dirs, apis, common, custom)
+	for _, want := range []string{"找对接人要 appId", "内部 OA 提交申请", "网关地址见群公告"} {
+		if !strings.Contains(html2, want) {
+			t.Fatalf("自定义接入指引缺少 %q", want)
+		}
+	}
+	if strings.Contains(html2, "申请应用凭证") {
+		t.Fatal("填写自定义正文后不应再输出内置默认引导")
+	}
+
+	// 3) 默认正文可取到（供「填入默认内容」）
+	text := QuickStartDefaultText()
+	if !strings.Contains(text, "申请应用凭证") || !strings.Contains(text, "签名") {
+		t.Fatalf("默认接入指引内容异常: %q", text[:40])
+	}
+}

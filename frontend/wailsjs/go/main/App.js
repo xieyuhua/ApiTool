@@ -126,6 +126,10 @@ export function DefaultDocGlossary() {
   return window['go']['main']['App']['DefaultDocGlossary']();
 }
 
+export function DefaultDocQuickStart() {
+  return window['go']['main']['App']['DefaultDocQuickStart']();
+}
+
 export function DefaultDocSign() {
   return window['go']['main']['App']['DefaultDocSign']();
 }

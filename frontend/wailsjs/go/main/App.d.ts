@@ -79,6 +79,8 @@ export function DefaultDocEnums():Promise<Array<model.DocEnum>>;
 
 export function DefaultDocGlossary():Promise<Array<model.DocTerm>>;
 
+export function DefaultDocQuickStart():Promise<string>;
+
 export function DefaultDocSign():Promise<string>;
 
 export function DefaultTestCasePrompt():Promise<string>;

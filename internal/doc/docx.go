@@ -445,6 +445,9 @@ func (b *docxBuilder) miniMarkdown(src string) {
 		case miniQuote:
 			b.para("DocQuote", docxRun{Text: miniPlain(block.Text)})
 		case miniCode:
+			if label := codeLangLabel(block.Info); label != "" {
+				b.text("DocH4", label)
+			}
 			b.code(block.Text)
 		case miniTable:
 			rows := make([][]docxCell, 0, len(block.Rows))

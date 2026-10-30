@@ -1555,6 +1555,7 @@ export namespace model {
 	    glossaryOn?: boolean;
 	    enumsOn?: boolean;
 	    businessCodesOn?: boolean;
+	    quickStartText?: string;
 	    sectionOrder?: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -1585,6 +1586,7 @@ export namespace model {
 	        this.glossaryOn = source["glossaryOn"];
 	        this.enumsOn = source["enumsOn"];
 	        this.businessCodesOn = source["businessCodesOn"];
+	        this.quickStartText = source["quickStartText"];
 	        this.sectionOrder = source["sectionOrder"];
 	    }
 	

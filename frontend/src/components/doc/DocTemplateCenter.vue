@@ -8,6 +8,7 @@ import {
   PullDocTemplates, PushDocTemplates, PreviewDocTemplateHTML, PreviewDocHTML,
   RenameDocLayoutTemplate, DuplicateDocLayoutTemplate,
   DefaultDocConvention, DefaultDocGlossary, DefaultDocEnums, DefaultDocBusinessCodes, DocSignTemplates,
+  DefaultDocQuickStart,
 } from '../../../wailsjs/go/main/App'
 import { store, saveNow, reloadStore, buildDirTree, currentProject, cloudConfigured, cloudSyncEnabled } from '../../store'
 import DocLayoutPanel from './DocLayoutPanel.vue'
@@ -286,8 +287,13 @@ const chapterOptions = [
     apply: l => { l.toc = true }, clear: l => { l.toc = false } },
   { key: 'numbering', label: '章节编号', type: 'flag', desc: '1 / 1.1 / 1.1.1，三种格式一致',
     apply: l => { l.numbering = true }, clear: l => { l.numbering = false } },
-  { key: 'quickStart', label: '接入指引（快速开始）', type: 'flag', desc: '申请凭证 → 选环境 → 公共头 → 签名 → 调用与排错',
-    apply: l => { l.quickStart = true }, clear: l => { l.quickStart = false } },
+  { key: 'quickStart', label: '接入指引（快速开始）', type: 'text', field: 'quickStartText', flagField: 'quickStart',
+    desc: '可自行编写接入流程；留空（或点「填入默认内容」后再改）使用内置引导',
+    fillDefault: async l => {
+      if (!String(l.quickStartText || '').trim()) l.quickStartText = await DefaultDocQuickStart()
+      l.quickStart = true
+    },
+    clear: l => { l.quickStart = false; l.quickStartText = '' } },
   { key: 'environment', label: '接入地址（环境）', type: 'flag', desc: '按项目环境变量生成测试/预发/生产地址表',
     apply: l => { l.environment = true }, clear: l => { l.environment = false } },
   { key: 'commonHeaders', label: '公共请求头与公共参数', type: 'flag', desc: '按项目「公共参数」生成表格',

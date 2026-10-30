@@ -334,6 +334,11 @@ func (a *App) PreviewDocWatermark(dirID string, apiID string) (string, error) {
 	return doc.PreviewWatermark(a.ctx, a.store, dirID, apiID)
 }
 
+// DefaultDocQuickStart 返回内置的「接入指引（快速开始）」正文，供前端一键填入后按团队流程修改
+func (a *App) DefaultDocQuickStart() string {
+	return doc.QuickStartDefaultText()
+}
+
 // DefaultDocConvention 返回内置的「接口统一定义规范」模板，供文档中心一键填入
 func (a *App) DefaultDocConvention() string {
 	return doc.DefaultConventionTemplate()

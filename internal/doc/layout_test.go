@@ -705,3 +705,34 @@ func readDOCXParts(t *testing.T, data []byte) map[string]string {
 	}
 	return parts
 }
+
+// TestCodeLangLabels 示例代码块要标明语言（Java / Go / JavaScript / PHP），
+// 避免文档里出现「不知道是什么语言」的代码段。
+func TestCodeLangLabels(t *testing.T) {
+	sign := DefaultSignTemplate()
+	if !strings.Contains(sign, "```java") || !strings.Contains(sign, "```php") {
+		t.Fatal("默认验签模板应带 ```java / ```php 语言标记")
+	}
+
+	title, rootID, dirs, apis, common := sampleScope()
+	layout := EnrichDocLayout(model.DocLayout{
+		Toc: true, ConventionOn: boolPointer(true), Convention: sign,
+	}, nil, common)
+
+	html := BuildHTMLWithLayout(title, rootID, dirs, apis, common, layout)
+	for _, want := range []string{`mini-code-lang">Java`, `mini-code-lang">Go`, "JavaScript（前端）", `mini-code-lang">PHP`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("HTML 代码块缺少语言标签 %q", want)
+		}
+	}
+
+	parts := readDOCXParts(t, mustDOCX(t, title, rootID, dirs, apis, common, layout))
+	doc := parts["word/document.xml"]
+	for _, want := range []string{"Java", "Go", "PHP", "JavaScript（前端）"} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("Word 代码块缺少语言标签 %q", want)
+		}
+	}
+}
+
+func boolPointer(v bool) *bool { return &v }

@@ -28,6 +28,7 @@ const (
 type miniBlock struct {
 	Kind   miniBlockKind
 	Level  int      // 标题级别（1-4）
+	Info   string   // 代码块语言标记（```java 里的 java）
 	Text   string   // 段落 / 引用 / 代码内容
 	Items  []string // 列表项
 	Header []string // 表格表头
@@ -39,6 +40,37 @@ type miniInline struct {
 	Text string
 	Bold bool
 	Code bool
+}
+
+// codeLangLabel 把围栏语言标记转成展示用名称（示例代码块的「语言标签」）。
+func codeLangLabel(info string) string {
+	switch strings.ToLower(strings.TrimSpace(info)) {
+	case "java":
+		return "Java"
+	case "go", "golang":
+		return "Go"
+	case "javascript", "js":
+		return "JavaScript（前端）"
+	case "typescript", "ts":
+		return "TypeScript（前端）"
+	case "php":
+		return "PHP"
+	case "python", "py":
+		return "Python"
+	case "json":
+		return "JSON"
+	case "xml":
+		return "XML"
+	case "sql":
+		return "SQL"
+	case "bash", "sh", "shell":
+		return "Shell"
+	case "text", "txt":
+		return "说明"
+	case "":
+		return ""
+	}
+	return strings.ToUpper(info)
 }
 
 // parseMiniMarkdown 解析简化 Markdown。
@@ -61,6 +93,7 @@ func parseMiniMarkdown(src string) []miniBlock {
 		// 围栏代码块
 		if strings.HasPrefix(trimmed, "```") {
 			flushPara()
+			info := strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
 			var code []string
 			for i++; i < len(lines); i++ {
 				if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
@@ -68,7 +101,7 @@ func parseMiniMarkdown(src string) []miniBlock {
 				}
 				code = append(code, lines[i])
 			}
-			blocks = append(blocks, miniBlock{Kind: miniCode, Text: strings.Join(code, "\n")})
+			blocks = append(blocks, miniBlock{Kind: miniCode, Info: info, Text: strings.Join(code, "\n")})
 			continue
 		}
 		// 空行
@@ -276,6 +309,9 @@ func miniHTML(src string) string {
 		case miniQuote:
 			sb.WriteString(`<blockquote class="mini-quote">` + miniInlineHTML(b.Text) + `</blockquote>`)
 		case miniCode:
+			if label := codeLangLabel(b.Info); label != "" {
+				sb.WriteString(`<div class="mini-code-lang">` + htmlText(label) + `</div>`)
+			}
 			sb.WriteString(`<pre class="mini-code">` + htmlText(b.Text) + `</pre>`)
 		case miniTable:
 			sb.WriteString(`<table class="mini-table"><thead><tr>`)

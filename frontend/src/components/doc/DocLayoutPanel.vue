@@ -5,7 +5,7 @@ import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   DefaultDocBusinessCodes, DefaultDocConvention, DefaultDocEnums, DefaultDocGlossary,
-  DocSignTemplates,
+  DocSignTemplates, DefaultDocQuickStart,
 } from '../../../wailsjs/go/main/App'
 import { saveNow } from '../../store'
 
@@ -17,6 +17,23 @@ const props = defineProps({
 })
 
 const dl = computed(() => props.layout)
+
+// ---------------- 接入指引：填入默认 / 清空 ----------------
+async function fillQuickStart() {
+  try {
+    dl.value.quickStart = true
+    dl.value.quickStartText = await DefaultDocQuickStart()
+    save()
+    ElMessage.success('已填入默认接入指引，可直接修改')
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+function clearQuickStart() {
+  dl.value.quickStartText = ''
+  save()
+  ElMessage.success('已清空，将使用内置默认接入指引')
+}
 
 // ---------------- 章节顺序（可拖动调整，写入 layout.sectionOrder） ----------------
 const orderLabels = {
@@ -75,6 +92,7 @@ function normalize(v) {
   if (typeof v.sign !== 'string') v.sign = ''
   if (!Array.isArray(v.businessCodes)) v.businessCodes = []
   if (typeof v.quickStart !== 'boolean') v.quickStart = true
+  if (typeof v.quickStartText !== 'string') v.quickStartText = ''
   if (v.signOn === undefined || v.signOn === null) v.signOn = true
   if (v.revisionsOn === undefined || v.revisionsOn === null) v.revisionsOn = (v.revisions || []).length > 0
   if (v.glossaryOn === undefined || v.glossaryOn === null) v.glossaryOn = (v.glossary || []).length > 0
@@ -370,8 +388,19 @@ defineExpose({ preview })
       </el-form-item>
 
       <el-form-item label="接入指引">
-        <el-switch v-model="dl.quickStart" @change="save" />
-        <span class="dl-hint">生成「接入指引（快速开始）」：申请凭证 → 选择环境 → 公共头 → 签名 → 调用与排错</span>
+        <div style="width:100%">
+          <div class="dl-row">
+            <el-switch v-model="dl.quickStart" @change="save" />
+            <span class="dl-hint">生成「接入指引（快速开始）」章节</span>
+            <el-button size="small" link type="primary" @click="fillQuickStart">填入默认内容</el-button>
+            <el-button size="small" link @click="clearQuickStart">清空（改用内置默认）</el-button>
+          </div>
+          <el-input v-model="dl.quickStartText" type="textarea" :rows="6" class="dl-md"
+            placeholder="留空 = 使用内置默认引导（申请凭证 → 选择环境 → 公共头 → 签名 → 调用与排错）。
+可直接改成你们团队自己的接入流程，支持简化 Markdown：#### 小标题 / - 列表 / 表格 / 代码块"
+            @input="save" />
+          <div class="dl-hint">当前：{{ dl.quickStartText && dl.quickStartText.trim() ? '自定义内容' : '内置默认内容' }}</div>
+        </div>
       </el-form-item>
 
       <el-form-item label="术语表">
@@ -494,6 +523,8 @@ defineExpose({ preview })
 .dl-hint { font-size: 12px; color: #86909c; margin-left: 10px; }
 .dl-chapter { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .dl-chapter :deep(.el-input) { align-self: flex-start; }
+.dl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.dl-md { margin-top: 2px; }
 .dl-md :deep(textarea) { font-family: Consolas, 'Courier New', monospace; font-size: 12.5px; }
 .sign-item { display: flex; flex-direction: column; line-height: 1.5; }
 .sign-item span { font-size: 11px; color: #86909c; }
