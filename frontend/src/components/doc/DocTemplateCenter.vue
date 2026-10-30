@@ -130,6 +130,7 @@ const previewHTML = ref('')
 const previewSrc = ref('')   // Blob URL：比 srcdoc 更稳，且支持 #anchor 跳转
 const previewing = ref('')
 const previewMode = ref('template') // template | full
+const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知'
 let previewSeq = 0
 const previewKey = ref(0)   // 每次预览换 key，强制 iframe 重新挂载
 
@@ -459,6 +460,18 @@ function scheduleTemplateSync() {
 }
 watch(() => JSON.stringify(dl.value), scheduleTemplateSync)
 
+// 把当前全局结构同步到「当前项目覆盖」，避免导出/分享继续用旧的项目级结构
+async function syncToProject() {
+  const pid = project.value?.id
+  if (!pid) { ElMessage.warning('没有可用的项目'); return }
+  if (!store.data.settings.projectDocLayouts) store.data.settings.projectDocLayouts = {}
+  store.data.settings.projectDocLayouts[pid] = JSON.parse(JSON.stringify(globalLayout.value))
+  normalize(store.data.settings.projectDocLayouts[pid])
+  await saveNow()
+  scope.value = 'project'
+  ElMessage.success('已把当前全局结构同步为「' + project.value.name + '」的项目级结构')
+}
+
 // 套用模板（预置或自定义），覆盖当前结构
 async function applyLayout(layout, name, silent = false) {
   if (!silent && !window.confirm(`套用「${name}」会覆盖当前文档结构配置，确定继续吗？`)) return
@@ -468,6 +481,16 @@ async function applyLayout(layout, name, silent = false) {
     Object.assign(dl.value, next)
     await saveNow()
     ElMessage.success('已套用模板：' + name)
+    // 当前项目存在覆盖时，导出/分享会优先用它 —— 主动提示同步，避免「选了模板却不生效」
+    if (scope.value === 'global' && projectOverride.value) {
+      try {
+        await ElMessageBox.confirm(
+          `当前项目「${project.value?.name || ''}」存在项目级覆盖，导出与分享会优先使用它，` +
+          `所以刚套用的模板不会生效。是否把新结构同步为该项目覆盖？`,
+          '项目级覆盖优先', { confirmButtonText: '同步到当前项目', cancelButtonText: '暂不', type: 'warning' })
+        await syncToProject()
+      } catch { /* 用户选择暂不同步 */ }
+    }
   } catch (e) {
     ElMessage.error(String(e))
   }
@@ -625,6 +648,20 @@ function preview() {
       <div class="tpl-lead">
         统一维护导出文档的章节结构（封面 / 修订记录 / 目录 / 公共描述 / 统一定义规范 / 附录）与规范模板，
         文档中心导出 Word / PDF / HTML / Markdown 时都会套用这里的配置。
+        <el-alert v-if="scope === 'global' && projectOverride" type="warning" :closable="false" show-icon
+          style="margin-bottom:10px"
+          title="当前项目存在「项目级覆盖」：导出 / 分享 / 预览会优先使用它，全局配置的修改不会生效">
+          <div style="font-size:12.5px; line-height:1.8">
+            当前项目：<b>{{ project?.name || '未选择' }}</b>　生效结构：
+            <b>{{ projectOverride.name || '自定义结构（无名称）' }}</b>
+            <el-button size="small" type="primary" plain style="margin-left:10px" @click="syncToProject">
+              用全局结构覆盖本项目
+            </el-button>
+            <el-button size="small" @click="clearProjectOverride">清除项目覆盖（改用全局）</el-button>
+            <el-button size="small" @click="scope = 'project'">切换到项目范围编辑</el-button>
+          </div>
+        </el-alert>
+
         <div class="tpl-scope">
           <span class="tpl-scope-label">配置作用范围：</span>
           <el-radio-group v-model="scope" size="small">
@@ -788,8 +825,10 @@ function preview() {
           style="width:260px" placeholder="预览范围（默认全部接口）" default-expand-all clearable />
         <el-button plain style="margin-left:10px" :loading="previewing === 'current'" @click="previewCurrent">👁 预览当前模板（不含接口）</el-button>
         <el-button type="primary" plain style="margin-left:8px" :loading="previewing === 'full'" @click="previewFullDoc">👁 预览整份文档（含接口）</el-button>
-        <span class="tpl-hint" style="margin-left:10px">用当前结构与水印在浏览器打开，Ctrl+P 可看打印分页</span>
+        <span class="tpl-hint" style="margin-left:10px">弹窗内按当前结构与水印渲染（含所选范围的接口）</span>
       </div>
+
+      <div class="build-stamp">前端构建：{{ buildStamp }}（若时间戳不是最新的，说明运行的是旧构建，请重新 wails build）</div>
     </div>
   </div>
 </template>
@@ -824,7 +863,8 @@ function preview() {
 .tpl-tag { cursor: pointer; }
 .tpl-empty { font-size: 12px; color: #86909c; }
 .tpl-hint { font-size: 12px; color: #86909c; margin-top: 8px; }
-.tpl-actions { display: flex; align-items: center; margin: 4px 0 24px; flex-wrap: wrap; }
+.tpl-actions { display: flex; align-items: center; margin: 4px 0 12px; flex-wrap: wrap; }
+.build-stamp { font-size: 11.5px; color: #c9cdd4; margin-bottom: 24px; }
 .preview-wrap { height: 76vh; background: #f7f8fa; border: 1px solid #e5e6eb; border-radius: 8px; overflow: hidden; }
 .preview-frame { width: 100%; height: 100%; border: 0; background: #fff; }
 </style>

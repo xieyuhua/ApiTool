@@ -48,8 +48,11 @@ async function doExport(format) {
 // 当前选中的模板名（在「文档模板」中套用后写入结构，此处只做展示）
 const activeTemplateName = computed(() => {
   const pid = currentProject()?.id
-  const v = (pid && store.data.settings.projectDocLayouts?.[pid]) || store.data.settings.docLayout || {}
-  return v.name || '自定义结构'
+  const override = pid ? store.data.settings.projectDocLayouts?.[pid] : null
+  const v = override || store.data.settings.docLayout || {}
+  const name = v.name || '自定义结构'
+  // 名称后标注来源，避免「全局改了但项目覆盖没变」的误解
+  return override ? name + '（项目级覆盖）' : name + '（全局配置）'
 })
 
 // 文档结构摘要（配置入口在「文档模板」菜单）
