@@ -51,6 +51,8 @@ type App struct {
 	ctxReady        atomic.Bool // Wails 生命周期 ctx 是否已就绪（未就绪时调用 runtime.* 会终止进程）
 	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
 	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
+	clipMonitor     atomic.Bool  // 设置中的剪贴板监听开关（轮询线程零 IO 读取）
+	clipMaxItems    atomic.Int32 // 剪贴板历史上限（写入时零 IO 读取）
 	quitting        bool // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
 }
 
@@ -98,6 +100,12 @@ func (a *App) startup(ctx context.Context) {
 	a.dataFile = filepath.Join(dataDir, "data.json")
 	a.syncDir = filepath.Join(dataDir, "syncserver")
 	a.store = store.New(a.dataFile, AppVersion, DefaultUpdateURL)
+	// 初始化剪贴板设置（轮询线程与写入路径读取，避免每次读库）
+	{
+		cs := a.store.GetData().Settings.Clipboard
+		a.clipMonitor.Store(cs.Monitor)
+		a.clipMaxItems.Store(int32(cs.MaxItems))
+	}
 	// 初始化 agent 模块（MCP/技能/会话/运行），注入宿主能力与事件总线
 	a.Manager = agent.NewManager(a, a)
 	// 初始化测试引擎（用例生成/执行/报告导出），注入宿主能力与事件总线
@@ -260,7 +268,15 @@ func (a *App) ClearTestData(projectID string, scope string) (int, error) {
 
 // SaveData 保存全部数据
 func (a *App) SaveData(data model.AppData) error {
-	return a.store.SaveData(data)
+	// 剪贴板历史由 Go 侧增量维护（meta.clipboard 单列），前端内存中的副本
+	// 在浮层未打开时不会刷新、可能落后；这里以已持久化的最新历史为准，
+	// 避免一次普通保存把刚复制的内容覆盖丢失。
+	data.Clipboard.History = a.loadClipData().History
+	err := a.store.SaveData(data)
+	// 同步剪贴板设置，供轮询线程与写入路径无锁读取
+	a.clipMonitor.Store(data.Settings.Clipboard.Monitor)
+	a.clipMaxItems.Store(int32(data.Settings.Clipboard.MaxItems))
+	return err
 }
 
 // GetDataFilePath 返回数据文件路径
@@ -281,14 +297,17 @@ func (a *App) ClipHistory() []model.ClipItem {
 
 // ClearClipHistory 清空剪贴板历史并落盘（同时删除图片文件）。
 func (a *App) ClearClipHistory() {
-	data := a.LoadData()
-	for _, it := range data.Clipboard.History {
+	clip := a.loadClipData()
+	for _, it := range clip.History {
 		if it.Type == model.ClipTypeImage && it.ImagePath != "" {
 			_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
 		}
 	}
-	data.Clipboard.History = nil
-	_ = a.SaveData(data)
+	b, err := json.Marshal(model.ClipData{History: []model.ClipItem{}})
+	if err != nil {
+		return
+	}
+	_ = a.store.SaveClipboardRaw(string(b))
 }
 
 // ChatMessage 简单的聊天消息结构（供 CallAI 使用），别名指向 internal/ai。
@@ -1331,8 +1350,8 @@ func (a *App) StopClipboardCapture() { platform.StopCapture() }
 // ---- platform.ClipSink 实现：剪贴板采集结果的落盘与去重 ----
 
 // SaveClipText 记录一条文本剪贴板（ClipSink 回调）。
+// 只读写 meta.clipboard 单列，避免复制一次就全库重写（接口/用例越多越慢）。
 func (a *App) SaveClipText(text, sig string) error {
-	data := a.LoadData()
 	item := model.ClipItem{
 		ID:        genClipID(),
 		Type:      model.ClipTypeText,
@@ -1340,8 +1359,7 @@ func (a *App) SaveClipText(text, sig string) error {
 		Time:      time.Now().Format("2006-01-02 15:04:05"),
 		Timestamp: time.Now().UnixMilli(),
 	}
-	a.pushClip(&data, item)
-	return a.SaveData(data)
+	return a.pushClip(item)
 }
 
 // SaveClipImage 保存 PNG 字节到磁盘并记录一条图片剪贴板（ClipSink 回调）。
@@ -1349,10 +1367,12 @@ func (a *App) SaveClipImage(pngData []byte, w, h int, sig string) error {
 	id := genClipID()
 	rel := filepath.Join("clipimg", id+".png")
 	full := filepath.Join(a.store.Dir(), rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(full, pngData, 0o644); err != nil {
 		return err
 	}
-	data := a.LoadData()
 	item := model.ClipItem{
 		ID:        id,
 		Type:      model.ClipTypeImage,
@@ -1362,8 +1382,14 @@ func (a *App) SaveClipImage(pngData []byte, w, h int, sig string) error {
 		Time:      time.Now().Format("2006-01-02 15:04:05"),
 		Timestamp: time.Now().UnixMilli(),
 	}
-	a.pushClip(&data, item)
-	return a.SaveData(data)
+	return a.pushClip(item)
+}
+
+// ClipMonitorEnabled 返回设置中的剪贴板监听开关（ClipSink 回调）。
+// 关闭时 platform 的轮询协程只比对序列号，不读取/编码剪贴板内容。
+// 标志位在启动时初始化、并在每次 SaveData 后更新，因此轮询路径零 IO。
+func (a *App) ClipMonitorEnabled() bool {
+	return a.clipMonitor.Load()
 }
 
 // NotifyUpdated 通知前端剪贴板历史已更新（ClipSink 回调）。
@@ -1372,28 +1398,40 @@ func (a *App) NotifyUpdated() {
 }
 
 // pushClip 将条目插入历史最前，并按上限裁剪（上限来自设置）。
-func (a *App) pushClip(data *model.AppData, item model.ClipItem) {
-	for i, it := range data.Clipboard.History {
-		if it.Type == item.Type {
-			if item.Type == model.ClipTypeText && it.Text == item.Text {
-				data.Clipboard.History = append(data.Clipboard.History[:i:i], data.Clipboard.History[i+1:]...)
-				break
-			}
+// 只读写 meta.clipboard 单列：剪贴板历史很小，而业务数据可能很大，
+// 走整库 SaveData 会让「每复制一次」都付出与项目规模成正比的 IO 代价。
+func (a *App) pushClip(item model.ClipItem) error {
+	var clip model.ClipData
+	if raw := a.store.LoadClipboardRaw(); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &clip)
+	}
+	if clip.History == nil {
+		clip.History = []model.ClipItem{}
+	}
+	for i, it := range clip.History {
+		if it.Type == item.Type && item.Type == model.ClipTypeText && it.Text == item.Text {
+			clip.History = append(clip.History[:i:i], clip.History[i+1:]...)
+			break
 		}
 	}
-	data.Clipboard.History = append([]model.ClipItem{item}, data.Clipboard.History...)
-	maxItems := data.Settings.Clipboard.MaxItems
+	clip.History = append([]model.ClipItem{item}, clip.History...)
+	maxItems := int(a.clipMaxItems.Load())
 	if maxItems <= 0 {
 		maxItems = 200
 	}
-	if len(data.Clipboard.History) > maxItems {
-		for _, it := range data.Clipboard.History[maxItems:] {
+	if len(clip.History) > maxItems {
+		for _, it := range clip.History[maxItems:] {
 			if it.Type == model.ClipTypeImage && it.ImagePath != "" {
 				_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
 			}
 		}
-		data.Clipboard.History = data.Clipboard.History[:maxItems]
+		clip.History = clip.History[:maxItems]
 	}
+	b, err := json.Marshal(clip)
+	if err != nil {
+		return err
+	}
+	return a.store.SaveClipboardRaw(string(b))
 }
 
 func genClipID() string {
@@ -1402,19 +1440,30 @@ func genClipID() string {
 
 // ---- 对外暴露给前端的 API ----
 
+// loadClipData 读取剪贴板历史（只读 meta.clipboard 单列，不回读整库）。
+func (a *App) loadClipData() model.ClipData {
+	var clip model.ClipData
+	if raw := a.store.LoadClipboardRaw(); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &clip)
+	}
+	if clip.History == nil {
+		clip.History = []model.ClipItem{}
+	}
+	return clip
+}
+
 // GetClipItems 返回剪贴板历史（最新在前）。
 func (a *App) GetClipItems() []model.ClipItem {
-	data := a.LoadData()
-	return data.Clipboard.History
+	return a.loadClipData().History
 }
 
 // CopyClipItem 复制指定历史项到系统剪贴板（文本直接写入；图片读取本地 PNG 写回 CF_DIB）。
 func (a *App) CopyClipItem(id string) error {
-	data := a.LoadData()
+	data := a.loadClipData()
 	var item *model.ClipItem
-	for i := range data.Clipboard.History {
-		if data.Clipboard.History[i].ID == id {
-			item = &data.Clipboard.History[i]
+	for i := range data.History {
+		if data.History[i].ID == id {
+			item = &data.History[i]
 			break
 		}
 	}
@@ -1438,8 +1487,7 @@ func (a *App) CopyClipItem(id string) error {
 
 // GetClipImageData 返回指定图片历史项的 PNG 数据（base64），用于前端直接展示缩略图。
 func (a *App) GetClipImageData(id string) map[string]string {
-	data := a.LoadData()
-	for _, it := range data.Clipboard.History {
+	for _, it := range a.loadClipData().History {
 		if it.ID == id && it.Type == model.ClipTypeImage && it.ImagePath != "" {
 			if m, ok := platform.ReadPNGFileBase64(filepath.Join(a.store.Dir(), it.ImagePath)); ok {
 				return m
@@ -1451,17 +1499,21 @@ func (a *App) GetClipImageData(id string) map[string]string {
 
 // DeleteClipItem 删除一条历史记录（同时删除图片文件）。
 func (a *App) DeleteClipItem(id string) error {
-	data := a.LoadData()
-	for i, it := range data.Clipboard.History {
+	clip := a.loadClipData()
+	for i, it := range clip.History {
 		if it.ID == id {
 			if it.Type == model.ClipTypeImage && it.ImagePath != "" {
 				_ = os.Remove(filepath.Join(a.store.Dir(), it.ImagePath))
 			}
-			data.Clipboard.History = append(data.Clipboard.History[:i], data.Clipboard.History[i+1:]...)
+			clip.History = append(clip.History[:i], clip.History[i+1:]...)
 			break
 		}
 	}
-	return a.SaveData(data)
+	b, err := json.Marshal(clip)
+	if err != nil {
+		return err
+	}
+	return a.store.SaveClipboardRaw(string(b))
 }
 
 // ---- 剪贴板历史窗口控制 ----

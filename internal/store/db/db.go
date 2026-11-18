@@ -28,6 +28,10 @@ type DB interface {
 	UpdateAgent(raw string) error
 	// ReadAgent 读取 meta.agent 单列。
 	ReadAgent() (string, error)
+	// UpdateClipboard 仅更新 meta.clipboard 单列（剪贴板历史更新频繁，避免全库重写）。
+	UpdateClipboard(raw string) error
+	// ReadClipboard 读取 meta.clipboard 单列。
+	ReadClipboard() (string, error)
 	// ReadSkills 读取全部技能（独立表 agent_skills）。
 	ReadSkills() ([]AgentSkill, error)
 	// SaveSkills 覆盖保存技能列表（独立表，行级 upsert）。

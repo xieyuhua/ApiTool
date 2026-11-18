@@ -78,6 +78,10 @@ export function ClipHistory() {
   return window['go']['main']['App']['ClipHistory']();
 }
 
+export function ClipMonitorEnabled() {
+  return window['go']['main']['App']['ClipMonitorEnabled']();
+}
+
 export function ClipboardGetText() {
   return window['go']['main']['App']['ClipboardGetText']();
 }

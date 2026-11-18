@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { store } from '../../store'
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 import { AgentAPI, hasBridge, isWebUI } from './agentApi'
-import { renderMarkdown, renderMermaid } from './markdown'
+import { renderMarkdown, renderMarkdownStreaming, renderMermaid } from './markdown'
 import AgentSettings from './AgentSettings.vue'
 import AgentWebChat from './AgentWebChat.vue'
 import AgentLogs from './AgentLogs.vue'
@@ -162,6 +162,8 @@ function loadActiveMessages() {
 }
 
 function md(text) { return renderMarkdown(text) }
+// 流式正文内容每帧都变，单独走不缓存的渲染，避免污染历史消息缓存
+function mdStream(text) { return renderMarkdownStreaming(text) }
 
 async function scrollBottom() {
   await nextTick()
@@ -574,7 +576,7 @@ onBeforeUnmount(() => {
           <div v-if="polishing" class="running-tip polish-tip">
             <span class="dot"></span> ✨ 正在润色回答…
           </div>
-          <div v-else-if="live.content" class="md-body streaming" v-html="md(live.content)"></div>
+          <div v-else-if="live.content" class="md-body streaming" v-html="mdStream(live.content)"></div>
           <div v-else class="running-tip"><span class="dot"></span> Agent 运行中…</div>
           <div class="msg-foot has-usage" v-if="showUsage">
             <span class="msg-usage live" title="本轮已消耗（模型返回实时上报）">

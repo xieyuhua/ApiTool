@@ -572,7 +572,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onActivated } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   SniffStatus, SniffStart, SniffStop, SniffSetFilter, SniffListSessions,
@@ -889,6 +889,7 @@ const listRecords = computed(() => filteredRecords.value.slice(0, MAX_RENDER))
 let pendingRecords = [] // 待合并到 liveRecords 的记录
 let flushRaf = null // rAF 句柄
 let lastFlushAt = 0 // 上次实际 flush 的时间戳，用于渲染节流
+let activated = true // 当前是否处于激活（可见）状态（keep-alive 切换时更新）
 
 // 合并缓冲中的记录到 liveRecords，并限制列表长度（保留最新）。
 function flushRecords() {
@@ -922,6 +923,10 @@ function flushRecords() {
 function onRecords(raw) {
   // 停止过程中冻结渲染：抓包已结束，残留事件无需再 patch 大列表，避免占用主线程
   if (flushFrozen.value) return
+  // 页面被 keep-alive 缓存（切到其它视图）时同样不渲染：
+  // 录制期间即使不在抓包页，事件仍会持续到达，若照常按 4fps 重建最多 400 条 DOM，
+  // 会在其它页面造成持续卡顿。记录本身仍由后端会话保存，切回时继续接收新流量即可。
+  if (!activated) return
   const batch = Array.isArray(raw) ? raw : [raw]
   if (!batch.length) return
   for (const r of batch) {
@@ -1170,12 +1175,23 @@ onMounted(async () => {
 // 切回该页（keep-alive 激活）时异步刷新状态与会话列表，确保数据最新。
 // 注意：不重置 liveRecords，已抓流量快照由 keep-alive 保留，这里仅做增量刷新。
 onActivated(async () => {
+  activated = true
   try {
     const s = await SniffStatus()
     Object.assign(status, s)
     sysProxy.value = !!s.systemProxy
   } catch (e) { /* ignore */ }
   try { sessions.value = await SniffListSessions() } catch (e) {}
+})
+
+// 切走（keep-alive 缓存）时暂停实时渲染，避免在其它页面持续重建大列表
+onDeactivated(() => {
+  activated = false
+  pendingRecords = []
+  if (flushRaf != null) {
+    cancelAnimationFrame(flushRaf)
+    flushRaf = null
+  }
 })
 
 onBeforeUnmount(() => {

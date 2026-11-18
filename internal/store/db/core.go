@@ -612,6 +612,30 @@ func updateAgent(db *sql.DB, raw string) error {
 }
 
 // readSkills 读取全部技能（独立表 agent_skills）。
+// readClipboard 读取 meta.clipboard 单列（剪贴板历史 JSON）。
+// 剪贴板历史变化频繁（每次复制都会新增一条），但只占一行，增量更新避免全库重写。
+func readClipboard(db *sql.DB) (string, error) {
+	var raw sql.NullString
+	err := db.QueryRow(`SELECT clipboard FROM meta WHERE key='global'`).Scan(&raw)
+	if err != nil {
+		return "", err
+	}
+	return raw.String, nil
+}
+
+// updateClipboard 仅更新 meta.clipboard 单列，避免全量重写整个库。
+func updateClipboard(db *sql.DB, raw string) error {
+	res, err := db.Exec(`UPDATE meta SET clipboard=? WHERE key='global'`, raw)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	_, err = db.Exec(`INSERT INTO meta (key, clipboard) VALUES ('global', ?)`, raw)
+	return err
+}
+
 func readSkills(db *sql.DB) ([]AgentSkill, error) {
 	rows, err := db.Query(`SELECT id, name, description, prompt, enabled, builtin, updated_at FROM agent_skills ORDER BY updated_at`)
 	if err != nil {

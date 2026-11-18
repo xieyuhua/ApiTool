@@ -55,6 +55,8 @@ export function ClearTestData(arg1:string,arg2:string):Promise<number>;
 
 export function ClipHistory():Promise<Array<model.ClipItem>>;
 
+export function ClipMonitorEnabled():Promise<boolean>;
+
 export function ClipboardGetText():Promise<string>;
 
 export function ClipboardSetText(arg1:string):Promise<void>;

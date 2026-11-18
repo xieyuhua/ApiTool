@@ -27,11 +27,17 @@ const activeTabSub = computed({
   get: () => (store.openTabs.find(t => t.id === store.activeTabId) || {}).sub || store.activeTab,
   set: (v) => setSubTab(v),
 })
-// 标签栏展示用的接口信息
-const visibleTabs = computed(() => store.openTabs.map(t => {
-  const api = currentProject().apis.find(a => a.id === t.apiId)
-  return { id: t.id, apiId: t.apiId, name: api ? api.name : '(已删除)', method: api ? api.method : 'GET' }
-}))
+// 标签栏展示用的接口信息。
+// 用 Map 做 id 索引：原来每个标签都 find 一次全量接口，标签/接口多时是 O(n²)，
+// 且该 computed 依赖接口名称等字段，每次改名都会重算整个列表。
+const visibleTabs = computed(() => {
+  const byId = new Map()
+  for (const a of currentProject().apis) byId.set(a.id, a)
+  return store.openTabs.map(t => {
+    const api = byId.get(t.apiId)
+    return { id: t.id, apiId: t.apiId, name: api ? api.name : '(已删除)', method: api ? api.method : 'GET' }
+  })
+})
 // 标签右键菜单状态
 const tabCtx = reactive({ visible: false, x: 0, y: 0, tab: null })
 function openTabCtx(tab, ev) {

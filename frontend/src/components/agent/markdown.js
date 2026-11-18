@@ -79,8 +79,40 @@ export async function renderMermaid(root) {
   }
 }
 
+// 渲染结果缓存：同一条消息在每次重渲染（如流式输出时每秒数十次）都会被
+// 模板重新调用 renderMarkdown，历史消息内容不变时直接命中缓存，
+// 避免把整段多轮对话反复解析成 HTML（长时间对话后明显卡顿的主因之一）。
+const mdCache = new Map()
+const MD_CACHE_MAX = 300
+const MD_CACHE_MAX_CHARS = 4 * 1024 * 1024 // 缓存总字符预算，避免超长回复长期占用内存
+let mdCacheChars = 0
+
 export function renderMarkdown(md) {
   if (!md) return ''
+  const cached = mdCache.get(md)
+  if (cached !== undefined) return cached
+  const html = renderMarkdownUncached(md)
+  const cost = md.length + html.length
+  // 单条就超预算的超长内容不缓存，避免一次性挤空整个缓存
+  if (cost <= MD_CACHE_MAX_CHARS) {
+    while (mdCache.size && (mdCache.size >= MD_CACHE_MAX || mdCacheChars + cost > MD_CACHE_MAX_CHARS)) {
+      const oldest = mdCache.keys().next().value
+      const oldHtml = mdCache.get(oldest)
+      mdCacheChars -= oldest.length + oldHtml.length
+      mdCache.delete(oldest)
+    }
+    mdCache.set(md, html)
+    mdCacheChars += cost
+  }
+  return html
+}
+
+// 流式正文专用：内容每帧都不同，缓存只会把历史消息的缓存挤掉，因此直接渲染。
+export function renderMarkdownStreaming(md) {
+  return md ? renderMarkdownUncached(md) : ''
+}
+
+function renderMarkdownUncached(md) {
   const lines = String(md).replace(/\r\n/g, '\n').split('\n')
   const out = []
   let i = 0

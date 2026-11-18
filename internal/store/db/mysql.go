@@ -66,6 +66,16 @@ func (m *MySQLDB) ReadAgent() (string, error) {
 	return readAgent(m.db)
 }
 
+// UpdateClipboard 仅更新 meta.clipboard 单列。
+func (m *MySQLDB) UpdateClipboard(raw string) error {
+	return updateClipboard(m.db, raw)
+}
+
+// ReadClipboard 读取 meta.clipboard 单列。
+func (m *MySQLDB) ReadClipboard() (string, error) {
+	return readClipboard(m.db)
+}
+
 // ReadSkills 读取全部技能（独立表）。
 func (m *MySQLDB) ReadSkills() ([]AgentSkill, error) {
 	return readSkills(m.db)

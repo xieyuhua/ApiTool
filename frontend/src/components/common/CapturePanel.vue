@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CaptureInfo, StartCaptureServer, StopCaptureServer, GetCapturedRequests,
@@ -34,7 +34,12 @@ const projectDirOptions = computed(() => {
   return [{ value: '', label: '全部接口（根目录）', children: nodes('') }]
 })
 
+// 轮询重叠保护：网络/后端慢时上一轮未返回就跳过本轮，
+// 避免请求在长时间运行后越积越多（表现为越来越卡）。
+let refreshing = false
 async function refresh() {
+  if (refreshing) return
+  refreshing = true
   loading.value = true
   try {
     const [i, l] = await Promise.all([CaptureInfo(), GetCapturedRequests()])
@@ -47,6 +52,7 @@ async function refresh() {
     // 忽略轮询错误
   } finally {
     loading.value = false
+    refreshing = false
   }
 }
 
@@ -169,11 +175,36 @@ async function copyAsCommand(key) {
   } catch (e) { ElMessage.error(String(e)) }
 }
 
-onMounted(() => {
+// 轮询启停：本页被 keep-alive 缓存，切走后 onBeforeUnmount 不会触发，
+// 若只在 mounted/unmounted 管理定时器，离开页面后仍会每 2.5s 拉取全量捕获列表，
+// 打开越久越卡。因此用 onActivated/onDeactivated 精确控制，
+// 并在标签页不可见时暂停，避免后台空转。
+function startPolling() {
+  if (timer.value || document.hidden) return
   refresh()
   timer.value = setInterval(refresh, 2500)
+}
+function stopPolling() {
+  if (timer.value) {
+    clearInterval(timer.value)
+    timer.value = null
+  }
+}
+function onVisibilityChange() {
+  if (document.hidden) stopPolling()
+  else startPolling()
+}
+
+onMounted(() => {
+  startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
-onBeforeUnmount(() => { if (timer.value) clearInterval(timer.value) })
+onActivated(startPolling)
+onDeactivated(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
 </script>
 
 <template>

@@ -41,6 +41,7 @@ var (
 	procIsClipboardFmtAvail = clipUser32.NewProc("IsClipboardFormatAvailable")
 	procGetClipboardOwner  = clipUser32.NewProc("GetClipboardOwner")
 	procSetClipboardOwner  = clipUser32.NewProc("SetClipboardOwner") // 不存在则忽略
+	procGetClipboardSequenceNumber = clipUser32.NewProc("GetClipboardSequenceNumber")
 
 	procGlobalAlloc = clipKernel32.NewProc("GlobalAlloc")
 	procGlobalLock  = clipKernel32.NewProc("GlobalLock")
@@ -54,6 +55,9 @@ type ClipSink interface {
 	SaveClipText(text, sig string) error
 	SaveClipImage(pngData []byte, w, h int, sig string) error
 	NotifyUpdated()
+	// ClipMonitorEnabled 返回用户在设置里是否开启了剪贴板监听。
+	// 关闭时轮询协程仅做一次极廉价的序列号比对，不读取/编码剪贴板内容。
+	ClipMonitorEnabled() bool
 }
 
 // captureState 采集去重状态（记录上一次文本/图片指纹，避免重复写入）
@@ -61,11 +65,21 @@ type captureStateT struct {
 	mu          sync.Mutex
 	lastTextSig string
 	lastImgSig  string
+	lastSeq     uint32 // 上次处理时的剪贴板序列号（内容变化才会递增）
 	running     bool
 	stop        chan struct{}
 }
 
 var captureState captureStateT
+
+// GetClipboardSequenceNumber 返回系统剪贴板的变更序列号。
+// 每次剪贴板内容被写入该值都会递增，因此无需打开剪贴板、读取内容或编码图片，
+// 就能判断「内容有没有变」。这是避免长期空转开销的关键：
+// 原来的实现每 800ms 读取并 PNG 编码整段剪贴板（大图可达数十 MB），即使内容没变。
+func GetClipboardSequenceNumber() uint32 {
+	r, _, _ := procGetClipboardSequenceNumber.Call()
+	return uint32(r)
+}
 
 // StartCapture 启动后台采集（在 startup 中调用一次）。sink 用于把采集结果回写业务层。
 func StartCapture(sink ClipSink) {
@@ -116,8 +130,31 @@ func MarkWritten(textSig, imgSig string) {
 	}
 }
 
-// pollClipboard 读取系统剪贴板当前内容，若与上次不同则通过 sink 记录
+// pollClipboard 读取系统剪贴板当前内容，若与上次不同则通过 sink 记录。
+//
+// 性能要点：先比对系统剪贴板序列号，内容未变化时直接返回。
+// 这样空闲时每次 tick 只做一次 user32 调用，不再反复读取/解码/PNG 编码
+// 剪贴板内容（大图或长文本时这是可观的 CPU 与内存带宽开销）。
 func pollClipboard(sink ClipSink) {
+	if sink == nil || !sink.ClipMonitorEnabled() {
+		// 监听被关闭：仍更新序列号，重新开启时不会把历史内容误采一次。
+		captureState.mu.Lock()
+		captureState.lastSeq = GetClipboardSequenceNumber()
+		captureState.mu.Unlock()
+		return
+	}
+	seq := GetClipboardSequenceNumber()
+	captureState.mu.Lock()
+	unchanged := seq != 0 && seq == captureState.lastSeq
+	captureState.mu.Unlock()
+	if unchanged {
+		return
+	}
+	// 先记录序列号：即使下面读取失败（剪贴板被占用），也不会反复重试同一版本内容。
+	captureState.mu.Lock()
+	captureState.lastSeq = seq
+	captureState.mu.Unlock()
+
 	if data, w, h, sig, ok := ReadClipboardImage(); ok {
 		captureState.mu.Lock()
 		dup := sig == captureState.lastImgSig

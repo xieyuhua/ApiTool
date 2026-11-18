@@ -67,6 +67,16 @@ func (s *SQLiteDB) ReadAgent() (string, error) {
 	return readAgent(s.db)
 }
 
+// UpdateClipboard 仅更新 meta.clipboard 单列。
+func (s *SQLiteDB) UpdateClipboard(raw string) error {
+	return updateClipboard(s.db, raw)
+}
+
+// ReadClipboard 读取 meta.clipboard 单列。
+func (s *SQLiteDB) ReadClipboard() (string, error) {
+	return readClipboard(s.db)
+}
+
 // ReadSkills 读取全部技能（独立表）。
 func (s *SQLiteDB) ReadSkills() ([]AgentSkill, error) {
 	return readSkills(s.db)

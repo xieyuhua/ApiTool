@@ -98,11 +98,17 @@ export default {
       return one.length > 200 ? one.slice(0, 200) + '…' : one
     }
 
+    // 记录正在请求中的 id，避免同一张图片在等待返回期间被重复请求
+    const thumbPending = new Set()
     function thumbOf(item) {
       if (thumbCache.value[item.id]) return thumbCache.value[item.id]
-      clipImageURL(item).then(url => {
-        if (url) thumbCache.value[item.id] = url
-      })
+      if (!thumbPending.has(item.id)) {
+        thumbPending.add(item.id)
+        clipImageURL(item).then(url => {
+          thumbPending.delete(item.id)
+          if (url) thumbCache.value[item.id] = url
+        })
+      }
       return ''
     }
 

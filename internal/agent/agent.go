@@ -632,13 +632,39 @@ func (d *AgentData) activeSession() *AgentSession {
 	return nil
 }
 
+// maxAgentLogBytes 日志总字符预算（约 8MB）。超过后丢弃最旧的日志，
+// 避免 meta.agent 单列随使用时间无限膨胀、每次日志追加都全量读写。
+const maxAgentLogBytes = 8 << 20
+
+// trimLogsByBudget 从最旧（切片头部）开始丢弃，直到日志总字符数不超过预算。
+// 只统计主要字段（Detail/Title/Summary），足以反映体积。
+func trimLogsByBudget(logs []AgentLog, budget int) []AgentLog {
+	total := 0
+	for i := range logs {
+		total += len(logs[i].Detail) + len(logs[i].Title) + len(logs[i].Summary)
+	}
+	if total <= budget {
+		return logs
+	}
+	cut := 0
+	for cut < len(logs) && total > budget {
+		total -= len(logs[cut].Detail) + len(logs[cut].Title) + len(logs[cut].Summary)
+		cut++
+	}
+	return logs[cut:]
+}
+
 // writeAgentData 将 Agent 数据序列化并持久化到应用主库（meta.agent 列）。
 // 调用方需持有 m.mu；内部会读取当前 AppData 并覆盖 Agent 字段后整体保存。
 func (m *Manager) writeAgentData(data AgentData) error {
-	// 限制日志与消息数量，避免无限增长
+	// 限制日志与消息数量，避免无限增长。
+	// 另加一层「总字符数」上限：单条 Detail 最大 200k 字符，2000 条日志理论上可达
+	// 数百 MB，每次追加日志都要把整份 JSON 读写一遍（且携带全部会话），
+	// 会让 Agent 用久了之后越来越卡。超限时从最旧的日志开始丢弃。
 	if len(data.Logs) > 2000 {
 		data.Logs = data.Logs[len(data.Logs)-2000:]
 	}
+	data.Logs = trimLogsByBudget(data.Logs, maxAgentLogBytes)
 	if len(data.Messages) > 500 {
 		data.Messages = data.Messages[len(data.Messages)-500:]
 	}
@@ -918,9 +944,14 @@ func (m *Manager) appendLog(l AgentLog) {
 	}
 	d.Logs = append(d.Logs, l)
 	_ = m.writeAgentData(d)
-	// 实时推送给前端日志面板
+	// 实时推送给前端日志面板：只发轻量摘要，不携带 Detail。
+	// 单条 Detail 最大可达 200k 字符（完整请求上下文），面板收到事件后
+	// 会按需 QueryAgentLogs 重新拉取列表，事件本身无需带全文；
+	// 否则每条日志都会在 IPC/SSE 上重复传输大段文本，越用越卡。
 	if m.ctx != nil {
-		m.b.Emit( "agent:log", l)
+		lite := l
+		lite.Detail = ""
+		m.b.Emit("agent:log", lite)
 	}
 }
 

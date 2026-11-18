@@ -40,6 +40,14 @@ var (
 // webBroadcast 把事件推送给所有局域网网页端订阅者（桌面端窗口仍由 Wails 自身推送）。
 // data 与 Wails EventsEmit 保持一致：单参数直接作为负载，多参数组成数组。
 func webBroadcast(event string, data ...interface{}) {
+	// 无网页端订阅者时直接返回：抓包/Agent 日志等高频事件不必做 JSON 序列化，
+	// 否则桌面端单机使用也要为每条事件付一次完整 marshal 开销。
+	webSubMu.Lock()
+	n := len(webSubs)
+	webSubMu.Unlock()
+	if n == 0 {
+		return
+	}
 	var payload interface{}
 	switch len(data) {
 	case 0:

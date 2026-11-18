@@ -857,14 +857,26 @@ export function removeDir(id) {
 }
 
 // 构建目录树（供 el-tree 使用）type: dir | api
+// 先按 parentId 建索引再递归，O(n)；原来每个节点都 filter 全量数组，接口多时是 O(n²)，
+// 且该 computed 依赖整个项目数据，任何编辑都会触发重算。
 export function buildTree() {
   const p = currentProject()
+  const dirsByParent = new Map()
+  for (const d of p.dirs) {
+    if (!dirsByParent.has(d.parentId)) dirsByParent.set(d.parentId, [])
+    dirsByParent.get(d.parentId).push(d)
+  }
+  const apisByParent = new Map()
+  for (const a of p.apis) {
+    if (!apisByParent.has(a.dirId)) apisByParent.set(a.dirId, [])
+    apisByParent.get(a.dirId).push(a)
+  }
   const nodes = (parentId) => {
     const out = []
-    for (const d of p.dirs.filter(x => x.parentId === parentId)) {
+    for (const d of (dirsByParent.get(parentId) || [])) {
       out.push({ id: d.id, label: d.name, type: 'dir', children: nodes(d.id) })
     }
-    for (const a of p.apis.filter(x => x.dirId === parentId)) {
+    for (const a of (apisByParent.get(parentId) || [])) {
       out.push({ id: a.id, label: a.name, type: 'api', method: a.method, url: a.url, children: [] })
     }
     return out
@@ -875,8 +887,12 @@ export function buildTree() {
 // 仅目录树（供范围选择）
 export function buildDirTree() {
   const p = currentProject()
-  const nodes = (parentId) => p.dirs
-    .filter(d => d.parentId === parentId)
+  const byParent = new Map()
+  for (const d of p.dirs) {
+    if (!byParent.has(d.parentId)) byParent.set(d.parentId, [])
+    byParent.get(d.parentId).push(d)
+  }
+  const nodes = (parentId) => (byParent.get(parentId) || [])
     .map(d => ({ value: d.id, label: d.name, children: nodes(d.id) }))
   return [{ value: '', label: '全部接口', children: nodes('') }]
 }
@@ -1077,8 +1093,18 @@ export function removePluginConn(id) {
 
 export let clipImgBase = ''
 
-// 图片历史项的数据 URL 缓存（避免重复向 Go 请求 base64）
+// 图片历史项的数据 URL 缓存（避免重复向 Go 请求 base64）。
+// 只在内存里存缩略图 data URL，历史被裁剪后不会自动失效，
+// 因此限制条目数，防止长期运行后无限占用内存。
 const clipImageCache = {}
+const CLIP_IMAGE_CACHE_MAX = 80
+function clipCacheSet(id, url) {
+  const keys = Object.keys(clipImageCache)
+  if (keys.length >= CLIP_IMAGE_CACHE_MAX) {
+    for (const k of keys.slice(0, keys.length - CLIP_IMAGE_CACHE_MAX + 1)) delete clipImageCache[k]
+  }
+  clipImageCache[id] = url
+}
 
 // clipImageURL 返回图片历史项的 data URL，按需向 Go 请求并缓存
 export async function clipImageURL(item) {
@@ -1088,7 +1114,7 @@ export async function clipImageURL(item) {
     const r = await GetClipImageData(item.id)
     if (r && r.data) {
       const url = 'data:' + (r.mime || 'image/png') + ';base64,' + r.data
-      clipImageCache[item.id] = url
+      clipCacheSet(item.id, url)
       return url
     }
   } catch (e) { /* ignore */ }

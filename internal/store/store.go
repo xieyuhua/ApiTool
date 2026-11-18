@@ -142,6 +142,47 @@ func (s *Store) SaveAgentRaw(raw string) error {
 	return os.WriteFile(filepath.Join(filepath.Dir(s.dataFile), "agent.json"), []byte(raw), 0o644)
 }
 
+// SaveClipboardRaw 仅持久化剪贴板历史（meta.clipboard 单列），不触碰其他表。
+// 剪贴板每复制一次就变化一次，若走 SaveData 全量重写会造成明显的长期 IO 放大
+// （接口/用例/报告越多越慢）。回退模式下写 data.json 的 clipboard 字段。
+func (s *Store) SaveClipboardRaw(raw string) error {
+	s.mu.Lock()
+	if s.dbImpl != nil {
+		err := s.dbImpl.UpdateClipboard(raw)
+		s.mu.Unlock()
+		if err == nil {
+			return nil
+		}
+		// DB 写入失败则回退 JSON
+	} else {
+		s.mu.Unlock()
+	}
+	// JSON 回退：readJSON 只读文件，writeJSON 内部自行加锁，此处不能持锁调用。
+	data := s.readJSON(s.version, s.updateURL)
+	var clip model.ClipData
+	if json.Unmarshal([]byte(raw), &clip) == nil {
+		data.Clipboard = clip
+	}
+	return s.writeJSON(data)
+}
+
+// LoadClipboardRaw 读取剪贴板历史 JSON 串（meta.clipboard 单列）。
+// 回退模式下从 data.json 读取整份数据后仅返回剪贴板字段。
+func (s *Store) LoadClipboardRaw() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dbImpl != nil {
+		if raw, err := s.dbImpl.ReadClipboard(); err == nil && raw != "" {
+			return raw
+		}
+	}
+	b, err := json.Marshal(s.readJSON(s.version, s.updateURL).Clipboard)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // LoadAgentRaw 读取 agent 原始 JSON 串（meta.agent 单列）。回退模式下读旧 agent.json。
 func (s *Store) LoadAgentRaw() string {
 	s.mu.Lock()
