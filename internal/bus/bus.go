@@ -1,16 +1,16 @@
-// Package bus 定义业务子包与 Wails 运行时之间的解耦接口。
+// Package bus 定义业务子包与桌面运行时之间的解耦接口。
 //
 // 业务模块（capture/agent/plugins/share/sync/stress/platform 等）
-// 不再直接 import wails runtime 或持有 *App，而是通过 bus.Bus 接口
+// 不再直接 import 具体的 UI 框架运行时，而是通过 bus.Bus 接口
 // 收发前端事件、弹窗、剪贴板与窗口控制，从而实现可独立编译与单测。
+//
+// 运行时实现见 internal/wailsrt（Wails v3 适配层）。
 package bus
 
-import (
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-)
+import "apitool/internal/wailsrt"
 
-// Bus 是业务子包与 Wails 运行时之间的抽象。App 在主包中实现该接口，
-// 内部用 a.ctx 转发到 runtime 包。
+// Bus 是业务子包与桌面运行时之间的抽象。App 在主包中实现该接口，
+// 内部转发到 internal/wailsrt。
 type Bus interface {
 	// Emit 向前端发送事件（数据透传）。
 	Emit(event string, data ...interface{})
@@ -29,9 +29,9 @@ type Bus interface {
 	ClipboardGetText() (string, error)
 	ClipboardSetText(text string) error
 	// SaveFileDialog 弹出保存文件对话框。
-	SaveFileDialog(opts runtime.SaveDialogOptions) (string, error)
+	SaveFileDialog(opts wailsrt.DialogOptions) (string, error)
 	// OpenFileDialog 弹出打开文件对话框。
-	OpenFileDialog(opts runtime.OpenDialogOptions) (string, error)
+	OpenFileDialog(opts wailsrt.DialogOptions) (string, error)
 	// OpenDirectoryDialog 弹出选择目录对话框。
-	OpenDirectoryDialog(opts runtime.OpenDialogOptions) (string, error)
+	OpenDirectoryDialog(opts wailsrt.DialogOptions) (string, error)
 }

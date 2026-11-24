@@ -26,7 +26,7 @@ import (
 
 	"sync"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -958,7 +958,7 @@ func saveDownloadedFile(b bus.Bus, name, remotePath string, data []byte) (string
 	if name == "" {
 		name = pathBaseName(remotePath)
 	}
-	local, err := b.SaveFileDialog(runtime.SaveDialogOptions{
+	local, err := b.SaveFileDialog(wailsrt.DialogOptions{
 		Title:           "保存文件",
 		DefaultFilename: name,
 	})

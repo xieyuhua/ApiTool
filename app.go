@@ -34,7 +34,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // App struct
@@ -48,7 +50,7 @@ type App struct {
 	syncDir         string
 	sniffMgr        *sniff.Manager // MITM 抓包管理器
 	mu              sync.Mutex
-	ctxReady        atomic.Bool // Wails 生命周期 ctx 是否已就绪（未就绪时调用 runtime.* 会终止进程）
+	ctxReady        atomic.Bool // 桌面窗口上下文是否就绪（v3 中在 application.New 后即为 true）
 	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
 	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
 	clipMonitor     atomic.Bool  // 设置中的剪贴板监听开关（轮询线程零 IO 读取）
@@ -86,7 +88,9 @@ const AppVersion = "1.0.0"
 // DefaultUpdateURL 默认升级服务地址（本地同步服务）
 const DefaultUpdateURL = "http://127.0.0.1" + syncsrv.DefaultSyncAddr
 
-func (a *App) startup(ctx context.Context) {
+// startup 初始化业务状态。wailsApp 为 v3 应用实例（用于创建原生托盘）。
+func (a *App) startup(wailsApp *application.App) {
+	ctx := wailsApp.Context()
 	a.ctx = ctx
 	a.ctxReady.Store(true)
 	// 数据目录使用「程序可执行文件所在目录」下的 apitool 子目录，
@@ -122,7 +126,7 @@ func (a *App) startup(ctx context.Context) {
 	capture.LoadOrCreateToken(a.syncDir)
 	// 启动系统托盘（独立于主界面，提供显隐/测试/退出）
 	a.windowVisible = true
-	go a.startTray()
+	a.startTray(wailsApp)
 	// 启动剪贴板后台采集（文本 + 图片）
 	go a.StartClipboardCapture()
 	// 初始化 MITM 抓包管理器（CA 与抓包数据目录）
@@ -137,40 +141,37 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
-// shutdown 在应用退出时清理资源（停止采集）。托盘由 systray.Quit 自行退出。
-func (a *App) shutdown(ctx context.Context) {
+// shutdown 在应用退出时清理资源（停止采集）。
+func (a *App) shutdown() {
 	a.StopClipboardCapture()
 }
 
-// beforeClose 在用户点击窗口关闭/Alt+F4 时触发。
-// 返回 true 表示阻止退出，改为隐藏窗口并驻留系统托盘，实现「关闭即最小化到托盘」。
-// 使用 WindowHide 而非 WindowMinimise：隐藏后窗口不在任务栏保留按钮，
-// 托盘图标仍然存在，用户可通过托盘菜单「显示主窗口」恢复。
-func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	// 主动退出（托盘「退出」）时跳过隐藏逻辑，直接放行关闭
+// beforeClose 处理「用户点击关闭」：隐藏到托盘而非退出。
+// v3 中由窗口事件钩子（main.go 的 bindWindowEvents）调用。
+func (a *App) beforeClose() {
+	// 主动退出（托盘「退出」）时不做隐藏处理
 	if a.quitting {
-		return false
+		return
 	}
-	// 用户点击窗口关闭：隐藏到托盘而非真正退出。
 	// 若剪贴板浮层处于打开状态，一并关闭并复位状态，避免下次 toggle 判断错位。
 	if a.clipWinVisible {
 		a.clipWinVisible = false
-		a.WindowSetAlwaysOnTop(false)
 		a.Emit("apitool:hide-clipboard-history")
 	}
+	// 隐藏前先取消置顶：浮层打开过会置顶，否则下次从托盘显示时窗口会盖住其它应用
+	a.WindowSetAlwaysOnTop(false)
 	a.WindowHide()
 	a.windowVisible = false
-	return true
 }
 
 // GetClipboardText 读取系统剪贴板文本（供前端轮询记录历史）
 func (a *App) GetClipboardText() (string, error) {
-	return runtime.ClipboardGetText(a.ctx)
+	return wailsrt.RuntimeImpl.ClipboardGetText()
 }
 
 // SetClipboardText 写入系统剪贴板
 func (a *App) SetClipboardText(text string) error {
-	return runtime.ClipboardSetText(a.ctx, text)
+	return wailsrt.RuntimeImpl.ClipboardSetText(text)
 }
 
 // readData 从磁盘加载并反序列化全部数据（兼容与默认值补全逻辑见 internal/store）。
@@ -286,7 +287,7 @@ func (a *App) GetDataFilePath() string {
 
 // CopyToClipboard 复制文本到剪贴板
 func (a *App) CopyToClipboard(text string) error {
-	return runtime.ClipboardSetText(a.ctx, text)
+	return wailsrt.RuntimeImpl.ClipboardSetText(text)
 }
 
 // ClipHistory 返回剪贴板历史（供原生菜单 / 托盘菜单读取）。
@@ -340,7 +341,7 @@ func (a *App) CallAI(args CallAIArgs) (string, error) {
 
 // OpenInBrowser 使用系统浏览器打开
 func (a *App) OpenInBrowser(url string) {
-	runtime.BrowserOpenURL(a.ctx, url)
+	wailsrt.RuntimeImpl.BrowserOpenURL(url)
 }
 
 // ExportDoc 导出文档（转发到 doc 包）
@@ -702,46 +703,46 @@ var _ bus.Bus = (*App)(nil)
 func (a *App) Emit(event string, data ...interface{}) {
 	// 局域网网页端不依赖 Wails 上下文，始终可推送
 	webBroadcast(event, data...)
-	// 桌面窗口：生命周期 ctx 未就绪时跳过（Wails 对无效 ctx 会直接终止进程）
+	// 桌面窗口：上下文未就绪时跳过（此时窗口尚未创建，无接收方）
 	if !a.ctxReady.Load() {
 		return
 	}
-	runtime.EventsEmit(a.ctx, event, data...)
+	wailsrt.RuntimeImpl.Emit(event, data...)
 }
 
 // Quit 退出应用。
 func (a *App) Quit() {
-	runtime.Quit(a.ctx)
+	wailsrt.RuntimeImpl.Quit()
 }
 
 // WindowShow 显示主窗口。
 func (a *App) WindowShow() {
-	runtime.WindowShow(a.ctx)
+	wailsrt.RuntimeImpl.WindowShow()
 }
 
 // WindowHide 隐藏主窗口。
 func (a *App) WindowHide() {
-	runtime.WindowHide(a.ctx)
+	wailsrt.RuntimeImpl.WindowHide()
 }
 
 // WindowUnminimise 还原最小化窗口。
 func (a *App) WindowUnminimise() {
-	runtime.WindowUnminimise(a.ctx)
+	wailsrt.RuntimeImpl.WindowUnminimise()
 }
 
 // WindowCenter 居中主窗口。
 func (a *App) WindowCenter() {
-	runtime.WindowCenter(a.ctx)
+	wailsrt.RuntimeImpl.WindowCenter()
 }
 
 // WindowSetAlwaysOnTop 设置主窗口是否置顶。
 func (a *App) WindowSetAlwaysOnTop(b bool) {
-	runtime.WindowSetAlwaysOnTop(a.ctx, b)
+	wailsrt.RuntimeImpl.WindowSetAlwaysOnTop(b)
 }
 
 // BrowserOpenURL 用系统浏览器打开 URL（实现 bus.Bus）。
 func (a *App) BrowserOpenURL(url string) {
-	runtime.BrowserOpenURL(a.ctx, url)
+	wailsrt.RuntimeImpl.BrowserOpenURL(url)
 }
 
 // OpenExportFile 用系统默认程序打开导出的文件（xlsx/csv/html/md）。
@@ -754,11 +755,11 @@ func (a *App) OpenExportFile(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("文件不存在: %s", path)
 	}
-	// 网页端无法调起本机程序，交由前端给出提示
-	if a.ctx == nil {
+	// 仅在桌面端有效：没有主窗口时无法调起系统默认程序
+	if wailsrt.MainWindow() == nil {
 		return fmt.Errorf("当前环境无法打开本地文件，请手动到该路径查看：%s", path)
 	}
-	runtime.BrowserOpenURL(a.ctx, "file:///"+strings.ReplaceAll(filepath.ToSlash(path), " ", "%20"))
+	wailsrt.RuntimeImpl.BrowserOpenURL("file:///"+strings.ReplaceAll(filepath.ToSlash(path), " ", "%20"))
 	return nil
 }
 
@@ -817,36 +818,36 @@ func (a *App) OpenExportFolder(path string) error {
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("目录不存在: %s", dir)
 	}
-	if a.ctx == nil {
+	if wailsrt.MainWindow() == nil {
 		return fmt.Errorf("当前环境无法打开本地目录，请手动到该路径查看：%s", dir)
 	}
-	runtime.BrowserOpenURL(a.ctx, "file:///"+strings.ReplaceAll(filepath.ToSlash(dir), " ", "%20"))
+	wailsrt.RuntimeImpl.BrowserOpenURL("file:///"+strings.ReplaceAll(filepath.ToSlash(dir), " ", "%20"))
 	return nil
 }
 
 // ClipboardGetText 读取系统剪贴板文本（实现 bus.Bus）。
 func (a *App) ClipboardGetText() (string, error) {
-	return runtime.ClipboardGetText(a.ctx)
+	return wailsrt.RuntimeImpl.ClipboardGetText()
 }
 
 // ClipboardSetText 写入系统剪贴板（实现 bus.Bus）。
 func (a *App) ClipboardSetText(text string) error {
-	return runtime.ClipboardSetText(a.ctx, text)
+	return wailsrt.RuntimeImpl.ClipboardSetText(text)
 }
 
 // SaveFileDialog 弹出保存文件对话框（实现 bus.Bus）。
-func (a *App) SaveFileDialog(opts runtime.SaveDialogOptions) (string, error) {
-	return runtime.SaveFileDialog(a.ctx, opts)
+func (a *App) SaveFileDialog(opts wailsrt.DialogOptions) (string, error) {
+	return wailsrt.RuntimeImpl.SaveFileDialog(opts)
 }
 
 // OpenFileDialog 弹出打开文件对话框（实现 bus.Bus）。
-func (a *App) OpenFileDialog(opts runtime.OpenDialogOptions) (string, error) {
-	return runtime.OpenFileDialog(a.ctx, opts)
+func (a *App) OpenFileDialog(opts wailsrt.DialogOptions) (string, error) {
+	return wailsrt.RuntimeImpl.OpenFileDialog(opts)
 }
 
 // OpenDirectoryDialog 弹出选择目录对话框（实现 bus.Bus）。
-func (a *App) OpenDirectoryDialog(opts runtime.OpenDialogOptions) (string, error) {
-	return runtime.OpenDirectoryDialog(a.ctx, opts)
+func (a *App) OpenDirectoryDialog(opts wailsrt.DialogOptions) (string, error) {
+	return wailsrt.RuntimeImpl.OpenDirectoryDialog(opts)
 }
 
 // ----------------------------------------------------------------------------
@@ -1026,9 +1027,9 @@ func (a *App) SniffPickCAFile() (map[string]string, error) {
 	if a.sniffMgr == nil {
 		return nil, fmt.Errorf("抓包模块未初始化")
 	}
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+	path, err := wailsrt.OpenFileDialog(a.ctx, wailsrt.DialogOptions{
 		Title: "选择根证书文件（FiddlerRoot.cer 等）",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: "证书文件", Pattern: "*.cer;*.crt;*.pem;*.crt;*.der;*.pfx;*.*"},
 			{DisplayName: "所有文件", Pattern: "*.*"},
 		},

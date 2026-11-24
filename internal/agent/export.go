@@ -21,7 +21,7 @@ import (
 
 	"apitool/internal/pdfprint"
 
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // 行内语法正则（与前端 markdown.js 保持一致）
@@ -150,10 +150,10 @@ func (m *Manager) ExportAgentSession(sessionID, format string) (string, error) {
 	default:
 		return "", fmt.Errorf("不支持的导出格式: %s（可选 html / pdf）", format)
 	}
-	path, err := m.b.SaveFileDialog(wruntime.SaveDialogOptions{
+	path, err := m.b.SaveFileDialog(wailsrt.DialogOptions{
 		Title:           title,
 		DefaultFilename: sanitizeExportName(s.Title) + "-" + time.Now().Format("20060102-150405") + ext,
-		Filters:         []wruntime.FileFilter{{DisplayName: filter, Pattern: "*" + ext}},
+		Filters:         []wailsrt.FileFilter{{DisplayName: filter, Pattern: "*" + ext}},
 	})
 	if err != nil || path == "" {
 		return "", err

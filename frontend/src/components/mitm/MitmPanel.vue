@@ -1200,9 +1200,12 @@ onBeforeUnmount(() => {
     flushRaf = null
   }
   pendingRecords = []
-  if (recOff) EventsOff('sniff:record', recOff)
-  if (statusOff) EventsOff('sniff:status', statusOff)
-  if (errOff) EventsOff('sniff:error', errOff)
+  // 用 EventsOn 返回的取消函数精确移除本组件的监听。
+  // 原写法 EventsOff(name, offFn) 在 v2/v3 中都不支持「按回调移除」
+  // （EventsOff 只接受事件名），会导致监听残留、重复挂载后回调被多次触发。
+  if (recOff) { try { recOff() } catch (e) { /* ignore */ } recOff = null }
+  if (statusOff) { try { statusOff() } catch (e) { /* ignore */ } statusOff = null }
+  if (errOff) { try { errOff() } catch (e) { /* ignore */ } errOff = null }
 })
 
 function setSysProxy(val) {

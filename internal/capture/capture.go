@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // ---------------- 捕获请求数据模型 ----------------
@@ -554,10 +554,10 @@ func ExportOpenAPI(ids []string, title string, b bus.Bus) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path, err := b.SaveFileDialog(runtime.SaveDialogOptions{
+	path, err := b.SaveFileDialog(wailsrt.DialogOptions{
 		Title:           "导出 OpenAPI 文档",
 		DefaultFilename: doc.SanitizeFilename(title) + ".json",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: "OpenAPI JSON (*.json)", Pattern: "*.json"},
 		},
 	})

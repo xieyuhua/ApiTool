@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // Host 是 Engine 所需的宿主能力（由 main 包 *App 实现）。
@@ -33,7 +33,7 @@ type Host interface {
 	// Emit 向前端发送运行时事件。
 	Emit(event string, data ...interface{})
 	// SaveFileDialog 弹出保存文件对话框，返回所选路径。
-	SaveFileDialog(opts runtime.SaveDialogOptions) (string, error)
+	SaveFileDialog(opts wailsrt.DialogOptions) (string, error)
 	// AppVersion 返回客户端版本号。
 	AppVersion() string
 }
@@ -951,10 +951,10 @@ func (e *Engine) ExportTestReport(reportJSON string, format string) (string, err
 	default:
 		return "", fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf）", format)
 	}
-	path, err := e.host.SaveFileDialog(runtime.SaveDialogOptions{
+	path, err := e.host.SaveFileDialog(wailsrt.DialogOptions{
 		Title:           "导出测试报告",
 		DefaultFilename: doc.ExportFileName("test-report-"+r.PlanName, ext),
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: filter, Pattern: "*" + ext},
 		},
 	})

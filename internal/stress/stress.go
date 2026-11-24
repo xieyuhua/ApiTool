@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // StressTarget 压测目标（来自测试用例或接口的请求定义）
@@ -339,10 +339,10 @@ func ExportReport(reportJSON string, format string, b bus.Bus) (string, error) {
 	default:
 		return "", fmt.Errorf("不支持的格式: %s", format)
 	}
-	path, err := b.SaveFileDialog(runtime.SaveDialogOptions{
+	path, err := b.SaveFileDialog(wailsrt.DialogOptions{
 		Title:           "导出压测报告",
 		DefaultFilename: "stress-report-" + time.Now().Format("20060102-150405") + ext,
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: filter, Pattern: "*" + ext},
 		},
 	})

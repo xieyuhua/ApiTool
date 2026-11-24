@@ -10,7 +10,7 @@ import (
 
 	"apitool/internal/bus"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // Event 名常量（前端 EventsOn 监听）。
@@ -223,7 +223,7 @@ func (m *Manager) ExportOpenAPI(id, title, hostMode string) (string, error) {
 		// 无对话框能力（理论上不会发生），不弹窗，返回空路径避免误展示文档内容
 		return "", nil
 	}
-	save, serr := m.bus.SaveFileDialog(runtimeSaveDialog(title))
+	save, serr := m.bus.SaveFileDialog(saveDialogOptions(title))
 	if serr != nil {
 		return "", serr
 	}
@@ -283,12 +283,12 @@ func (m *Manager) ImportCA(certPEM, keyPEM string) (string, error) {
 	return fp, nil
 }
 
-// runtimeSaveDialog 构造保存对话框选项。
-func runtimeSaveDialog(title string) runtime.SaveDialogOptions {
-	return runtime.SaveDialogOptions{
+// saveDialogOptions 构造保存对话框选项。
+func saveDialogOptions(title string) wailsrt.DialogOptions {
+	return wailsrt.DialogOptions{
 		Title:           title,
 		DefaultFilename: "openapi.json",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: "OpenAPI JSON", Pattern: "*.json"},
 			{DisplayName: "YAML", Pattern: "*.yaml;*.yml"},
 		},

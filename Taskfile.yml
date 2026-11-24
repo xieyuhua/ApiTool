@@ -1,0 +1,38 @@
+# Wails v3 构建任务（可选使用 Task 运行；不装 Task 也可直接用 build-v3 脚本）
+#
+# 本项目前端沿用 v2 的 wailsjs 调用形态，由 frontend/src/wailsV3Bridge.js
+# 在运行时映射到 v3 的 Call.ByName / Events，因此不需要 wails3 生成绑定。
+#
+# 用法：
+#   wails3 build                 # 生产构建 -> build/bin/apitool.exe
+#   wails3 dev                   # 开发模式
+#
+# 不安装 Task 时可直接执行：
+#   bash build-v3.sh             # 生产构建
+#   bash build-v3.sh debug       # 调试构建（保留控制台输出）
+version: '3'
+
+vars:
+  APP_NAME: apitool
+  BIN_DIR: build/bin
+
+tasks:
+  build:
+    summary: 构建生产版本到 build/bin/apitool.exe
+    cmds:
+      - bash ./build-v3.sh
+
+  build:debug:
+    summary: 构建调试版本（保留控制台输出）
+    cmds:
+      - bash ./build-v3.sh debug
+
+  test:
+    summary: 运行 Go 单元测试
+    cmds:
+      - go test ./internal/...
+
+  run:
+    summary: 运行已构建的程序
+    cmds:
+      - ./{{.BIN_DIR}}/{{.APP_NAME}}.exe

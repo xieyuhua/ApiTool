@@ -12,7 +12,7 @@ import (
 	"apitool/internal/model"
 	"apitool/internal/store"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // collectScope 计算导出/分享范围内的目录与接口（限定当前项目）。
@@ -155,10 +155,10 @@ func ExportDoc(ctx context.Context, s *store.Store, dirID string, apiID string, 
 	if err != nil {
 		return "", err
 	}
-	path, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
+	path, err := wailsrt.SaveFileDialog(ctx, wailsrt.DialogOptions{
 		Title:           f.dialog,
 		DefaultFilename: ExportFileName(payload.title, f.ext),
-		Filters:         []runtime.FileFilter{{DisplayName: f.filter, Pattern: "*" + f.ext}},
+		Filters:         []wailsrt.FileFilter{{DisplayName: f.filter, Pattern: "*" + f.ext}},
 	})
 	if err != nil || path == "" {
 		return "", err
@@ -216,7 +216,7 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
 		return "", err
 	}
-	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	wailsrt.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
 	return path, nil
 }
 
@@ -292,7 +292,7 @@ func ShareDoc(ctx context.Context, s *store.Store, dirID string, apiID string) (
 	if err := os.WriteFile(path, payload.data, 0o644); err != nil {
 		return "", err
 	}
-	runtime.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	wailsrt.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
 	return path, nil
 }
 
@@ -302,7 +302,7 @@ func CopyDocMarkdown(ctx context.Context, s *store.Store, dirID string, apiID st
 	if err != nil {
 		return err
 	}
-	return runtime.ClipboardSetText(ctx, string(payload.data))
+	return wailsrt.ClipboardSetText(ctx, string(payload.data))
 }
 
 // SanitizeFilename 清理文件名中的非法字符，空结果回退为 api-doc。

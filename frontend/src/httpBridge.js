@@ -8,9 +8,19 @@
 //
 // 判定：window.runtime 缺失即视为 Web 模式（浏览器预览 / 局域网网页）。
 
-// 仅在浏览器（无 Wails 运行时）环境下安装
+// 仅在浏览器（无 Wails 运行时）环境下安装。
+//
+// 判定顺序很重要：Wails v3 的 runtime.js 是异步注入的，进入 main.js 时
+// window.wails / window.runtime 可能都还不存在，此时若只检查 window.runtime
+// 会误判为「浏览器预览」，把 HTTP/SSE 桥装上去并覆盖真正的 v3 绑定
+// （表现为所有后端调用 404）。因此：
+//   1) 已经由 v3 兼容桥接管 -> 不安装；
+//   2) v3 的 window.wails 已在 -> 不安装；
+//   3) v2 桌面端（window.runtime + window.go 且无 __WEBUI__）-> 不安装。
 export function installWebBridge() {
-  if (window.runtime && window.go) return false
+  if (window.__WAILS_V3__) return false
+  if (window.wails && window.wails.Call) return false
+  if (window.runtime && window.go && !window.__WEBUI__) return false
   window.__WEBUI__ = true
   installGoBridge()
   installRuntimeBridge()
@@ -85,26 +95,27 @@ function installRuntimeBridge() {
 
   window.runtime = {
     // ---- 事件 ----
+    // maxCallbacks > 0 时，回调被调用该次数后自动注销（与 Wails 语义一致）。
     EventsOnMultiple(eventName, callback, maxCallbacks) {
       if (!handlers.has(eventName)) handlers.set(eventName, new Set())
       const set = handlers.get(eventName)
-      set.add(callback)
-      return () => set.delete(callback)
+      let left = maxCallbacks > 0 ? maxCallbacks : -1
+      const wrapped = (data) => {
+        callback(data)
+        if (left > 0 && --left === 0) set.delete(wrapped)
+      }
+      set.add(wrapped)
+      return () => set.delete(wrapped)
     },
     EventsOn(eventName, callback) {
       return window.runtime.EventsOnMultiple(eventName, callback, -1)
     },
     EventsOnce(eventName, callback) {
-      const off = window.runtime.EventsOnMultiple(eventName, callback, 1)
-      setTimeout(() => { if (off) off() }, 0)
-      return off
+      return window.runtime.EventsOnMultiple(eventName, callback, 1)
     },
-    EventsOff(eventName, ...rest) {
-      if (rest.length) {
-        rest.forEach(n => handlers.delete(n))
-        return
-      }
-      handlers.delete(eventName)
+    // 与 Wails 一致：EventsOff 只按事件名移除该事件的全部监听。
+    EventsOff(eventName) {
+      if (eventName) handlers.delete(eventName)
     },
     EventsOffAll() { handlers.clear() },
     EventsEmit() { /* 网页端无需向桌面端反向发事件 */ },

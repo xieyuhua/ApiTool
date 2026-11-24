@@ -13,14 +13,14 @@ import (
 	"apitool/internal/store"
 	"apitool/internal/util"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"apitool/internal/wailsrt"
 )
 
 // ImportDoc 选择并导入接口文档（OpenAPI 3 / Swagger 2 / Postman）
 func ImportDoc(ctx context.Context, s *store.Store, projectID string) (string, error) {
-	path, err := runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{
+	path, err := wailsrt.OpenFileDialog(ctx, wailsrt.DialogOptions{
 		Title: "导入接口文档",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsrt.FileFilter{
 			{DisplayName: "接口文档 (OpenAPI/Swagger/Postman)", Pattern: "*.json;*.yaml;*.yml"},
 			{DisplayName: "JSON (*.json)", Pattern: "*.json"},
 			{DisplayName: "YAML (*.yaml;*.yml)", Pattern: "*.yaml;*.yml"},

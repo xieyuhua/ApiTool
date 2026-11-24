@@ -17,11 +17,17 @@ import './style.css'
 // Teleport 到 body 的组件样式，组件内布局适配见 AgentChat.vue 的 @media。
 import './agent-mobile.css'
 import { installWebBridge } from './httpBridge'
+import { installV3BridgeWhenReady } from './wailsV3Bridge'
 import { store, initAgentWebStore, applyScheme } from './store'
 import AgentChat from './components/agent/AgentChat.vue'
 
-// 桌面端：window.go 由 Wails 注入；局域网网页：安装 HTTP/SSE 兼容桥端
-installWebBridge()
+// 桌面端（Wails v3）：把 v3 API 映射回 window.go / window.runtime；
+// 局域网网页：安装 HTTP/SSE 兼容桥端。
+// v3 的 runtime.js 可能晚于本文件注入，因此先等待其就绪再决定安装哪一套桥，
+// 之后才能安全地调用后端（initAgentWebStore 依赖 window.go）。
+const bridgeReady = installV3BridgeWhenReady().then((v3Ready) => {
+  if (!v3Ready) installWebBridge()
+})
 // 标记为网页端：移动端样式（agent-mobile.css）以 body.web-agent 限定作用域
 document.body.classList.add('web-agent')
 
@@ -35,7 +41,8 @@ function mountApp() {
   app.mount('#app')
 }
 
-initAgentWebStore()
+bridgeReady
+  .then(() => initAgentWebStore())
   .then(() => {
     mountApp()
     // 套用与桌面端一致的主题（明暗 / 主题方案 / 主色）
