@@ -11,13 +11,14 @@ import (
 
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 	"apitool/internal/util"
 
 	"apitool/internal/wailsrt"
 )
 
 // ImportDoc 选择并导入接口文档（OpenAPI 3 / Swagger 2 / Postman）
-func ImportDoc(ctx context.Context, s *store.Store, projectID string) (string, error) {
+func ImportDoc(ctx context.Context, s storeapi.Store, projectID string) (string, error) {
 	path, err := wailsrt.OpenFileDialog(ctx, wailsrt.DialogOptions{
 		Title: "导入接口文档",
 		Filters: []wailsrt.FileFilter{

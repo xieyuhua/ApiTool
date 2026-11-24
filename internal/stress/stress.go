@@ -9,6 +9,7 @@ import (
 	"apitool/internal/httpx"
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 	"apitool/internal/util"
 
 	"encoding/json"
@@ -75,7 +76,7 @@ type StressReport struct {
 
 // Run 对给定目标发起并发压测，返回含延迟分布与吞吐的报告。
 // 通过运行时事件 "apitool:stress-progress" 推送进度 {done,total}。
-func Run(targets []StressTarget, config StressConfig, s *store.Store, b bus.Bus) (StressReport, error) {
+func Run(targets []StressTarget, config StressConfig, s storeapi.Store, b bus.Bus) (StressReport, error) {
 	report := StressReport{}
 	if len(targets) == 0 {
 		return report, fmt.Errorf("请至少选择一个压测目标")

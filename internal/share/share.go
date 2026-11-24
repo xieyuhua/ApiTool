@@ -8,6 +8,7 @@ import (
 	"apitool/internal/doc"
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 	"apitool/internal/util"
 
 	"encoding/json"
@@ -202,7 +203,7 @@ func buildShareHTML(data model.AppData, title, dirID string, dirs []model.Direct
 }
 
 // htmlByAPI 构建指定目录/接口范围的 HTML 文档（供多分享链接使用）。
-func htmlByAPI(s *store.Store, dirID, apiID string) (title, html string, err error) {
+func htmlByAPI(s storeapi.Store, dirID, apiID string) (title, html string, err error) {
 	data := s.GetData()
 	title, dirs, apis := doc.CollectScope(data, dirID, apiID)
 	if len(apis) == 0 {
@@ -212,13 +213,13 @@ func htmlByAPI(s *store.Store, dirID, apiID string) (title, html string, err err
 }
 
 // BuildHTMLByAPI 导出：按 dirID/apiID 构建 HTML 文档内容。
-func BuildHTMLByAPI(s *store.Store, dirID, apiID string) (string, error) {
+func BuildHTMLByAPI(s storeapi.Store, dirID, apiID string) (string, error) {
 	_, html, err := htmlByAPI(s, dirID, apiID)
 	return html, err
 }
 
 // BuildTitleByAPI 导出：返回 dirID/apiID 范围的文档标题。
-func BuildTitleByAPI(s *store.Store, dirID, apiID string) (string, error) {
+func BuildTitleByAPI(s storeapi.Store, dirID, apiID string) (string, error) {
 	title, _, err := htmlByAPI(s, dirID, apiID)
 	if err != nil {
 		return "", err
@@ -229,7 +230,7 @@ func BuildTitleByAPI(s *store.Store, dirID, apiID string) (string, error) {
 // CreateShare 创建一条分享链接（内存态，应用退出失效）。
 // password 为空表示无需密码；expireMinutes<=0 表示长期有效。
 // 返回 (token, link)，link 形如 http://局域网IP:port/s/{token}。
-func CreateShare(s *store.Store, dirID, apiID, password string, expireMinutes int) (string, string, error) {
+func CreateShare(s storeapi.Store, dirID, apiID, password string, expireMinutes int) (string, string, error) {
 	title, html, err := htmlByAPI(s, dirID, apiID)
 	if err != nil {
 		return "", "", err
@@ -288,7 +289,7 @@ func StopShare(token string) error {
 
 // BuildDoc 构建文档内容（HTML/OpenAPI/Markdown），不启动分享服务。
 // projectID 保留以兼容前端调用契约（当前单项目模型下内部未使用）。
-func BuildDoc(s *store.Store, scope, projectID, dirID, format string) (string, error) {
+func BuildDoc(s storeapi.Store, scope, projectID, dirID, format string) (string, error) {
 	data := s.GetData()
 	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
@@ -313,7 +314,7 @@ func BuildDoc(s *store.Store, scope, projectID, dirID, format string) (string, e
 
 // RefreshAllShares 按最新「文档模板」重建全部分享链接的内容，返回刷新条数。
 // 模板或水印调整后调用，避免旧链接继续展示旧结构。
-func RefreshAllShares(s *store.Store) (int, error) {
+func RefreshAllShares(s storeapi.Store) (int, error) {
 	shareMu.Lock()
 	items := make([]*ShareItem, 0, len(shareItems))
 	for _, it := range shareItems {
@@ -338,7 +339,7 @@ func RefreshAllShares(s *store.Store) (int, error) {
 }
 
 // Refresh 重新生成当前分享文档并刷新托管内容（不重启服务）。
-func Refresh(s *store.Store, scope, projectID, dirID string) error {
+func Refresh(s storeapi.Store, scope, projectID, dirID string) error {
 	content, err := BuildDoc(s, scope, projectID, dirID, "html")
 	if err != nil {
 		return err
@@ -351,7 +352,7 @@ func Refresh(s *store.Store, scope, projectID, dirID string) error {
 
 // OpenDoc 构建文档并（按 openType）内嵌预览 / 复制链接 / 系统浏览器打开。
 // 返回实际地址（view=内嵌 html，copy/open=http 链接）。
-func OpenDoc(b bus.Bus, s *store.Store, scope, projectID, dirID, openType, format string) (string, error) {
+func OpenDoc(b bus.Bus, s storeapi.Store, scope, projectID, dirID, openType, format string) (string, error) {
 	content, err := BuildDoc(s, scope, projectID, dirID, format)
 	if err != nil {
 		return "", err
@@ -395,7 +396,7 @@ func OpenDoc(b bus.Bus, s *store.Store, scope, projectID, dirID, openType, forma
 }
 
 // TestReport 分享测试报告（HTML 默认打开分享服务，或按 openType 复制/打开）。
-func TestReport(b bus.Bus, s *store.Store, reportJSON, format, openType string) (string, error) {
+func TestReport(b bus.Bus, s storeapi.Store, reportJSON, format, openType string) (string, error) {
 	var r model.TestReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
 		return "", fmt.Errorf("报告解析失败: %v", err)

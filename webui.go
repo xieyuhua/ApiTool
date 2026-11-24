@@ -1,3 +1,5 @@
+//go:build !serveronly
+
 package main
 
 // 局域网 Web UI：把桌面端同一份前端（frontend/dist，已由 go:embed 内嵌）托管到局域网

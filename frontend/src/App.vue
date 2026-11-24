@@ -19,6 +19,7 @@ import MitmPanel from './components/mitm/MitmPanel.vue'
 import Tools from './components/tools/Tools.vue'
 import AgentChat from './components/agent/AgentChat.vue'
 import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
+import LoginView from './components/auth/LoginView.vue'
 
 const clipVisible = ref(false)
 
@@ -222,6 +223,9 @@ const navs = [
   </div>
 
   <ClipboardHistory v-if="clipVisible" @close="closeClip" />
+
+  <!-- 2.0 服务端模式：未登录时整屏登录视图 -->
+  <LoginView v-if="store.serverInfo && !store.user" />
 
   <!-- 前端构建时间戳：确认当前运行的是哪次构建（改完需 wails build 才会生效） -->
   <div class="build-badge" :title="'客户端版本 ' + (store.appVersion || '-') + '；前端构建时间 ' + buildStamp">

@@ -45,7 +45,10 @@ export const store = reactive({
   loaded: false,
   loading: false, // 初始化数据加载中（全屏遮罩）
   treeLoading: false, // 切换项目 / 重建目录时的局部加载
-  view: 'workspace', // workspace | docs | templates | testing | capture | mitm | tools | agent | settings
+  view: 'workspace', // workspace | docs | templates | testing | capture | mitm | tools | agent | settings | login
+  // 2.0 服务端会话：null=本地模式（桌面未登录）；登录后为 {id, username, server}
+  user: null,
+  serverInfo: null, // 服务端能力信息（allowRegister/enablePlugins/enableAgent）
   currentApiId: '',
   activeTab: 'debug', // debug | params | doc
   // 接口调试多标签：每个标签绑定一个接口，支持同时打开多个接口窗口（类似浏览器标签）
@@ -354,10 +357,18 @@ export async function saveNow() {
   clearTimeout(saveTimer)
   if (!store.loaded) return
   if (!hasGoBridge()) return
+  // 服务端模式：未登录时不做整包保存（数据在服务端，登录后经会话读写）
+  if (store.serverInfo && !store.user) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
     clearDebugDirty() // 任何显式保存后，清除调试脏标记
   } catch (e) {
+    // 401 → 登录失效：切到登录页（服务端模式）
+    if (e && e.name === 'AuthRequired') {
+      store.user = null
+      store.view = 'login'
+      return
+    }
     console.error('保存失败', e)
   }
 }
@@ -480,13 +491,43 @@ export async function initAgentWebStore() {
 export async function initStore() {
   store.loading = true
   const ok = await waitForGo()
-  if (ok) {
+  // 2.0 服务端探测（先于数据加载）：无论桥是否存在都探测一次（webui 模式下
+  // hasGoBridge 也为 true——那是 httpBridge 的 Proxy，不是本地数据）。
+  // serverInfo 存在即服务端模式；user 为空表示未登录（由 LoginView 处理），
+  // 未登录时跳过 loadInto，避免未授权的 RPC 调用刷 401。
+  let serverMode = false
+  if (typeof window !== 'undefined' && !window.__WAILS_V3__) {
+    try {
+      const mod = await import('./auth')
+      const health = await mod.probeServer()
+      if (health) {
+        store.serverInfo = health
+        serverMode = true
+        try {
+          const res = await fetch(mod.apiBase() + '/api/me', { credentials: 'same-origin' })
+          if (res.ok) {
+            const d = await res.json()
+            if (d && d.ok) {
+              store.user = { id: d.result.user.id, username: d.result.user.username, server: health.version }
+            }
+          }
+        } catch (e) { /* 未登录 */ }
+      }
+    } catch (e) { /* 服务端不可达：保持本地/预览模式 */ }
+  }
+  // 数据加载：桌面 v3 与预览模式走本地桥；服务端模式仅在已登录时经会话加载
+  if (!serverMode || store.user) {
     try {
       await loadInto()
     } catch (e) {
-      console.error('加载数据失败', e)
+      if (e && e.name === 'AuthRequired') {
+        store.user = null
+        store.view = 'login'
+      } else {
+        console.error('加载数据失败', e)
+      }
     }
-  } else {
+  } else if (!ok) {
     console.warn('未检测到 Wails 桥接（window.go），使用内存数据（预览模式）')
   }
   store.loading = false

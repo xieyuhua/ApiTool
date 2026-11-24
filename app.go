@@ -1,32 +1,24 @@
+//go:build !serveronly
+
 package main
 
 import (
-	"apitool/internal/agent"
-	"apitool/internal/ai"
-	"apitool/internal/bus"
+	"apitool/internal/appcore"
 	"apitool/internal/capture"
-	"apitool/internal/cloud"
 	"apitool/internal/doc"
-	"apitool/internal/httpx"
-	"apitool/internal/jsonutil"
 	"apitool/internal/model"
 	"apitool/internal/platform"
-	"apitool/internal/plugins"
 	"apitool/internal/share"
 	"apitool/internal/sniff"
 	"apitool/internal/store"
 	"apitool/internal/stress"
 	syncsrv "apitool/internal/sync"
-	"apitool/internal/testing"
-	"apitool/internal/tool"
-	"apitool/internal/util"
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,56 +31,40 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// App struct
-type App struct {
-	*agent.Manager  // 嵌入 agent 模块，提升其 Agent*/RunAgent/MCP* 等导出方法供 Wails 绑定
-	*testing.Engine // 嵌入测试引擎，提升其 Generate*/RunTest*/ExportTestReport 等导出方法供 Wails 绑定
-	*tool.Service   // 嵌入通用工具，提升其 ToolHash/ToolHmac/ToolCipher 等导出方法供 Wails 绑定
-	ctx             context.Context
-	store           *store.Store
-	dataFile        string
-	syncDir         string
-	sniffMgr        *sniff.Manager // MITM 抓包管理器
-	mu              sync.Mutex
-	ctxReady        atomic.Bool // 桌面窗口上下文是否就绪（v3 中在 application.New 后即为 true）
-	windowVisible   bool // 主窗口当前是否可见（托盘显隐用）
-	clipWinVisible  bool // 剪贴板历史浮层当前是否可见
-	clipMonitor     atomic.Bool  // 设置中的剪贴板监听开关（轮询线程零 IO 读取）
-	clipMaxItems    atomic.Int32 // 剪贴板历史上限（写入时零 IO 读取）
-	quitting        bool // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
-}
-
-// Store 返回应用数据存储（实现 agent.Host 接口）
-func (a *App) Store() *store.Store { return a.store }
-
-// ReadData 返回应用数据（实现 agent.Host 接口）
-func (a *App) ReadData() model.AppData { return a.readData() }
-
-// AppVersion 返回应用版本号（实现 agent.Host 接口）
-func (a *App) AppVersion() string { return AppVersion }
-
-// DefaultTestCasePrompt 返回内置的 AI 生成测试用例默认提示词，供前端「设置」展示与「恢复默认」。
-func (a *App) DefaultTestCasePrompt() string {
-	return testing.DefaultTestCaseUserPrompt()
-}
-
-// GenerateDescriptions 使用 AI 为字段自动生成描述（转发到 internal/ai，保持 Wails 绑定签名）
-func (a *App) GenerateDescriptions(apiName string, apiDesc string, fields []*model.Field) ([]*model.Field, error) {
-	return ai.GenerateDescriptions(a, apiName, apiDesc, fields)
-}
-
-// NewApp creates a new App application struct
-func NewApp() *App {
-	return &App{}
-}
-
 // AppVersion 客户端版本号（用于升级检测与本地配置标记）
 const AppVersion = "1.0.0"
 
 // DefaultUpdateURL 默认升级服务地址（本地同步服务）
 const DefaultUpdateURL = "http://127.0.0.1" + syncsrv.DefaultSyncAddr
 
-// startup 初始化业务状态。wailsApp 为 v3 应用实例（用于创建原生托盘）。
+// NewApp 创建桌面壳实例。
+func NewApp() *App {
+	return &App{}
+}
+
+// App struct：桌面壳。业务方法全部由嵌入的 appcore.App 提供（Wails 绑定路径
+// main.App.X 经方法提升保持不变）；本结构体只保留桌面专属状态（窗口/托盘/
+// 剪贴板采集/抓包管理器/本地存储句柄）。
+type App struct {
+	*appcore.App // 业务核心：数据/文档/测试/插件/Agent 等全部导出方法
+
+	ctx            context.Context
+	store          *store.Store // 本地存储（托盘/剪贴板/抓包等桌面功能落盘用）
+	dataFile       string
+	syncDir        string
+	sniffMgr       *sniff.Manager // MITM 抓包管理器（桌面专属）
+	mu             sync.Mutex
+	ctxReady       atomic.Bool  // 桌面窗口上下文是否就绪（v3 中在 application.New 后即为 true）
+	windowVisible  bool         // 主窗口当前是否可见（托盘显隐用）
+	clipWinVisible bool         // 剪贴板历史浮层当前是否可见
+	clipMonitor    atomic.Bool  // 设置中的剪贴板监听开关（轮询线程零 IO 读取）
+	clipMaxItems   atomic.Int32 // 剪贴板历史上限（写入时零 IO 读取）
+	quitting       bool         // 是否正在主动退出（绕过 beforeClose 的隐藏逻辑）
+}
+
+// AppVersion 返回客户端版本号。
+func (a *App) AppVersion() string { return AppVersion }
+
 func (a *App) startup(wailsApp *application.App) {
 	ctx := wailsApp.Context()
 	a.ctx = ctx
@@ -104,20 +80,23 @@ func (a *App) startup(wailsApp *application.App) {
 	a.dataFile = filepath.Join(dataDir, "data.json")
 	a.syncDir = filepath.Join(dataDir, "syncserver")
 	a.store = store.New(a.dataFile, AppVersion, DefaultUpdateURL)
+	// 初始化业务核心（本地存储 + wailsrt 总线），Wails 绑定经方法提升生效
+	{
+		core, err := appcore.New(a.store, wailsrt.RuntimeImpl, appcore.HostInfo{Version: AppVersion})
+		if err != nil {
+			fmt.Printf("初始化业务核心失败: %v\n", err)
+			return
+		}
+		a.App = core
+	}
 	// 初始化剪贴板设置（轮询线程与写入路径读取，避免每次读库）
 	{
 		cs := a.store.GetData().Settings.Clipboard
 		a.clipMonitor.Store(cs.Monitor)
 		a.clipMaxItems.Store(int32(cs.MaxItems))
 	}
-	// 初始化 agent 模块（MCP/技能/会话/运行），注入宿主能力与事件总线
-	a.Manager = agent.NewManager(a, a)
-	// 初始化测试引擎（用例生成/执行/报告导出），注入宿主能力与事件总线
-	a.Engine = testing.NewEngine(a, ctx)
-	// 初始化通用工具服务（Hash/HMAC/Cipher），嵌入 App 供 Wails 绑定
-	a.Service = &tool.Service{}
 	// 注册局域网 Web UI（复用本份前端 + HTTP/SSE 桥），使手机/其他电脑打开网页即与桌面端一致
-	a.RegisterWebUI(a.webUIHandler())
+	a.Manager.RegisterWebUI(a.webUIHandler())
 	// 初始化配置：本地 JSON 不存在时，自动生成默认配置文件
 	if _, err := os.Stat(a.dataFile); err != nil {
 		_ = a.SaveData(a.store.GetData())
@@ -174,118 +153,6 @@ func (a *App) SetClipboardText(text string) error {
 	return wailsrt.RuntimeImpl.ClipboardSetText(text)
 }
 
-// readData 从磁盘加载并反序列化全部数据（兼容与默认值补全逻辑见 internal/store）。
-func (a *App) readData() model.AppData {
-	return a.store.GetData()
-}
-
-// LoadData 加载全部数据（上次保存的接口信息）
-func (a *App) LoadData() model.AppData {
-	return a.readData()
-}
-
-// GetAgentBootstrap 返回局域网「Agent 对话网页」启动所需的**最小**数据集：
-// 仅全局设置（AI 接口配置等）与数据库连接列表，供 Agent 的模型/插件设置使用。
-// 刻意不返回接口文档、测试用例等业务数据——网页端只需要能对话。
-func (a *App) GetAgentBootstrap() map[string]interface{} {
-	d := a.store.GetData()
-	return map[string]interface{}{
-		"settings":    d.Settings,
-		"connections": d.Plugins.Connections,
-	}
-}
-
-// ParseFields 将 JSON 文本解析为字段树（转发到 jsonutil）
-func (a *App) ParseFields(jsonStr string, existing []*model.Field) ([]*model.Field, error) {
-	return jsonutil.ParseFields(jsonStr, existing)
-}
-
-// FormatJSON 格式化 JSON 文本（转发到 jsonutil）
-func (a *App) FormatJSON(jsonStr string) (string, error) {
-	return jsonutil.FormatJSON(jsonStr)
-}
-
-// SendRequest 执行 HTTP 请求（转发到 httpx）
-func (a *App) SendRequest(spec model.RequestSpec) model.ResponseData {
-	return httpx.SendRequest(spec)
-}
-
-// ClearTestData 一键清空当前项目的测试数据。
-// scope 取值：
-//   - "cases"  仅清空测试用例
-//   - "plans"  仅清空测试计划
-//   - "reports"仅清空测试报告
-//   - "all"    清空以上全部（默认）
-//
-// 返回被清空的数据总条数。
-func (a *App) ClearTestData(projectID string, scope string) (int, error) {
-	data := a.readData()
-	idx := store.ActiveProjectIndex(data)
-	if idx < 0 {
-		return 0, fmt.Errorf("没有可用的项目")
-	}
-	if projectID != "" {
-		found := false
-		for i, p := range data.Projects {
-			if p.ID == projectID {
-				idx = i
-				found = true
-				break
-			}
-		}
-		if !found {
-			return 0, fmt.Errorf("项目不存在：%s", projectID)
-		}
-	}
-	if scope == "" {
-		scope = "all"
-	}
-	removed := 0
-	proj := &data.Projects[idx]
-	switch scope {
-	case "cases":
-		removed = len(proj.TestCases)
-		proj.TestCases = []model.TestCase{}
-	case "plans":
-		removed = len(proj.TestPlans)
-		proj.TestPlans = []model.TestPlan{}
-	case "reports":
-		removed = len(proj.TestReports)
-		proj.TestReports = []model.TestReport{}
-	case "all":
-		removed = len(proj.TestCases) + len(proj.TestPlans) + len(proj.TestReports)
-		proj.TestCases = []model.TestCase{}
-		proj.TestPlans = []model.TestPlan{}
-		proj.TestReports = []model.TestReport{}
-	default:
-		return 0, fmt.Errorf("未知的清空范围：%s", scope)
-	}
-	proj.UpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.SaveData(data); err != nil {
-		return 0, err
-	}
-	return removed, nil
-}
-
-// SaveData 保存全部数据
-func (a *App) SaveData(data model.AppData) error {
-	// 剪贴板历史由 Go 侧增量维护（meta.clipboard 单列），前端内存中的副本
-	// 在浮层未打开时不会刷新、可能落后；这里以已持久化的最新历史为准，
-	// 避免一次普通保存把刚复制的内容覆盖丢失。
-	data.Clipboard.History = a.loadClipData().History
-	err := a.store.SaveData(data)
-	// 同步剪贴板设置，供轮询线程与写入路径无锁读取
-	a.clipMonitor.Store(data.Settings.Clipboard.Monitor)
-	a.clipMaxItems.Store(int32(data.Settings.Clipboard.MaxItems))
-	return err
-}
-
-// GetDataFilePath 返回数据文件路径
-func (a *App) GetDataFilePath() string {
-	return a.store.Path()
-}
-
-// CopyToClipboard 复制文本到剪贴板
 func (a *App) CopyToClipboard(text string) error {
 	return wailsrt.RuntimeImpl.ClipboardSetText(text)
 }
@@ -311,35 +178,6 @@ func (a *App) ClearClipHistory() {
 	_ = a.store.SaveClipboardRaw(string(b))
 }
 
-// ChatMessage 简单的聊天消息结构（供 CallAI 使用），别名指向 internal/ai。
-type ChatMessage = ai.ChatMessage
-
-// CallAIArgs CallAI 入参（由前端传入已解析好的配置，避免在 Go 端读取前端 store）
-type CallAIArgs struct {
-	BaseURL   string        `json:"baseUrl"`
-	APIKey    string        `json:"apiKey"`
-	Model     string        `json:"model"`
-	Timeout   int           `json:"timeoutSec"`
-	MaxTokens int           `json:"maxTokens"`
-	Messages  []ChatMessage `json:"messages"`
-}
-
-// CallAI 由 Go 后端代发 AI 请求，规避前端 webview 的 CORS 限制。
-// 返回模型回复的文本内容；失败时返回错误。
-func (a *App) CallAI(args CallAIArgs) (string, error) {
-	base := strings.TrimSpace(args.BaseURL)
-	if base == "" {
-		return "", fmt.Errorf("未配置 AI 接口地址（设置 → AI 配置）")
-	}
-	if args.APIKey == "" {
-		return "", fmt.Errorf("未配置 AI API Key（设置 → AI 配置）")
-	}
-	model := strings.TrimSpace(args.Model)
-	// 委托 internal/ai 统一处理 URL 拼接、超时与错误解析（与 Chat 共用底层实现）
-	return ai.ChatRaw(base, args.APIKey, model, args.Messages, args.Timeout, args.MaxTokens)
-}
-
-// OpenInBrowser 使用系统浏览器打开
 func (a *App) OpenInBrowser(url string) {
 	wailsrt.RuntimeImpl.BrowserOpenURL(url)
 }
@@ -354,222 +192,6 @@ func (a *App) PreviewDocWatermark(dirID string, apiID string) (string, error) {
 	return doc.PreviewWatermark(a.ctx, a.store, dirID, apiID)
 }
 
-// DefaultDocQuickStart 返回内置的「接入指引（快速开始）」正文，供前端一键填入后按团队流程修改
-func (a *App) DefaultDocQuickStart() string {
-	return doc.QuickStartDefaultText()
-}
-
-// DefaultDocConvention 返回内置的「接口统一定义规范」模板，供文档中心一键填入
-func (a *App) DefaultDocConvention() string {
-	return doc.DefaultConventionTemplate()
-}
-
-// RefreshShares 按最新「文档模板」重建全部分享链接内容，返回刷新条数。
-func (a *App) RefreshShares() (int, error) {
-	return share.RefreshAllShares(a.store)
-}
-
-// PreviewDocHTML 生成完整文档预览 HTML（含接口），供前端弹窗内嵌展示。
-// layoutJSON 非空时按传入的结构渲染（前端当前编辑中的模板），否则用当前生效结构。
-func (a *App) PreviewDocHTML(dirID string, apiID string, layoutJSON string) (string, error) {
-	return doc.PreviewHTML(a.store, dirID, apiID, layoutJSON)
-}
-
-// PreviewDocTemplateHTML 生成模板结构预览 HTML（不含具体接口），供前端弹窗内嵌展示。
-func (a *App) PreviewDocTemplateHTML(layoutJSON string) (string, error) {
-	return doc.PreviewTemplateHTML(a.store, layoutJSON)
-}
-
-// DefaultDocGlossary 返回内置的通用术语表（术语表章节初始内容）。
-func (a *App) DefaultDocGlossary() []model.DocTerm {
-	return doc.DefaultGlossary()
-}
-
-// DefaultDocEnums 返回内置的数据字典样例（附录：数据字典初始内容）。
-func (a *App) DefaultDocEnums() []model.DocEnum {
-	return doc.DefaultEnums()
-}
-
-// DefaultDocBusinessCodes 返回内置的业务错误码表（附录：业务错误码的初始内容）。
-func (a *App) DefaultDocBusinessCodes() []model.DocCode {
-	return doc.DefaultBusinessCodes()
-}
-
-// DocSignTemplates 返回预置验签模板清单（MD5 排序拼接等），前端下拉选择后填入「加密与验签」。
-func (a *App) DocSignTemplates() []doc.DocSignTemplate {
-	return doc.SignTemplateList()
-}
-
-// DefaultDocSign 返回默认的「加密与验签」说明模板（MD5 参数排序拼接）。
-func (a *App) DefaultDocSign() string {
-	return doc.DefaultSignTemplate()
-}
-
-// DocPresets 返回预置文档结构模板清单（6 套企业标准模板）
-func (a *App) DocPresets() []doc.DocPreset {
-	return doc.DocPresetList()
-}
-
-// DocPresetLayout 生成指定预置模板的排版配置，供前端「套用模板」使用
-func (a *App) DocPresetLayout(key string) model.DocLayout {
-	return doc.DocPresetLayout(key)
-}
-
-// SaveDocLayoutTemplate 把当前文档结构保存为自定义模板（同名覆盖）
-func (a *App) SaveDocLayoutTemplate(name string, layoutJSON string) (model.DocLayoutTemplate, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return model.DocLayoutTemplate{}, fmt.Errorf("模板名称不能为空")
-	}
-	var layout model.DocLayout
-	if err := json.Unmarshal([]byte(layoutJSON), &layout); err != nil {
-		return model.DocLayoutTemplate{}, fmt.Errorf("文档结构解析失败: %v", err)
-	}
-	data := a.store.GetData()
-	tpl := model.DocLayoutTemplate{ID: util.GenID(), Name: name, Layout: layout}
-	replaced := false
-	for i := range data.Settings.DocLayoutTemplates {
-		if data.Settings.DocLayoutTemplates[i].Name == name {
-			tpl.ID = data.Settings.DocLayoutTemplates[i].ID
-			data.Settings.DocLayoutTemplates[i] = tpl
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		data.Settings.DocLayoutTemplates = append(data.Settings.DocLayoutTemplates, tpl)
-		if len(data.Settings.DocLayoutTemplates) > maxDocTemplates {
-			return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 %d 个，请先删除不用的模板", maxDocTemplates)
-		}
-	}
-	if err := a.store.SaveData(data); err != nil {
-		return model.DocLayoutTemplate{}, err
-	}
-	return tpl, nil
-}
-
-// maxDocTemplates 自定义模板数量上限（与 SaveDocLayoutTemplate 保持一致）。
-const maxDocTemplates = 20
-
-// cloudClient 按当前设置构造云端同步客户端。
-func (a *App) cloudClient() *cloud.Client {
-	s := a.store.GetData().Settings
-	return cloud.New(s.CloudURL, s.CloudToken)
-}
-
-// PullDocTemplates 从云端拉取模板库并合并到本地（同名以云端为准）。
-func (a *App) PullDocTemplates() (cloud.SyncResult, error) {
-	data := a.store.GetData()
-	remote, err := a.cloudClient().PullTemplates()
-	if err != nil {
-		return cloud.SyncResult{}, err
-	}
-	merged, changed := cloud.MergeTemplates(data.Settings.DocLayoutTemplates, remote)
-	if len(merged) > maxDocTemplates {
-		merged = merged[:maxDocTemplates]
-	}
-	data.Settings.DocLayoutTemplates = merged
-	if err := a.store.SaveData(data); err != nil {
-		return cloud.SyncResult{}, err
-	}
-	return cloud.SyncResult{Total: len(merged), Changed: changed}, nil
-}
-
-// PushDocTemplates 把本地模板库上传到云端（团队共享）。
-func (a *App) PushDocTemplates() (cloud.SyncResult, error) {
-	data := a.store.GetData()
-	tpls := data.Settings.DocLayoutTemplates
-	if len(tpls) == 0 {
-		return cloud.SyncResult{}, fmt.Errorf("本地没有可上传的模板")
-	}
-	if err := a.cloudClient().PushTemplates(tpls); err != nil {
-		return cloud.SyncResult{}, err
-	}
-	return cloud.SyncResult{Total: len(tpls), Changed: len(tpls)}, nil
-}
-
-// RenameDocLayoutTemplate 重命名自定义模板（重名报错）。
-func (a *App) RenameDocLayoutTemplate(id, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("模板名称不能为空")
-	}
-	data := a.store.GetData()
-	found := false
-	for i := range data.Settings.DocLayoutTemplates {
-		t := data.Settings.DocLayoutTemplates[i]
-		if t.ID == id {
-			found = true
-			continue
-		}
-		if t.Name == name {
-			return fmt.Errorf("已存在同名模板：%s", name)
-		}
-	}
-	if !found {
-		return fmt.Errorf("模板不存在")
-	}
-	for i := range data.Settings.DocLayoutTemplates {
-		if data.Settings.DocLayoutTemplates[i].ID == id {
-			data.Settings.DocLayoutTemplates[i].Name = name
-		}
-	}
-	return a.store.SaveData(data)
-}
-
-// DuplicateDocLayoutTemplate 复制一份自定义模板，返回新模板（名称为「原名 副本」）。
-func (a *App) DuplicateDocLayoutTemplate(id string) (model.DocLayoutTemplate, error) {
-	data := a.store.GetData()
-	var src *model.DocLayoutTemplate
-	for i := range data.Settings.DocLayoutTemplates {
-		if data.Settings.DocLayoutTemplates[i].ID == id {
-			src = &data.Settings.DocLayoutTemplates[i]
-			break
-		}
-	}
-	if src == nil {
-		return model.DocLayoutTemplate{}, fmt.Errorf("模板不存在")
-	}
-	if len(data.Settings.DocLayoutTemplates) >= maxDocTemplates {
-		return model.DocLayoutTemplate{}, fmt.Errorf("自定义模板最多 %d 个，请先删除不用的模板", maxDocTemplates)
-	}
-	name := src.Name + " 副本"
-	for i := 2; ; i++ {
-		exist := false
-		for _, t := range data.Settings.DocLayoutTemplates {
-			if t.Name == name {
-				exist = true
-				break
-			}
-		}
-		if !exist {
-			break
-		}
-		name = fmt.Sprintf("%s 副本 %d", src.Name, i)
-	}
-	tpl := model.DocLayoutTemplate{ID: util.GenID(), Name: name, Layout: src.Layout}
-	tpl.Layout.Name = name
-	data.Settings.DocLayoutTemplates = append(data.Settings.DocLayoutTemplates, tpl)
-	if err := a.store.SaveData(data); err != nil {
-		return model.DocLayoutTemplate{}, err
-	}
-	return tpl, nil
-}
-
-// DeleteDocLayoutTemplate 删除自定义文档结构模板
-func (a *App) DeleteDocLayoutTemplate(id string) error {
-	data := a.store.GetData()
-	kept := make([]model.DocLayoutTemplate, 0, len(data.Settings.DocLayoutTemplates))
-	for _, t := range data.Settings.DocLayoutTemplates {
-		if t.ID != id {
-			kept = append(kept, t)
-		}
-	}
-	data.Settings.DocLayoutTemplates = kept
-	return a.store.SaveData(data)
-}
-
-// ImportDoc 选择并导入接口文档（转发到 doc 包）
 func (a *App) ImportDoc() (string, error) {
 	return doc.ImportDoc(a.ctx, a.store, "")
 }
@@ -601,105 +223,6 @@ type CheckUpdateResult struct {
 	Error   string `json:"error"`   // 检测错误信息（网络/解析失败）
 }
 
-// GetVersion 返回当前客户端版本号
-func (a *App) GetVersion() string {
-	return AppVersion
-}
-
-// CheckUpdate 调用升级服务地址的 /version 接口检测是否有新版本。
-// 升级服务需返回 JSON：{ "version": "1.2.0", "url": "...", "notes": "..." }
-func (a *App) CheckUpdate() CheckUpdateResult {
-	data := a.readData()
-	res := CheckUpdateResult{Current: data.Settings.Version}
-	if data.Settings.Version == "" {
-		res.Current = AppVersion
-	}
-	res.Latest = res.Current
-
-	base := strings.TrimSpace(data.Settings.UpdateURL)
-	if base == "" {
-		base = DefaultUpdateURL
-	}
-	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
-		base = "http://" + base
-	}
-	base = strings.TrimRight(base, "/")
-
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(base + "/version")
-	if err != nil {
-		res.Error = "无法连接升级服务：" + err.Error()
-		return res
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		res.Error = fmt.Sprintf("升级服务返回状态 %d", resp.StatusCode)
-		return res
-	}
-	var info UpdateInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		res.Error = "升级服务返回数据解析失败：" + err.Error()
-		return res
-	}
-	if info.Version == "" {
-		res.Error = "升级服务未返回版本号"
-		return res
-	}
-	res.Latest = info.Version
-	res.URL = info.URL
-	res.Notes = info.Notes
-	res.HasNew = compareVersion(info.Version, res.Current) > 0
-	return res
-}
-
-// compareVersion 比较两个语义化版本号（仅比较数值段），a>b 返回 1，相等 0，a<b 返回 -1
-func compareVersion(a, b string) int {
-	as := strings.Split(strings.TrimSpace(a), ".")
-	bs := strings.Split(strings.TrimSpace(b), ".")
-	n := len(as)
-	if len(bs) > n {
-		n = len(bs)
-	}
-	for i := 0; i < n; i++ {
-		ai, bi := 0, 0
-		if i < len(as) {
-			ai = atoiSafe(as[i])
-		}
-		if i < len(bs) {
-			bi = atoiSafe(bs[i])
-		}
-		if ai > bi {
-			return 1
-		}
-		if ai < bi {
-			return -1
-		}
-	}
-	return 0
-}
-
-func atoiSafe(s string) int {
-	v := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			break
-		}
-		v = v*10 + int(c-'0')
-	}
-	return v
-}
-
-// ----------------------------------------------------------------------------
-// bus.Bus 实现：App 作为业务子包与 Wails 运行时之间的桥接。
-// 子包通过 bus.Bus 接口收发事件/弹窗/剪贴板，不再依赖 runtime 或 *App 具体类型。
-// ----------------------------------------------------------------------------
-
-// Assert 编译期检查 App 实现了 bus.Bus。
-var _ bus.Bus = (*App)(nil)
-
-// Emit 向前端发送事件。
-// 除桌面窗口（Wails WebView）外，同时推送给局域网网页端（SSE），
-// 使手机/其他电脑打开的网页与桌面端看到完全相同的实时过程。
 func (a *App) Emit(event string, data ...interface{}) {
 	// 局域网网页端不依赖 Wails 上下文，始终可推送
 	webBroadcast(event, data...)
@@ -763,48 +286,6 @@ func (a *App) OpenExportFile(path string) error {
 	return nil
 }
 
-// ExportFileInDir 判断 path 是否位于应用数据目录的 exports 子目录内。
-//
-// 局域网网页端下载导出文件时必须做此校验：Agent 具备文件读写与命令执行能力，
-// 若不限制目录，网页端就能通过 ?path= 下载任意文件（数据库、配置等）。
-func (a *App) ExportFileInDir(path string) bool {
-	if a == nil || a.store == nil {
-		return false
-	}
-	return exportPathAllowed(a.store.Dir(), path)
-}
-
-// ExportDirPath 返回导出目录的绝对路径（供前端提示用户去哪取文件）。
-func (a *App) ExportDirPath() string {
-	if a == nil || a.store == nil {
-		return ""
-	}
-	return filepath.Join(a.store.Dir(), agent.ExportDirName)
-}
-
-// exportPathAllowed 校验目标文件是否位于导出目录内。
-func exportPathAllowed(base, path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" || base == "" {
-		return false
-	}
-	absBase, err := filepath.Abs(filepath.Join(base, agent.ExportDirName))
-	if err != nil {
-		return false
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absBase, absPath)
-	if err != nil {
-		return false
-	}
-	// 必须位于导出目录内部（不允许 ../ 逃逸，也不允许就是目录本身）
-	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// OpenExportFolder 在文件管理器中打开导出文件所在目录。
 func (a *App) OpenExportFolder(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -1546,203 +1027,4 @@ func (a *App) CloseClipboardWindow() {
 	a.WindowSetAlwaysOnTop(false)
 	a.Emit("apitool:hide-clipboard-history")
 	a.WindowHide()
-}
-
-// ----------------------------------------------------------------------------
-// 外部连接插件转发层（实现在 internal/plugins：Redis/ES/SSH/SFTP/FTP/DB）
-// ----------------------------------------------------------------------------
-
-// PluginConnect 测试连接（按分类做最小连通性/登录校验）。
-func (a *App) PluginConnect(conn model.PluginConn) plugins.PluginOpResult {
-	return plugins.PluginTest(conn)
-}
-
-// PluginDisconnect 断开连接（当前连接采用 TTL 连接池自动回收，这里直接返回成功）。
-func (a *App) PluginDisconnect(conn model.PluginConn) plugins.PluginOpResult {
-	return plugins.PluginOpResult{Ok: true, Info: "已断开"}
-}
-
-// PluginTest 连接测试。
-func (a *App) PluginTest(conn model.PluginConn) plugins.PluginOpResult {
-	return plugins.PluginTest(conn)
-}
-
-// PluginRedisKeys 列举匹配模式的 Redis 键。
-func (a *App) PluginRedisKeys(conn model.PluginConn, pattern string, db int) ([]plugins.RedisKey, error) {
-	return plugins.PluginRedisKeys(conn, pattern, db)
-}
-
-// PluginRedisValue 获取 Redis 键的值。
-func (a *App) PluginRedisValue(conn model.PluginConn, key string, db int) (plugins.RedisValue, error) {
-	return plugins.PluginRedisValue(conn, key, db)
-}
-
-// PluginRedisSet 设置 Redis 字符串键。
-func (a *App) PluginRedisSet(conn model.PluginConn, key, value string, ttl, db int) error {
-	return plugins.PluginRedisSet(conn, key, value, ttl, db)
-}
-
-// PluginRedisDel 删除 Redis 键。
-func (a *App) PluginRedisDel(conn model.PluginConn, key string, db int) error {
-	return plugins.PluginRedisDel(conn, key, db)
-}
-
-// PluginRedisTTL 返回 Redis 键过期秒数。
-func (a *App) PluginRedisTTL(conn model.PluginConn, key string, db int) (int, error) {
-	return plugins.PluginRedisTTL(conn, key, db)
-}
-
-// PluginESIndices 列出 ES 索引。
-func (a *App) PluginESIndices(conn model.PluginConn) ([]plugins.ESIndex, error) {
-	return plugins.PluginESIndices(conn)
-}
-
-// PluginESSearch 执行 ES 查询。
-func (a *App) PluginESSearch(conn model.PluginConn, index, query string) (string, error) {
-	return plugins.PluginESSearch(conn, index, query)
-}
-
-// PluginSSHExec 在远端执行命令（XShell 风格）。
-func (a *App) PluginSSHExec(conn model.PluginConn, command string) (string, error) {
-	return plugins.PluginSSHExec(conn, command)
-}
-
-// PluginSSHOpen 建立带 PTY 的持久 SSH 会话，输出通过事件实时推送前端。
-func (a *App) PluginSSHOpen(conn model.PluginConn) (string, error) {
-	return plugins.PluginSSHOpen(a, conn)
-}
-
-// PluginSSHInput 向 SSH 会话写入数据。
-func (a *App) PluginSSHInput(id string, data string) error {
-	return plugins.PluginSSHInput(id, data)
-}
-
-// PluginSSHClose 关闭 SSH 会话。
-func (a *App) PluginSSHClose(id string) error {
-	return plugins.PluginSSHClose(id)
-}
-
-// PluginSSHResize 调整 SSH 会话伪终端尺寸。
-func (a *App) PluginSSHResize(id string, rows, cols int) error {
-	return plugins.PluginSSHResize(id, rows, cols)
-}
-
-// PluginSFTPList 列出远端目录。
-func (a *App) PluginSFTPList(conn model.PluginConn, dir string) ([]plugins.FileInfo, error) {
-	return plugins.PluginSFTPList(conn, dir)
-}
-
-// PluginSFTPRead 读取远端文件文本。
-func (a *App) PluginSFTPRead(conn model.PluginConn, path string) (string, error) {
-	return plugins.PluginSFTPRead(conn, path)
-}
-
-// PluginSFTPWrite 写入远端文件。
-func (a *App) PluginSFTPWrite(conn model.PluginConn, path, content string) error {
-	return plugins.PluginSFTPWrite(conn, path, content)
-}
-
-// PluginSFTPUploadB64 上传本地文件（base64）。
-func (a *App) PluginSFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
-	return plugins.PluginSFTPUploadB64(conn, remoteDir, name, b64)
-}
-
-// PluginSFTPRename 重命名 / 移动远端文件。
-func (a *App) PluginSFTPRename(conn model.PluginConn, oldPath, newPath string) error {
-	return plugins.PluginSFTPRename(conn, oldPath, newPath)
-}
-
-// PluginSFTPDownload 下载远端文件到本地。
-func (a *App) PluginSFTPDownload(conn model.PluginConn, path, name string) (string, error) {
-	return plugins.PluginSFTPDownload(a, conn, path, name)
-}
-
-// PluginSFTPMkdir 创建远端目录。
-func (a *App) PluginSFTPMkdir(conn model.PluginConn, path string) error {
-	return plugins.PluginSFTPMkdir(conn, path)
-}
-
-// PluginSFTPDelete 删除远端文件/目录。
-func (a *App) PluginSFTPDelete(conn model.PluginConn, path string) error {
-	return plugins.PluginSFTPDelete(conn, path)
-}
-
-// PluginFTPList 列出 FTP 目录。
-func (a *App) PluginFTPList(conn model.PluginConn, dir string) ([]plugins.FileInfo, error) {
-	return plugins.PluginFTPList(conn, dir)
-}
-
-// PluginFTPRead 读取 FTP 文件文本。
-func (a *App) PluginFTPRead(conn model.PluginConn, path string) (string, error) {
-	return plugins.PluginFTPRead(conn, path)
-}
-
-// PluginFTPWrite 上传 FTP 文件。
-func (a *App) PluginFTPWrite(conn model.PluginConn, path, content string) error {
-	return plugins.PluginFTPWrite(conn, path, content)
-}
-
-// PluginFTPUploadB64 上传本地文件（base64）。
-func (a *App) PluginFTPUploadB64(conn model.PluginConn, remoteDir, name, b64 string) error {
-	return plugins.PluginFTPUploadB64(conn, remoteDir, name, b64)
-}
-
-// PluginFTPDownload 下载 FTP 文件到本地。
-func (a *App) PluginFTPDownload(conn model.PluginConn, path, name string) (string, error) {
-	return plugins.PluginFTPDownload(a, conn, path, name)
-}
-
-// PluginFTPRename 重命名 / 移动 FTP 文件。
-func (a *App) PluginFTPRename(conn model.PluginConn, oldPath, newPath string) error {
-	return plugins.PluginFTPRename(conn, oldPath, newPath)
-}
-
-// PluginFTPMkdir 创建 FTP 目录。
-func (a *App) PluginFTPMkdir(conn model.PluginConn, path string) error {
-	return plugins.PluginFTPMkdir(conn, path)
-}
-
-// PluginFTPDelete 删除 FTP 文件/目录。
-func (a *App) PluginFTPDelete(conn model.PluginConn, path string) error {
-	return plugins.PluginFTPDelete(conn, path)
-}
-
-// PluginSetClipboard 写入系统剪贴板。
-func (a *App) PluginSetClipboard(text string) error {
-	return plugins.PluginSetClipboard(a, text)
-}
-
-// PluginDBTest 数据库连接测试。
-func (a *App) PluginDBTest(conn model.PluginConn) plugins.PluginOpResult {
-	return plugins.PluginDBTest(conn)
-}
-
-// PluginDBDatabases 列出数据库。
-func (a *App) PluginDBDatabases(conn model.PluginConn) (plugins.DBInfo, error) {
-	return plugins.PluginDBDatabases(conn)
-}
-
-// PluginDBTables 列出表。
-func (a *App) PluginDBTables(conn model.PluginConn, database string) ([]plugins.DBTable, error) {
-	return plugins.PluginDBTables(conn, database)
-}
-
-// PluginDBColumns 列出表的字段（含类型/可空/默认/注释）。
-func (a *App) PluginDBColumns(conn model.PluginConn, database, table string) ([]plugins.DBColumn, error) {
-	return plugins.PluginDBColumns(conn, database, table)
-}
-
-// PluginDBSchema 批量读取表结构（表 + 字段）。
-func (a *App) PluginDBSchema(conn model.PluginConn, database string, tables []string) ([]plugins.DBSchema, error) {
-	return plugins.PluginDBSchema(conn, database, tables)
-}
-
-// PluginDBQuery 执行查询。
-func (a *App) PluginDBQuery(conn model.PluginConn, req plugins.DBQueryReq) (*plugins.DBRow, error) {
-	return plugins.PluginDBQuery(conn, req)
-}
-
-// PluginDBExec 执行 DML/DDL。
-func (a *App) PluginDBExec(conn model.PluginConn, req plugins.DBExecReq) (int64, error) {
-	return plugins.PluginDBExec(conn, req)
 }

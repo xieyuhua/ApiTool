@@ -18,15 +18,15 @@ import (
 	"apitool/internal/ai"
 	"apitool/internal/bus"
 	"apitool/internal/model"
-	"apitool/internal/store"
 	"apitool/internal/store/db"
+	"apitool/internal/storeapi"
 	"apitool/internal/util"
 )
 
 // Host 宿主能力接口：agent 模块通过它访问应用数据存储、事件推送与配置，
-// 从而与 main 包的 App 解耦（App 实现该接口并注入）。
+// 从而与具体客户端形态（桌面 App / 服务端会话）解耦（实现该接口并注入）。
 type Host interface {
-	Store() *store.Store
+	Store() storeapi.Store
 	ReadData() model.AppData
 	SaveData(model.AppData) error
 	SendRequest(model.RequestSpec) model.ResponseData

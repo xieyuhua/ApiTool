@@ -1,3 +1,5 @@
+//go:build !serveronly
+
 package main
 
 import (
@@ -16,6 +18,11 @@ var assets embed.FS
 const appTitle = "ApiTool - 接口调试与文档工具"
 
 func main() {
+	runDesktop()
+}
+
+// runDesktop 桌面端入口（serveronly 构建时由 servermain.go 提供服务端入口）。
+func runDesktop() {
 	app := NewApp()
 
 	wailsApp := application.New(application.Options{

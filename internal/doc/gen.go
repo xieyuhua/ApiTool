@@ -11,6 +11,7 @@ import (
 
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 
 	"apitool/internal/wailsrt"
 )
@@ -86,7 +87,7 @@ type docScopeData struct {
 }
 
 // loadDocScope 解析导出范围（标题、根目录、目录、接口、公共参数）与水印配置。
-func loadDocScope(s *store.Store, dirID, apiID string) (docScopeData, error) {
+func loadDocScope(s storeapi.Store, dirID, apiID string) (docScopeData, error) {
 	data := s.GetData()
 	idx := store.ActiveProjectIndex(data)
 	if idx < 0 {
@@ -143,10 +144,43 @@ func (p docPayload) writeTo(path string) error {
 	return os.WriteFile(path, p.data, 0o644)
 }
 
+// RenderExport 渲染导出产物但不落盘、不弹对话框，返回（文件名，字节内容）。
+// 供服务端导出下载（网页/App 端无文件对话框）与桌面端复用。
+// pdf 格式通过 save 回调落盘，这里改为先渲染 HTML 再走 WriteHTMLToPDF 临时路径。
+func RenderExport(s storeapi.Store, dirID, apiID, format string) (string, []byte, error) {
+	f, ok := docFormats[format]
+	if !ok {
+		return "", nil, fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf / openapi）", format)
+	}
+	payload, err := renderDoc(s, dirID, apiID, format)
+	if err != nil {
+		return "", nil, err
+	}
+	if payload.data != nil {
+		return ExportFileName(payload.title, f.ext), payload.data, nil
+	}
+	// save 回调型（pdf）：渲染到临时文件再读回
+	tmp, err := os.CreateTemp("", "apitool-export-*"+f.ext)
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := payload.save(tmpPath); err != nil {
+		return "", nil, err
+	}
+	b, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", nil, err
+	}
+	return ExportFileName(payload.title, f.ext), b, nil
+}
+
 // ExportDoc 导出文档，返回保存路径。
 // 支持格式见 docFormats：markdown / html / word（.docx，Word 原生排版）/
 // pdf（浏览器无头打印）/ openapi。
-func ExportDoc(ctx context.Context, s *store.Store, dirID string, apiID string, format string) (string, error) {
+func ExportDoc(ctx context.Context, s storeapi.Store, dirID string, apiID string, format string) (string, error) {
 	f, ok := docFormats[format]
 	if !ok {
 		return "", fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf / openapi）", format)
@@ -170,7 +204,7 @@ func ExportDoc(ctx context.Context, s *store.Store, dirID string, apiID string, 
 }
 
 // renderDoc 按格式渲染导出产物（word / pdf 会写入水印）。
-func renderDoc(s *store.Store, dirID, apiID, format string) (docPayload, error) {
+func renderDoc(s storeapi.Store, dirID, apiID, format string) (docPayload, error) {
 	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return docPayload{}, err
@@ -203,7 +237,7 @@ func renderDoc(s *store.Store, dirID, apiID, format string) (docPayload, error) 
 
 // PreviewWatermark 按当前水印配置渲染 HTML 文档并在浏览器打开，返回临时文件路径。
 // 与 PDF 导出共用同一套 HTML 水印层，用于导出前核对水印效果。
-func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID string) (string, error) {
+func PreviewWatermark(ctx context.Context, s storeapi.Store, dirID string, apiID string) (string, error) {
 	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return "", err
@@ -222,7 +256,7 @@ func PreviewWatermark(ctx context.Context, s *store.Store, dirID string, apiID s
 
 // PreviewHTML 生成完整文档 HTML（含所选范围内的全部接口），供前端弹窗预览。
 // layoutJSON 非空时使用该结构（前端当前编辑中的模板，含未落库的改动），否则用当前生效结构。
-func PreviewHTML(s *store.Store, dirID string, apiID string, layoutJSON string) (string, error) {
+func PreviewHTML(s storeapi.Store, dirID string, apiID string, layoutJSON string) (string, error) {
 	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return "", err
@@ -247,13 +281,13 @@ func PreviewHTML(s *store.Store, dirID string, apiID string, layoutJSON string) 
 
 // PreviewTemplateHTML 生成「模板结构预览」HTML（不含具体接口），供前端弹窗内嵌展示。
 // layoutJSON 为空时使用当前生效结构（全局配置或项目级覆盖）。
-func PreviewTemplateHTML(s *store.Store, layoutJSON string) (string, error) {
+func PreviewTemplateHTML(s storeapi.Store, layoutJSON string) (string, error) {
 	html, _, err := templatePreviewHTML(s, layoutJSON)
 	return html, err
 }
 
 // templatePreviewHTML 解析生效结构 + 水印，渲染模板预览 HTML（返回 HTML 与模板名）。
-func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, error) {
+func templatePreviewHTML(s storeapi.Store, layoutJSON string) (string, string, error) {
 	data := s.GetData()
 	proj := model.Project{}
 	if idx := store.ActiveProjectIndex(data); idx >= 0 {
@@ -283,7 +317,7 @@ func templatePreviewHTML(s *store.Store, layoutJSON string) (string, string, err
 }
 
 // ShareDoc 生成 HTML 文档并用浏览器打开（可将文件发送给他人分享）
-func ShareDoc(ctx context.Context, s *store.Store, dirID string, apiID string) (string, error) {
+func ShareDoc(ctx context.Context, s storeapi.Store, dirID string, apiID string) (string, error) {
 	payload, err := renderDoc(s, dirID, apiID, "html")
 	if err != nil {
 		return "", err
@@ -297,7 +331,7 @@ func ShareDoc(ctx context.Context, s *store.Store, dirID string, apiID string) (
 }
 
 // CopyDocMarkdown 复制 Markdown 文档到剪贴板（用于快速分享）
-func CopyDocMarkdown(ctx context.Context, s *store.Store, dirID string, apiID string) error {
+func CopyDocMarkdown(ctx context.Context, s storeapi.Store, dirID string, apiID string) error {
 	payload, err := renderDoc(s, dirID, apiID, "markdown")
 	if err != nil {
 		return err

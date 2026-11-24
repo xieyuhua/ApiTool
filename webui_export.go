@@ -1,4 +1,6 @@
-﻿package main
+//go:build !serveronly
+
+package main
 
 import (
 	"fmt"

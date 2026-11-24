@@ -45,7 +45,8 @@ function installGoBridge() {
 }
 
 async function callRPC(method, args) {
-  const res = await fetch('/rpc/' + encodeURIComponent(method), {
+  const base = (typeof window !== 'undefined' && window.__API_BASE__) || ''
+  const res = await fetch(base + '/rpc/' + encodeURIComponent(method), {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -53,6 +54,28 @@ async function callRPC(method, args) {
   })
   let data = null
   try { data = await res.json() } catch (e) { /* 非 JSON 响应 */ }
+  // 401：accessToken 过期。httpBridge 不直接依赖 auth.js（避免循环），
+  // 抛出标记错误由 store 启动流程统一刷新；这里先尝试一次 refresh 重试。
+  if (res.status === 401) {
+    const mod = await import('./auth')
+    try {
+      await mod.refreshAccessToken()
+      const retry = await fetch(base + '/rpc/' + encodeURIComponent(method), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args || []),
+      })
+      let rd = null
+      try { rd = await retry.json() } catch (e) { /* ignore */ }
+      if (retry.ok && rd && rd.ok !== false) return rd ? rd.result : null
+      if (retry.status === 401) throw new mod.AuthRequired()
+      throw new Error((rd && rd.error) || '请求失败（HTTP ' + retry.status + '）')
+    } catch (e) {
+      if (e && e.name === 'AuthRequired') throw e
+      throw e
+    }
+  }
   if (!res.ok) throw new Error((data && data.error) || ('请求失败（HTTP ' + res.status + '）'))
   if (data && data.ok === false) throw new Error(data.error || '调用失败')
   return data ? data.result : null
@@ -77,14 +100,17 @@ function installRuntimeBridge() {
 
   function connect() {
     if (closed) return
-    es = new EventSource('/events', { withCredentials: true })
+    const base = (typeof window !== 'undefined' && window.__API_BASE__) || ''
+    es = new EventSource(base + '/events', { withCredentials: true })
     es.onmessage = (e) => {
       let msg
       try { msg = JSON.parse(e.data) } catch (err) { return }
       dispatch(msg.event, msg.data)
     }
     es.onerror = () => {
-      // EventSource 自带重连；连接彻底失败时兜底重建
+      // EventSource 自带重连；连接彻底失败时兜底重建。
+      // 401（登录过期）时 EventSource 不暴露状态码，重建失败同样走此分支；
+      // 由 RPC 层的 401 → refresh 流程恢复 Cookie 后这里自然重连成功。
       if (es) { es.close(); es = null }
       if (!closed) setTimeout(connect, 3000)
     }

@@ -10,6 +10,7 @@ import (
 	"apitool/internal/jsonutil"
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 	"apitool/internal/util"
 
 	"encoding/json"
@@ -441,7 +442,7 @@ func parseFormBodyToKVs(body string) []model.KV {
 }
 
 // GenerateApi 将选中的捕获请求转换为接口定义并导入当前项目（指定目录）
-func GenerateApi(ids []string, projectID, dirID string, s *store.Store) (int, error) {
+func GenerateApi(ids []string, projectID, dirID string, s storeapi.Store) (int, error) {
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("请至少选择一条捕获记录")
 	}
@@ -488,7 +489,7 @@ func GenerateApi(ids []string, projectID, dirID string, s *store.Store) (int, er
 }
 
 // ImportTestCases 将选中的捕获请求转换为测试用例，导入当前项目用于自动化测试 / 压测
-func ImportTestCases(ids []string, s *store.Store) (int, error) {
+func ImportTestCases(ids []string, s storeapi.Store) (int, error) {
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("请至少选择一条捕获记录")
 	}

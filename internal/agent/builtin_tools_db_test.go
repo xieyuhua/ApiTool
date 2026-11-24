@@ -6,6 +6,7 @@ import (
 
 	"apitool/internal/model"
 	"apitool/internal/store"
+	"apitool/internal/storeapi"
 )
 
 // stubHost 是测试用的最小 Host 实现，仅提供存储能力（其余方法返回零值）。
@@ -13,7 +14,7 @@ type stubHost struct {
 	st *store.Store
 }
 
-func (h *stubHost) Store() *store.Store              { return h.st }
+func (h *stubHost) Store() storeapi.Store           { return h.st }
 func (h *stubHost) ReadData() model.AppData          { return h.st.GetData() }
 func (h *stubHost) SaveData(d model.AppData) error    { return h.st.SaveData(d) }
 func (h *stubHost) SendRequest(model.RequestSpec) model.ResponseData { return model.ResponseData{} }
