@@ -1,7 +1,7 @@
 <script setup>
 const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知构建'
 import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject } from './store'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject, saveConflict, forceSaveNow, pullRemote, dismissConflict } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -238,6 +238,20 @@ const navs = [
   <!-- 2.0 服务端模式：未登录时整屏登录视图 -->
   <LoginView v-if="store.serverInfo && !store.user" />
 
+  <!-- 2.0 保存冲突（任何页面都可能触发）：全局对话框 -->
+  <el-dialog :model-value="!!saveConflict" title="保存冲突" width="460px"
+    :close-on-click-modal="false" @close="dismissConflict">
+    <div class="conflict-body">
+      <p>服务端已有更新的版本（其他人或其他设备先保存了）。选择如何处理：</p>
+      <div class="conflict-err">{{ saveConflict && saveConflict.error }}</div>
+    </div>
+    <template #footer>
+      <el-button @click="dismissConflict">稍后处理</el-button>
+      <el-button @click="pullRemote()">以远端为准（丢弃我的修改）</el-button>
+      <el-button type="primary" @click="forceSaveNow()">以我的为准（覆盖远端）</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 前端构建时间戳：确认当前运行的是哪次构建（改完需 wails build 才会生效） -->
   <div class="build-badge" :title="'客户端版本 ' + (store.appVersion || '-') + '；前端构建时间 ' + buildStamp">
     {{ buildStamp.slice(5) }}
@@ -332,4 +346,9 @@ const navs = [
 }
 .drawer-toggle:active { background: var(--surface-2); }
 .drawer-mask { display: none; }
+.conflict-body { font-size: 13px; line-height: 1.7; }
+.conflict-err {
+  margin-top: 8px; padding: 8px 10px; background: var(--surface-2);
+  border-radius: 6px; color: #f53f3f; font-size: 12px; word-break: break-all;
+}
 </style>

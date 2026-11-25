@@ -28,6 +28,14 @@ type UserStore struct {
 	dataDir string
 	// cachedDBAnalysis 最近一次读/写的 DB 分析 JSON（增量保存）。
 	cachedDBAnalysis string
+	// seen 本次会话通过 GetData 见过的项目 ID。
+	// 用于区分「客户端新建的项目」与「客户端持有陈旧数据」：
+	// 未见过 + 无版本 = 新建；见过 + 无版本 = 陈旧（要求刷新）。
+	seen map[string]bool
+	// versions 读取时记录的项目版本快照（projectID -> version）。
+	// SaveData 用它做乐观锁：若服务端版本已前进，说明他人先保存过，
+	// 返回冲突错误而不是静默覆盖。零值表示"未读过"（新项目）。
+	versions map[string]int64
 }
 
 // NewUserStore 创建用户存储视图。
@@ -46,11 +54,17 @@ func (u *UserStore) GetData() model.AppData {
 	data := model.AppData{}
 	metas, err := u.db.ProjectsOfUser(u.userID)
 	if err == nil {
+		u.versions = make(map[string]int64, len(metas))
+		u.seen = make(map[string]bool, len(metas))
 		for _, m := range metas {
 			row, err := u.db.Project(m.ID)
 			if err != nil {
 				continue
 			}
+			u.versions[row.ID] = row.Version
+			u.seen[row.ID] = true
+			// 版本随数据下发：客户端保存时回传，实现跨设备/跨会话的乐观锁
+			// （服务端每用户一个会话实例，不能只依赖实例内快照）。
 			var p model.Project
 			if row.Data != "" {
 				if err := json.Unmarshal([]byte(row.Data), &p); err != nil {
@@ -62,6 +76,7 @@ func (u *UserStore) GetData() model.AppData {
 			// 行上的 name/version 为准（data 内的 name 可能滞后）
 			p.ID = row.ID
 			p.Name = row.Name
+			p.Version = row.Version
 			data.Projects = append(data.Projects, p)
 		}
 	}
@@ -107,7 +122,7 @@ func (u *UserStore) SaveData(data model.AppData) error {
 	if err := u.db.SavePrefs(u.userID, string(settingsJSON), string(pluginsJSON), string(clipJSON), data.Agent, ""); err != nil {
 		return fmt.Errorf("保存用户设置失败: %w", err)
 	}
-	// 2) 项目 → 逐行 upsert（按当前行版本 +1 覆盖）
+	// 2) 项目 → 逐行 upsert（带乐观锁）
 	for _, p := range data.Projects {
 		b, err := json.Marshal(p)
 		if err != nil {
@@ -118,6 +133,14 @@ func (u *UserStore) SaveData(data model.AppData) error {
 			if err := u.db.CreateProject(ProjectRow{ID: p.ID, OwnerID: u.userID, Name: p.Name, Data: string(b), Version: 1}); err != nil {
 				return fmt.Errorf("创建项目 %s 失败: %w", p.Name, err)
 			}
+			if u.versions == nil {
+				u.versions = map[string]int64{}
+			}
+			u.versions[p.ID] = 1
+			if u.seen == nil {
+				u.seen = map[string]bool{}
+			}
+			u.seen[p.ID] = true
 			continue
 		}
 		if err != nil {
@@ -128,9 +151,30 @@ func (u *UserStore) SaveData(data model.AppData) error {
 			// 这里兜底拒绝非 owner 的整包写，防止共享读者覆盖他人项目）。
 			continue
 		}
+		// 乐观锁：只以「客户端回传的 Version」为准。
+		// 不用会话快照兜底——会话快照记录的就是服务端最新版本，
+		// 拿它做基准会让陈旧客户端永远"看起来最新"，失去并发保护。
+		if p.Version > 0 {
+			if p.Version != row.Version {
+				return &ConflictError{Msg: fmt.Sprintf(
+					"项目「%s」已有更新版本（你基于 v%d，服务端已是 v%d），请刷新后重试",
+					p.Name, p.Version, row.Version)}
+			}
+		} else if u.seen != nil && u.seen[p.ID] {
+			// 本会话读过该项目（读时必然带过版本），客户端却没带回版本：
+			// 说明它持有的是更早的陈旧副本 → 冲突，要求刷新。
+			return &ConflictError{Msg: fmt.Sprintf(
+				"项目「%s」的数据已过期（服务端为 v%d），请刷新后重试",
+				p.Name, row.Version)}
+		}
+		// 未带版本且本会话没见过该项目 → 客户端新建，允许落库。
 		if err := u.db.UpdateProject(p.ID, row.Version, p.Name, string(b)); err != nil {
 			return fmt.Errorf("保存项目 %s 失败: %w", p.Name, err)
 		}
+		if u.versions == nil {
+			u.versions = map[string]int64{}
+		}
+		u.versions[p.ID] = row.Version + 1
 	}
 	return nil
 }

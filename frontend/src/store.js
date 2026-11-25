@@ -391,6 +391,20 @@ export async function saveNow() {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
     clearDebugDirty() // 任何显式保存后，清除调试脏标记
     saveConflict.value = null
+    // 服务端模式：仅当存在「尚未拿到版本」的项目时同步一次版本号。
+    // 场景：首次保存会新建项目行，此时客户端手里没有版本，
+    // 若不同步，下次保存会被误判为冲突。
+    // 注意：只在缺失时同步（不是每次保存都拉），避免自动保存的性能退步。
+    if (store.serverInfo && store.user && store.data.projects.some(p => !p.version)) {
+      try {
+        const fresh = await LoadData()
+        const verOf = {}
+        for (const p of (fresh.projects || [])) verOf[p.id] = p.version || 0
+        for (const p of store.data.projects) {
+          if (verOf[p.id] !== undefined) p.version = verOf[p.id]
+        }
+      } catch (e) { /* 版本同步失败不影响已保存的数据 */ }
+    }
   } catch (e) {
     // 401 → 登录失效：切到登录页（服务端模式）
     if (e && e.name === 'AuthRequired') {
@@ -407,17 +421,39 @@ export async function saveNow() {
   }
 }
 
-// 强制覆盖保存（冲突对话框「以我的为准」）：再提交一次整包保存。
-// 服务端会话的 SaveData 语义是「读最新版本后覆盖」，重试即可生效。
+// 强制覆盖保存（冲突对话框「以我的为准」）：
+// 先把本地内容记下，拉取服务端最新版本号，再用最新版本号提交本地内容——
+// 否则直接重试仍会因版本过期再次冲突。
 export async function forceSaveNow() {
   saveConflict.value = null
-  await saveNow()
+  const mine = store.data
+  try {
+    // 取服务端当前版本（用 LoadData 写入 store，但保留我们的数据）
+    const remote = await LoadData()
+    const verOf = {}
+    for (const p of (remote.projects || [])) verOf[p.id] = p.version || 0
+    for (const p of mine.projects) {
+      if (verOf[p.id]) p.version = verOf[p.id]
+      else delete p.version // 服务端没有的项目：作为新项目提交
+    }
+    await SaveData(JSON.parse(JSON.stringify(mine)))
+    store.data = mine
+    clearDebugDirty()
+  } catch (e) {
+    console.error('强制覆盖失败', e)
+    saveConflict.value = { error: String(e && e.message ? e.message : e), time: Date.now() }
+  }
 }
 
 // 拉取远端（冲突对话框「以远端为准」）。
 export async function pullRemote() {
   saveConflict.value = null
   await reloadStore()
+}
+
+// 忽略本次冲突（保留本地内存修改，不再重试保存）。
+export function dismissConflict() {
+  saveConflict.value = null
 }
 
 // 仅更新单个接口的已保存快照（O(1)，取代每次保存克隆全部接口），供文档预览使用。

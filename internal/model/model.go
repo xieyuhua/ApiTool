@@ -116,6 +116,10 @@ type Project struct {
 	TestCases   []TestCase   `json:"testCases,omitempty"`
 	TestPlans   []TestPlan   `json:"testPlans,omitempty"`
 	TestReports []TestReport `json:"testReports,omitempty"`
+	// Version 服务端乐观锁版本（仅服务端模式使用）：
+	// LoadData 时由服务端填入，SaveData 时回传用于冲突检测。
+	// 桌面本地模式恒为 0（不参与任何判断）。
+	Version int64 `json:"version,omitempty"`
 }
 
 // Assertion 测试断言（期望）
