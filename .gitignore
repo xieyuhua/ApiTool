@@ -17,3 +17,14 @@ vet.txt
 
 # ������ʱ����/���Բ���
 _tmp_out/
+
+# Capacitor / Android 构建产物与本地配置
+frontend/android/.gradle/
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/local.properties
+frontend/android/.idea/
+frontend/android/capacitor-cordova-android-plugins/build/
+frontend/android/app/src/main/assets/public/
+*.apk
+*.aab

@@ -29,6 +29,11 @@ export function saveRefreshToken(t) {
   try { t ? localStorage.setItem(REFRESH_KEY, t) : localStorage.removeItem(REFRESH_KEY) } catch (e) { /* ignore */ }
 }
 
+// accessToken：内存持有（不落盘，避免 XSS 读取）；App 端跨域时以 Bearer 携带。
+let accessToken = ''
+export function getAccessToken() { return accessToken }
+function setAccessToken(t) { accessToken = t || '' }
+
 // AuthRequired 登录失效信号（store 据此切换到登录页）。
 export class AuthRequired extends Error {
   constructor(msg) { super(msg || '需要登录'); this.name = 'AuthRequired' }
@@ -53,6 +58,7 @@ export async function refreshAccessToken() {
         saveRefreshToken('')
         throw new AuthRequired((data && data.error) || '登录已过期')
       }
+      setAccessToken(data.accessToken)
       return data
     })().finally(() => { refreshing = null })
   }
@@ -74,6 +80,7 @@ export async function login(username, password) {
     throw new Error((data && data.error) || '登录失败')
   }
   saveRefreshToken(data.refreshToken)
+  setAccessToken(data.accessToken)
   return data
 }
 
@@ -89,6 +96,7 @@ export async function register(username, password) {
     throw new Error((data && data.error) || '注册失败')
   }
   saveRefreshToken(data.refreshToken)
+  setAccessToken(data.accessToken)
   return data
 }
 
@@ -98,6 +106,7 @@ export async function logout() {
     await fetch(apiBase() + '/api/logout', { method: 'POST' })
   } catch (e) { /* ignore */ }
   saveRefreshToken('')
+  setAccessToken('')
 }
 
 // probe 探测服务端是否可达（/api/health）。

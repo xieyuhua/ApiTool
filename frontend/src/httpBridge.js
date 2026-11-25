@@ -44,12 +44,34 @@ function installGoBridge() {
   window.go = { main: { App: app } }
 }
 
+// apiBase 解析服务端地址：显式注入（window.__API_BASE__）优先，
+// 其次是 App 端/用户配置写入的 localStorage('apitool_server_base')。
+// 网页端两者皆空 → 返回 '' 即同源相对路径。
+function apiBaseURL() {
+  if (typeof window === 'undefined') return ''
+  if (window.__API_BASE__) return window.__API_BASE__
+  try { return localStorage.getItem('apitool_server_base') || '' } catch (e) { return '' }
+}
+
+// authHeaders 构造请求头：始终 JSON；有 accessToken 时附带 Bearer。
+// 网页端（同源）主要靠 HttpOnly Cookie，Bearer 冗余无害；
+// App 端（跨域）Cookie 不发送，必须走 Bearer。auth.js 为动态导入避免循环依赖。
+async function authHeaders() {
+  const h = { 'Content-Type': 'application/json' }
+  try {
+    const mod = await import('./auth')
+    const tok = mod.getAccessToken && mod.getAccessToken()
+    if (tok) h['Authorization'] = 'Bearer ' + tok
+  } catch (e) { /* ignore */ }
+  return h
+}
+
 async function callRPC(method, args) {
-  const base = (typeof window !== 'undefined' && window.__API_BASE__) || ''
+  const base = apiBaseURL()
   const res = await fetch(base + '/rpc/' + encodeURIComponent(method), {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders(),
     body: JSON.stringify(args || []),
   })
   let data = null
@@ -63,7 +85,7 @@ async function callRPC(method, args) {
       const retry = await fetch(base + '/rpc/' + encodeURIComponent(method), {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify(args || []),
       })
       let rd = null
@@ -100,7 +122,7 @@ function installRuntimeBridge() {
 
   function connect() {
     if (closed) return
-    const base = (typeof window !== 'undefined' && window.__API_BASE__) || ''
+    const base = apiBaseURL()
     es = new EventSource(base + '/events', { withCredentials: true })
     es.onmessage = (e) => {
       let msg

@@ -1,0 +1,14 @@
+{
+  "appId": "com.apitool.app",
+  "appName": "ApiTool",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true,
+    "useLegacyBridge": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}
