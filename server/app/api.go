@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -80,8 +81,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "请求体解析失败")
 		return
 	}
+	key := loginKey(r, req.Username)
+	if locked, wait := s.loginGuard.locked(key); locked {
+		writeErr(w, http.StatusTooManyRequests,
+			fmt.Sprintf("登录失败次数过多，请 %.0f 分钟后重试", wait.Minutes()+0.5))
+		return
+	}
 	u, err := s.db.UserByName(trimName(req.Username))
 	if errors.Is(err, store.ErrNotFound) {
+		s.loginGuard.fail(key)
 		writeErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
@@ -90,9 +98,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !auth.VerifyPassword(req.Password, u.Salt, u.PwdHash) {
+		s.loginGuard.fail(key)
 		writeErr(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
+	s.loginGuard.ok(key)
 	s.issueSession(w, u.ID, u.Username)
 }
 
@@ -159,10 +169,12 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"user":     userInfo{ID: u.ID, Username: u.Username},
 		"projects": ps,
 		"server": map[string]interface{}{
-			"version":       s.version,
-			"allowRegister": s.cfg.AllowRegister,
-			"enablePlugins": s.cfg.EnablePlugins,
-			"enableAgent":   s.cfg.EnableAgent,
+			"version":         s.version,
+			"allowRegister":   s.cfg.AllowRegister,
+			"enablePlugins":   s.cfg.EnablePlugins,
+			"enableAgent":     s.cfg.EnableAgent,
+			"agentDailyQuota": s.cfg.AgentDailyQuota,
+			"agentUsedToday":  s.agentQuota.usage(uid),
 		},
 	})
 }

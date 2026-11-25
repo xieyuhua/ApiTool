@@ -24,6 +24,11 @@ type Server struct {
 	sessions *sessionManager
 	version  string
 	mux      *http.ServeMux
+
+	// 安全组件（P5）
+	limiter    *rateLimiter
+	loginGuard *loginGuard
+	agentQuota *agentQuotaTracker
 }
 
 // New 装配服务端。webAssets 为内嵌的网页端资源（embed.FS of frontend/dist），
@@ -41,6 +46,9 @@ func New(cfg *Config, version string, webAssets fs.FS) (*Server, error) {
 		hub:      newHub(),
 		sessions: newSessionManager(nil, cfg.SessionTTL),
 		version:  version,
+		limiter:  newRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst),
+		loginGuard: newLoginGuard(cfg.LoginMaxFails, cfg.LoginLockFor),
+		agentQuota: newAgentQuotaTracker(cfg.AgentDailyQuota),
 	}
 	s.sessions.s = s // 打破循环：sessionManager 需要 Server 引用
 	s.buildRoutes()
@@ -50,11 +58,16 @@ func New(cfg *Config, version string, webAssets fs.FS) (*Server, error) {
 // Close 释放资源。
 func (s *Server) Close() error { return s.db.Close() }
 
+// Handler 返回带全局中间件的处理器（限流 → 路由）。
+func (s *Server) Handler() http.Handler {
+	return s.withRateLimit(s.mux)
+}
+
 // ListenAndServe 启动 HTTP 服务。
 func (s *Server) ListenAndServe() error {
 	srv := &http.Server{
 		Addr:              s.cfg.Addr,
-		Handler:           s.mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 	log.Printf("ApiTool 服务端已启动：%s（db=%s, register=%v, plugins=%v, agent=%v）",
@@ -68,8 +81,6 @@ func (s *Server) buildRoutes() {
 	s.mux = m
 
 	// 鉴权 API（匿名可访问）
-	m.HandleFunc("POST /api/register", s.handleRegister)
-	m.HandleFunc("POST /api/login", s.handleLogin)
 	m.HandleFunc("POST /api/token/refresh", s.handleRefresh)
 
 	// 需登录 API
@@ -88,7 +99,13 @@ func (s *Server) buildRoutes() {
 	m.Handle("DELETE /api/projects/{id}/share/{teamID}", s.requireAuth(http.HandlerFunc(s.handleProjectUnshare)))
 
 	// RPC 与事件（需登录；RPC 反射调用 appcore 会话）
-	m.Handle("POST /rpc/", s.requireAuth(http.HandlerFunc(s.handleRPC)))
+	maxBody := s.cfg.MaxBodyMB << 20
+	if maxBody <= 0 {
+		maxBody = 32 << 20
+	}
+	m.Handle("POST /rpc/", s.requireAuth(maxBytes(s.handleRPC, maxBody)))
+	m.Handle("POST /api/register", maxBytes(s.handleRegister, maxBody))
+	m.Handle("POST /api/login", maxBytes(s.handleLogin, maxBody))
 	m.Handle("GET /events", s.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.serveSSE(w, r, userIDOf(r.Context()))
 	})))

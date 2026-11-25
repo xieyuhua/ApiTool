@@ -25,6 +25,14 @@ type Config struct {
 	EnablePlugins bool   // 是否允许网页端调用 Plugin*（DB/SSH/SFTP 等）
 	EnableAgent   bool   // 是否允许网页端运行 AI Agent
 	SessionTTL    time.Duration
+	// 安全相关（P5）
+	RateLimitRPS   float64 // 每 IP 每秒请求数（0=关闭限流）
+	RateLimitBurst float64 // 突发上限
+	LoginMaxFails  int           // 连续登录失败上限（0=不锁定）
+	LoginLockFor   time.Duration // 锁定窗口
+	MaxBodyMB      int64         // 请求体上限（MB，0=用默认 32MB）
+	// Agent 每用户每日调用配额（0=不限）
+	AgentDailyQuota int
 }
 
 // LoadConfig 从命令行 flag 装配配置。
@@ -39,6 +47,12 @@ func LoadConfig() (*Config, error) {
 	flag.BoolVar(&cfg.EnablePlugins, "enable-plugins", false, "是否允许网页端调用插件（DB/SSH/SFTP，注意 SSRF 风险）")
 	flag.BoolVar(&cfg.EnableAgent, "enable-agent", true, "是否允许网页端运行 AI Agent")
 	ttl := flag.Duration("session-ttl", 30*time.Minute, "用户会话空闲淘汰时间")
+	flag.Float64Var(&cfg.RateLimitRPS, "rate-limit", 20, "每 IP 每秒请求数（0=关闭）")
+	flag.Float64Var(&cfg.RateLimitBurst, "rate-burst", 40, "每 IP 突发请求上限")
+	flag.IntVar(&cfg.LoginMaxFails, "login-max-fails", 5, "连续登录失败次数上限（0=不锁定）")
+	flag.DurationVar(&cfg.LoginLockFor, "login-lock-for", 10*time.Minute, "登录失败锁定窗口")
+	flag.Int64Var(&cfg.MaxBodyMB, "max-body-mb", 32, "请求体大小上限（MB）")
+	flag.IntVar(&cfg.AgentDailyQuota, "agent-daily-quota", 200, "每用户每日 Agent 调用配额（0=不限）")
 	flag.Parse()
 	cfg.SessionTTL = *ttl
 

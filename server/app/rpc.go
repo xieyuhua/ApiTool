@@ -57,6 +57,20 @@ var rpcBlocked = map[string]string{
 	"OpenCADialog":       "该操作仅适用于桌面端",
 	"CopyClipItem":       "网页端请使用浏览器剪贴板",
 	"GetClipImageData":   "网页端暂不支持图片历史",
+	// 桌面端新增/遗留的专属方法（P5 收口）
+	"ServerLogin":          "该操作仅适用于桌面端（网页端已登录）",
+	"ServerRegister":       "该操作仅适用于桌面端（网页端已登录）",
+	"ServerLogout":         "该操作仅适用于桌面端",
+	"ServerStatus":         "该操作仅适用于桌面端",
+	"ServerRefreshProjects": "该操作仅适用于桌面端",
+	"LocalStore":           "该操作仅适用于桌面端",
+	"ClipMonitorEnabled":   "该操作仅适用于桌面端",
+	"SaveClipText":         "系统剪贴板采集仅适用于桌面端",
+	"SaveClipImage":        "系统剪贴板采集仅适用于桌面端",
+	"SetClipboardText":     "网页端请使用浏览器剪贴板",
+	"ClipboardSetText":     "网页端请使用浏览器剪贴板",
+	"ExportStressReport":   "网页端不支持保存对话框，请使用导出下载",
+	"DocExport":            "网页端不支持保存对话框，请使用导出下载",
 }
 
 // agentSemaphore 服务端级 Agent 并发护栏（防滥用）。
@@ -98,6 +112,14 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := userIDOf(r.Context())
 	uname := usernameOf(r.Context())
+
+	// Agent 每日配额（RunAgent / PolishText 均计入）
+	if name == "RunAgent" || name == "PolishText" {
+		if qerr := s.agentQuota.take(uid); qerr != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": qerr.Error()})
+			return
+		}
+	}
 
 	// 在会话互斥下反射调用该用户的 appcore 实例
 	out, callErr := s.sessions.withLock(uid, uname, func(core *appcore.App) (interface{}, error) {
