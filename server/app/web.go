@@ -28,7 +28,14 @@ func (s *Server) mountStatic(m *http.ServeMux) {
 		case path == "/" || path == "/index.html" || path == "/agent.html":
 			w.Header().Set("Cache-Control", "no-store")
 			servePage(w, sub, "index.html")
-		case path == "/manifest.webmanifest" || path == "/sw.js" || strings.HasPrefix(path, "/icons/"):
+		case path == "/manifest.webmanifest":
+			// PWA manifest：浏览器要求正确的 MIME
+			w.Header().Set("Cache-Control", "no-cache")
+			serveBytes(w, sub, "manifest.webmanifest", "application/manifest+json; charset=utf-8")
+		case path == "/sw.js":
+			w.Header().Set("Cache-Control", "no-cache")
+			serveBytes(w, sub, "sw.js", "text/javascript; charset=utf-8")
+		case strings.HasPrefix(path, "/icons/"):
 			w.Header().Set("Cache-Control", "no-cache")
 			fileServer.ServeHTTP(w, r)
 		default:
@@ -37,6 +44,17 @@ func (s *Server) mountStatic(m *http.ServeMux) {
 			servePage(w, sub, "index.html")
 		}
 	})
+}
+
+// serveBytes 输出嵌入文件的字节与指定 MIME。
+func serveBytes(w http.ResponseWriter, sub fs.FS, name, contentType string) {
+	b, err := fs.ReadFile(sub, name)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	_, _ = w.Write(b)
 }
 
 // servePage 输出嵌入的 HTML。

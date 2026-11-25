@@ -1,0 +1,120 @@
+/* ApiTool 移动适配（网页/App 端窄屏）。
+ *
+ * 作用域：body.web-mobile（由 main.js 在窄屏且非桌面时添加）。
+ * 布局策略（≤820px）：
+ *   - 顶部导航：图标条（隐藏文字），横向滚动
+ *   - 侧栏（Sidebar）：改为覆盖层抽屉，默认收起，点「目录」按钮展开
+ *   - 分栏拖拽条隐藏，详情区全宽
+ *   - Element Plus 全局覆盖：弹窗满屏、输入 16px 防 iOS 缩放、触控热区
+ */
+body.web-mobile {
+  --mobile-nav-h: 52px;
+}
+
+body.web-mobile .shell {
+  flex-direction: column;
+}
+
+/* ---- 顶部导航：图标条 ---- */
+body.web-mobile .navbar {
+  flex-direction: row;
+  overflow-x: auto;
+  padding: 0 6px;
+  height: var(--mobile-nav-h);
+  -webkit-overflow-scrolling: touch;
+}
+body.web-mobile .navbar .logo {
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+body.web-mobile .navbar .nav-item {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+body.web-mobile .navbar .nav-item .ni-label {
+  display: none; /* 仅图标 */
+}
+body.web-mobile .navbar .nav-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+}
+body.web-mobile .navbar .nav-item::after {
+  content: attr(data-label);
+  font-size: 10px;
+}
+
+/* ---- 侧栏抽屉 ---- */
+body.web-mobile .sb-resizer {
+  display: none;
+}
+body.web-mobile .sidebar {
+  position: fixed !important;
+  left: 0;
+  top: var(--mobile-nav-h);
+  bottom: 0;
+  width: min(78vw, 320px) !important;
+  z-index: 2000;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.25);
+}
+body.web-mobile .sidebar.drawer-open {
+  transform: translateX(0);
+}
+body.web-mobile .drawer-mask {
+  position: fixed;
+  left: 0;
+  top: var(--mobile-nav-h);
+  right: 0;
+  bottom: 0;
+  z-index: 1999;
+  background: rgba(0, 0, 0, 0.35);
+}
+/* 抽屉唤出按钮（桌面端隐藏） */
+body.web-mobile .drawer-toggle {
+  display: inline-flex;
+}
+
+/* ---- 主区全宽 ---- */
+body.web-mobile .main-area {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Element Plus 触屏优化 ---- */
+body.web-mobile .el-dialog {
+  width: 94vw !important;
+  max-width: 94vw;
+  margin-top: 6vh !important;
+}
+body.web-mobile .el-message-box {
+  width: 90vw !important;
+  max-width: 90vw;
+}
+body.web-mobile input,
+body.web-mobile textarea {
+  font-size: 16px; /* 防 iOS 聚焦自动放大 */
+}
+body.web-mobile .el-button {
+  padding: 8px 14px; /* 触控热区 */
+}
+body.web-mobile .el-drawer {
+  width: 92vw !important;
+}
+
+/* ---- 桌面专属交互隐藏 ---- */
+body.web-mobile .build-badge {
+  display: none;
+}
+
+/* 桌面端（非 web-mobile）隐藏抽屉按钮（默认隐藏，mobile 作用域内显式开启） */
+body:not(.web-mobile) .drawer-toggle {
+  display: none !important;
+}
+body:not(.web-mobile) .drawer-mask {
+  display: none !important;
+}

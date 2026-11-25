@@ -22,6 +22,10 @@ import ClipboardHistory from './components/clipboard/ClipboardHistory.vue'
 import LoginView from './components/auth/LoginView.vue'
 
 const clipVisible = ref(false)
+// 移动端（网页/App 窄屏）：侧栏变抽屉（与 mobile.css 的 body.web-mobile 作用域配合）
+const isMobile = ref(false)
+const drawerOpen = ref(false)
+function updateIsMobile() { isMobile.value = window.innerWidth <= 820 }
 
 // 当前激活标签内子页（debug/params/doc）的读写，回写到对应标签
 const activeTabSub = computed({
@@ -50,6 +54,8 @@ function openTabCtx(tab, ev) {
 function closeTabCtx() { tabCtx.visible = false }
 
 onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
   initStore()
   initClipboardMonitor()
   // 系统托盘「运行全部测试」：执行当前项目全部用例
@@ -75,6 +81,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateIsMobile)
   EventsOff('apitool:tray-run-tests')
   EventsOff('apitool:show-clipboard-history')
   EventsOff('apitool:hide-clipboard-history')
@@ -148,8 +155,9 @@ const navs = [
     <div class="navbar">
       <div class="logo">Ap</div>
       <div v-for="n in navs" :key="n.key" class="nav-item" :class="{ active: store.view === n.key }"
+        :data-label="n.label"
         @click="store.view = n.key">
-        <span class="ni-icon">{{ n.icon }}</span>{{ n.label }}
+        <span class="ni-icon">{{ n.icon }}</span><span class="ni-label">{{ n.label }}</span>
       </div>
     </div>
 
@@ -157,7 +165,9 @@ const navs = [
     <CommonParams v-model:visible="commonDialogVisible" />
 
     <template v-if="store.view === 'workspace'">
-      <Sidebar :style="{ width: sidebarWidth + 'px' }" />
+      <span v-if="isMobile" class="drawer-toggle" title="目录" @click="drawerOpen = !drawerOpen">☰</span>
+      <div v-if="isMobile && drawerOpen" class="drawer-mask" @click="drawerOpen = false"></div>
+      <Sidebar :class="{ 'drawer-open': isMobile && drawerOpen }" :style="{ width: sidebarWidth + 'px' }" />
       <div class="sb-resizer" :class="{ active: resizing }" @mousedown="startResize" title="拖动调整目录宽度"></div>
       <div class="main-area">
         <div class="global-bar">
@@ -309,4 +319,17 @@ const navs = [
   color: #c9cdd4; background: rgba(255,255,255,.75); border-radius: 8px; padding: 1px 6px; pointer-events: auto; }
 .boot-text { color: var(--text-muted); font-size: 14px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.drawer-toggle {
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.drawer-toggle:active { background: var(--surface-2); }
+.drawer-mask { display: none; }
 </style>

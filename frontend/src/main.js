@@ -5,6 +5,7 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import './style.css'
+import './mobile.css'
 import { installWebBridge } from './httpBridge'
 import { installV3BridgeWhenReady } from './wailsV3Bridge'
 
@@ -48,7 +49,19 @@ installV3BridgeWhenReady().then((v3Ready) => {
   }
   installSafeProxyFallback()
 
+  // 窄屏移动标记：mobile.css 作用域类（桌面 v3 全屏窗口不会命中）
+  if (window.innerWidth <= 820 && !window.__WAILS_V3__) {
+    document.body.classList.add('web-mobile')
+  }
+
   const app = createApp(App)
   app.use(ElementPlus, { locale: zhCn })
   app.mount('#app')
+
+  // PWA Service Worker：仅网页/App 环境（桌面 v3 内有原生窗口，不需要 SW）
+  if ('serviceWorker' in navigator && !window.__WAILS_V3__) {
+    navigator.serviceWorker.register('/sw.js').catch((e) => {
+      console.warn('[pwa] SW 注册失败（不影响使用）', e)
+    })
+  }
 })

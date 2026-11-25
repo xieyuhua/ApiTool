@@ -1,0 +1,16 @@
+{
+  "name": "ApiTool - 接口调试与文档工具",
+  "short_name": "ApiTool",
+  "description": "接口调试 / 文档 / 测试 / 协作，数据存服务端，多端可用",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1b2636",
+  "theme_color": "#165dff",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
