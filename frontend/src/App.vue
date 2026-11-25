@@ -1,7 +1,7 @@
 <script setup>
 const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知构建'
 import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab } from './store'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -161,6 +161,7 @@ const navs = [
       <div class="sb-resizer" :class="{ active: resizing }" @mousedown="startResize" title="拖动调整目录宽度"></div>
       <div class="main-area">
         <div class="global-bar">
+          <el-tag v-if="!canEditProject()" size="small" type="warning" effect="plain" title="该账号对此项目为只读，修改不会被保存">🔒 只读</el-tag>
           <span class="gb-label">环境</span>
           <el-select v-model="currentProject().activeEnvId" size="small" class="gb-env" placeholder="无环境" title="当前环境变量">
             <el-option label="无环境" value="" />

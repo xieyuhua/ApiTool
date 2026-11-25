@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, SyncServerURL, OpenInBrowser, DefaultTestCasePrompt } from '../../../wailsjs/go/main/App'
 import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, setCodeFont, setCodeFontSize, THEMES, SCHEMES, setScheme } from '../../store'
 import CloudSync from './CloudSync.vue'
+import TeamPanel from '../auth/TeamPanel.vue'
 
 const dataPath = ref('')
 const defaultPrompt = ref('')   // 内置默认提示词（来自后端，避免前后端文案漂移）
@@ -95,6 +96,12 @@ async function toggleSync() {
   <div class="main-area">
     <div class="panel-page" style="max-width:760px; margin:0 auto; width:100%">
       <h2 style="margin:6px 0 16px">⚙ 设置</h2>
+
+      <!-- 2.0 服务端账号与协作（仅服务端模式显示） -->
+      <div v-if="store.user" class="card">
+        <div class="card-title">账号与协作</div>
+        <TeamPanel />
+      </div>
 
       <div class="card">
         <div class="card-title">AI 配置（用于自动生成字段描述）</div>

@@ -49,17 +49,20 @@ export async function refreshAccessToken() {
         body: JSON.stringify({ refreshToken: rt }),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data || data.ok === false) {
+      if (!res.ok || !data || !data.accessToken || data.ok === false) {
         saveRefreshToken('')
         throw new AuthRequired((data && data.error) || '登录已过期')
       }
-      return data.result
+      return data
     })().finally(() => { refreshing = null })
   }
   return refreshing
 }
 
 // login 登录并持久化 refreshToken。
+// 响应格式（服务端 issueSession 直接返回顶层结构，无 {ok,result} 包装）：
+//   成功 { accessToken, refreshToken, user:{id,username}, projects:[...] }
+//   失败 { ok:false, error:"..." }（writeErr）或 HTTP 4xx/5xx
 export async function login(username, password) {
   const res = await fetch(apiBase() + '/api/login', {
     method: 'POST',
@@ -67,14 +70,14 @@ export async function login(username, password) {
     body: JSON.stringify({ username, password }),
   })
   const data = await res.json().catch(() => null)
-  if (!res.ok || !data || data.ok === false) {
+  if (!res.ok || !data || !data.accessToken || data.ok === false) {
     throw new Error((data && data.error) || '登录失败')
   }
   saveRefreshToken(data.refreshToken)
-  return data.result
+  return data
 }
 
-// register 注册并自动登录。
+// register 注册并自动登录（响应格式同 login）。
 export async function register(username, password) {
   const res = await fetch(apiBase() + '/api/register', {
     method: 'POST',
@@ -82,11 +85,11 @@ export async function register(username, password) {
     body: JSON.stringify({ username, password }),
   })
   const data = await res.json().catch(() => null)
-  if (!res.ok || !data || data.ok === false) {
+  if (!res.ok || !data || !data.accessToken || data.ok === false) {
     throw new Error((data && data.error) || '注册失败')
   }
   saveRefreshToken(data.refreshToken)
-  return data.result
+  return data
 }
 
 // logout 登出（吊销 refresh + 清理本地）。

@@ -49,6 +49,9 @@ export const store = reactive({
   // 2.0 服务端会话：null=本地模式（桌面未登录）；登录后为 {id, username, server}
   user: null,
   serverInfo: null, // 服务端能力信息（allowRegister/enablePlugins/enableAgent）
+  // 项目角色表（服务端模式）：projectId -> admin | editor | viewer
+  // 本地模式为空表（全部视为 owner）。viewer 的保存动作被抑制并提示只读。
+  projectRoles: {},
   currentApiId: '',
   activeTab: 'debug', // debug | params | doc
   // 接口调试多标签：每个标签绑定一个接口，支持同时打开多个接口窗口（类似浏览器标签）
@@ -77,6 +80,16 @@ export const store = reactive({
     clipboard: { history: [] },
   },
 })
+
+// 开发/自动化调试句柄：只读暴露状态（不含数据本体，避免泄漏敏感配置）
+if (typeof window !== 'undefined') {
+  try {
+    Object.defineProperty(window, '__store_dbg__', {
+      get: () => ({ loaded: store.loaded, user: store.user, server: store.serverInfo, view: store.view, saveRev: store.saveRev }),
+      configurable: true,
+    })
+  } catch (e) { /* ignore */ }
+}
 
 // ---------------- 主题 ----------------
 export const THEMES = [
@@ -281,6 +294,19 @@ export function currentProject() {
   return p || store.data.projects[0]
 }
 
+// currentProjectRole 当前项目在服务端的共享角色。
+// 本地模式（无服务端）恒为 admin；服务端模式未在表中的项目视为 viewer（保守）。
+export function currentProjectRole() {
+  if (!store.serverInfo) return 'admin'
+  return store.projectRoles[store.data.currentProjectId] || 'viewer'
+}
+
+// canEditProject 当前项目是否可编辑。
+export function canEditProject() {
+  const r = currentProjectRole()
+  return r === 'admin' || r === 'editor'
+}
+
 // 一键清空测试数据。scope: cases|plans|reports|all；返回被清空的条数。
 export async function clearTestData(scope = 'all') {
   const removed = await ClearTestData(store.data.currentProjectId || '', scope)
@@ -359,9 +385,12 @@ export async function saveNow() {
   if (!hasGoBridge()) return
   // 服务端模式：未登录时不做整包保存（数据在服务端，登录后经会话读写）
   if (store.serverInfo && !store.user) return
+  // 只读项目（viewer）：抑制自动保存，避免反复提交被 403 拒绝
+  if (store.serverInfo && store.user && !canEditProject()) return
   try {
     await SaveData(JSON.parse(JSON.stringify(store.data)))
     clearDebugDirty() // 任何显式保存后，清除调试脏标记
+    saveConflict.value = null
   } catch (e) {
     // 401 → 登录失效：切到登录页（服务端模式）
     if (e && e.name === 'AuthRequired') {
@@ -369,8 +398,26 @@ export async function saveNow() {
       store.view = 'login'
       return
     }
+    // 409 → 版本冲突（服务端模式）：记录状态，UI 弹冲突对话框
+    if (/已有更新版本|409|冲突/.test(String(e && e.message || e))) {
+      saveConflict.value = { error: String(e && e.message || e), time: Date.now() }
+      return
+    }
     console.error('保存失败', e)
   }
+}
+
+// 强制覆盖保存（冲突对话框「以我的为准」）：再提交一次整包保存。
+// 服务端会话的 SaveData 语义是「读最新版本后覆盖」，重试即可生效。
+export async function forceSaveNow() {
+  saveConflict.value = null
+  await saveNow()
+}
+
+// 拉取远端（冲突对话框「以远端为准」）。
+export async function pullRemote() {
+  saveConflict.value = null
+  await reloadStore()
 }
 
 // 仅更新单个接口的已保存快照（O(1)，取代每次保存克隆全部接口），供文档预览使用。
@@ -521,6 +568,7 @@ export async function initStore() {
       await loadInto()
     } catch (e) {
       if (e && e.name === 'AuthRequired') {
+        console.warn('[loadInto] AuthRequired -> 清除登录态')
         store.user = null
         store.view = 'login'
       } else {
@@ -1061,6 +1109,10 @@ export const stressStat = ref({ running: false, done: 0, total: 0 })
 // 任务结束 / 出错时写入，供「接口测试」视图切回时弹出提示（提示后清除）
 export const genDoneInfo = ref(null)   // { count: number, time: number }
 export const genErrorInfo = ref(null)  // { error: string, time: number }
+
+// 保存冲突状态（服务端 409）：UI 监听此值弹出冲突对话框。
+// { error, time }；用户选择「拉取远端」→ pullRemote()；「强制覆盖」→ forceSaveNow()。
+export const saveConflict = ref(null)
 
 export function startGenJob(jobId, total) {
   genJobId.value = jobId

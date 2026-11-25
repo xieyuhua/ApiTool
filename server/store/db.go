@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -56,61 +57,64 @@ func (d *DB) Driver() string { return d.driver }
 
 // ddl 返回建表语句（SQLite/MySQL 兼容语法：TEXT 主键 + BIGINT 时间戳毫秒）。
 func (d *DB) ddl() []string {
-	ts := "BIGINT" // 时间统一存毫秒时间戳，避免双方言 datetime 差异
-	txt := "TEXT"
+	ts := "BIGINT"  // 时间统一存毫秒时间戳，避免双方言 datetime 差异
+	txt := "TEXT"   // 普通文本列
+	pk  := "TEXT"   // 主键/索引列：MySQL 的 TEXT 不能直接做主键，需 VARCHAR
 	big := "MEDIUMTEXT"
 	if d.driver == "sqlite" {
 		big = "TEXT"
+	} else {
+		pk = "VARCHAR(64)"
 	}
 	return []string{
 		`CREATE TABLE IF NOT EXISTS users (
-			id ` + txt + ` PRIMARY KEY,
-			username ` + txt + ` NOT NULL UNIQUE,
+			id ` + pk + ` PRIMARY KEY,
+			username ` + pk + ` NOT NULL UNIQUE,
 			salt ` + txt + ` NOT NULL,
 			pwd_hash ` + txt + ` NOT NULL,
 			created_at ` + ts + ` NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS tokens (
-			refresh_hash ` + txt + ` PRIMARY KEY,
-			user_id ` + txt + ` NOT NULL,
+			refresh_hash ` + pk + ` PRIMARY KEY,
+			user_id ` + pk + ` NOT NULL,
 			expire_at ` + ts + ` NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS teams (
-			id ` + txt + ` PRIMARY KEY,
+			id ` + pk + ` PRIMARY KEY,
 			name ` + txt + ` NOT NULL,
-			owner_id ` + txt + ` NOT NULL,
+			owner_id ` + pk + ` NOT NULL,
 			created_at ` + ts + ` NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS team_members (
-			team_id ` + txt + ` NOT NULL,
-			user_id ` + txt + ` NOT NULL,
+			team_id ` + pk + ` NOT NULL,
+			user_id ` + pk + ` NOT NULL,
 			role ` + txt + ` NOT NULL,
 			PRIMARY KEY (team_id, user_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS projects (
-			id ` + txt + ` PRIMARY KEY,
-			owner_id ` + txt + ` NOT NULL,
+			id ` + pk + ` PRIMARY KEY,
+			owner_id ` + pk + ` NOT NULL,
 			name ` + txt + ` NOT NULL,
 			data ` + big + `,
 			version BIGINT NOT NULL DEFAULT 1,
 			updated_at ` + ts + ` NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS project_members (
-			project_id ` + txt + ` NOT NULL,
-			team_id ` + txt + ` NOT NULL,
+			project_id ` + pk + ` NOT NULL,
+			team_id ` + pk + ` NOT NULL,
 			role ` + txt + ` NOT NULL,
 			PRIMARY KEY (project_id, team_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS user_prefs (
-			user_id ` + txt + ` PRIMARY KEY,
+			user_id ` + pk + ` PRIMARY KEY,
 			settings ` + big + `,
 			plugins ` + big + `,
 			clipboard ` + big + `,
 			agent ` + big + `
 		)`,
 		`CREATE TABLE IF NOT EXISTS shares (
-			token ` + txt + ` PRIMARY KEY,
-			project_id ` + txt + ` NOT NULL,
+			token ` + pk + ` PRIMARY KEY,
+			project_id ` + pk + ` NOT NULL,
 			title ` + txt + `,
 			html ` + big + `,
 			password ` + txt + `,
@@ -123,6 +127,14 @@ func (d *DB) ddl() []string {
 func (d *DB) initSchema() error {
 	stmts := d.ddl()
 	stmts = append(stmts, ddlExtra...)
+	// 方言替换：{PK} 在 MySQL 下为 VARCHAR(64)（TEXT 不能做主键），SQLite 下为 TEXT
+	pk := "TEXT"
+	if d.driver != "sqlite" {
+		pk = "VARCHAR(64)"
+	}
+	for i := range stmts {
+		stmts[i] = strings.ReplaceAll(stmts[i], "{PK}", pk)
+	}
 	for _, s := range stmts {
 		if _, err := d.db.Exec(s); err != nil {
 			return fmt.Errorf("建表失败: %w", err)

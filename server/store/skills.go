@@ -14,8 +14,8 @@ var timeNow = time.Now
 
 func init() {
 	ddlExtra = append(ddlExtra, `CREATE TABLE IF NOT EXISTS user_skills (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
+		id {PK} PRIMARY KEY,
+		user_id {PK} NOT NULL,
 		name TEXT NOT NULL,
 		description TEXT,
 		prompt TEXT,

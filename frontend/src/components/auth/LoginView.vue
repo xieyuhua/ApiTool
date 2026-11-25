@@ -40,6 +40,9 @@ async function submit() {
       ? await login(name, password.value)
       : await register(name, password.value)
     store.user = { id: r.user.id, username: r.user.username, server: (store.serverInfo || {}).version || '' }
+    const roles = {}
+    for (const pm of (r.projects || [])) roles[pm.id] = pm.role || 'viewer'
+    store.projectRoles = roles
     ElMessage.success('欢迎，' + r.user.username)
     await reloadStore()
     store.view = 'workspace'
