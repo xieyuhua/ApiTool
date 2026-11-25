@@ -5,6 +5,7 @@ import { GetDataFilePath, StartSyncServer, StopSyncServer, SyncServerRunning, Sy
 import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, setClipboardMonitor, setCodeFont, setCodeFontSize, THEMES, SCHEMES, setScheme } from '../../store'
 import CloudSync from './CloudSync.vue'
 import TeamPanel from '../auth/TeamPanel.vue'
+import ServerSync from './ServerSync.vue'
 
 const dataPath = ref('')
 const defaultPrompt = ref('')   // 内置默认提示词（来自后端，避免前后端文案漂移）
@@ -96,6 +97,12 @@ async function toggleSync() {
   <div class="main-area">
     <div class="panel-page" style="max-width:760px; margin:0 auto; width:100%">
       <h2 style="margin:6px 0 16px">⚙ 设置</h2>
+
+      <!-- 2.0 桌面端：服务端同步（登录/登出，本地/服务端双模式） -->
+      <div class="card">
+        <div class="card-title">服务端同步（团队协作）</div>
+        <ServerSync />
+      </div>
 
       <!-- 2.0 服务端账号与协作（仅服务端模式显示） -->
       <div v-if="store.user" class="card">

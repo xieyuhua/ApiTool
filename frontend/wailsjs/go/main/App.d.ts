@@ -421,6 +421,17 @@ export function WindowHide():Promise<void>;
 
 export function WindowSetAlwaysOnTop(arg1:boolean):Promise<void>;
 
+
+export function ServerLogin(arg1:{baseUrl:string;password:string;username:string}):Promise<main.ServerUserInfo>;
+
+export function ServerRegister(arg1:{baseUrl:string;password:string;username:string}):Promise<main.ServerUserInfo>;
+
+export function ServerLogout():Promise<void>;
+
+export function ServerRefreshProjects():Promise<Array<serverclient.ProjectMeta>>;
+
+export function ServerStatus():Promise<main.ServerUserInfo>;
+
 export function WindowShow():Promise<void>;
 
 export function WindowUnminimise():Promise<void>;

@@ -810,6 +810,27 @@ export function WindowSetAlwaysOnTop(arg1) {
   return window['go']['main']['App']['WindowSetAlwaysOnTop'](arg1);
 }
 
+
+export function ServerLogin(arg1) {
+  return window['go']['main']['App']['ServerLogin'](arg1);
+}
+
+export function ServerRegister(arg1) {
+  return window['go']['main']['App']['ServerRegister'](arg1);
+}
+
+export function ServerLogout() {
+  return window['go']['main']['App']['ServerLogout']();
+}
+
+export function ServerRefreshProjects() {
+  return window['go']['main']['App']['ServerRefreshProjects']();
+}
+
+export function ServerStatus() {
+  return window['go']['main']['App']['ServerStatus']();
+}
+
 export function WindowShow() {
   return window['go']['main']['App']['WindowShow']();
 }

@@ -110,7 +110,8 @@ func (d *DB) ddl() []string {
 			settings ` + big + `,
 			plugins ` + big + `,
 			clipboard ` + big + `,
-			agent ` + big + `
+			agent ` + big + `,
+			db_schemas ` + big + `
 		)`,
 		`CREATE TABLE IF NOT EXISTS shares (
 			token ` + pk + ` PRIMARY KEY,
@@ -139,6 +140,52 @@ func (d *DB) initSchema() error {
 		if _, err := d.db.Exec(s); err != nil {
 			return fmt.Errorf("建表失败: %w", err)
 		}
+	}
+	// 旧库兼容：CREATE IF NOT EXISTS 不会给已存在的 user_prefs 表补新列，
+	// 建表后探测补列（列已存在时跳过）。
+	return d.migrateAlter()
+}
+
+// migrateAlter 旧库补列：建表后探测 user_prefs 是否缺 db_schemas 列，缺则 ALTER。
+// 列已存在（新库）时直接返回 nil。
+func (d *DB) migrateAlter() error {
+	hasColumn := false
+	if d.driver == "sqlite" {
+		rows, err := d.db.Query(`PRAGMA table_info(user_prefs)`)
+		if err == nil {
+			for rows.Next() {
+				var cid int
+				var name, ctype string
+				var notNull int
+				var dfltValue interface{}
+				var pk int
+				if rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk) == nil && name == "db_schemas" {
+					hasColumn = true
+					break
+				}
+			}
+			_ = rows.Close()
+			if err := rows.Err(); err != nil {
+				return nil // 探测失败：跳过迁移
+			}
+		}
+	} else {
+		rows, err := d.db.Query(`SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user_prefs' AND COLUMN_NAME='db_schemas'`)
+		if err == nil {
+			hasColumn = rows.Next()
+			_ = rows.Close()
+		}
+	}
+	if hasColumn {
+		return nil
+	}
+	alterBig := "MEDIUMTEXT"
+	if d.driver == "sqlite" {
+		alterBig = "TEXT"
+	}
+	if _, err := d.db.Exec(`ALTER TABLE user_prefs ADD COLUMN db_schemas ` + alterBig); err != nil {
+		// 并发或已存在：忽略（不影响功能）
+		return nil
 	}
 	return nil
 }

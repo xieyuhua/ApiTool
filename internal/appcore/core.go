@@ -59,6 +59,14 @@ func New(ds DataStore, b bus.Bus, info HostInfo) (*App, error) {
 func (a *App) lock() { a.dataMu <- struct{}{} }
 func (a *App) unlock() { <-a.dataMu }
 
+// SetDataStore 运行时切换存储（桌面端登录/登出服务端时调用）。
+// 内部串行化，等待在途读写完成后替换。
+func (a *App) SetDataStore(ds DataStore) {
+	a.lock()
+	defer a.unlock()
+	a.data = ds
+}
+
 // ---- agent.Host 实现 ----
 
 // Store 返回存储句柄（agent.Host 要求）。

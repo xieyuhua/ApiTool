@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -163,11 +164,10 @@ func (d *DB) RevokeProject(projectID, teamID string) error {
 
 // ---- user_prefs ----
 
-// SavePrefs 保存用户偏好（四个 JSON 列，空串表示不变）。
-func (d *DB) SavePrefs(userID, settings, plugins, clipboard, agent string) error {
-	// 先确保行存在
-	if _, err := d.db.Exec(`INSERT INTO user_prefs (user_id) VALUES (?)`, userID); err != nil && d.driver == "mysql" {
-		// MySQL：主键冲突时忽略
+// SavePrefs 保存用户偏好（JSON 列，空串表示不变）。
+func (d *DB) SavePrefs(userID, settings, plugins, clipboard, agent, dbSchemas string) error {
+	// 先确保行存在（重复插入报错忽略：双方言 INSERT OR IGNORE 的简单写法）
+	if _, err := d.db.Exec(`INSERT INTO user_prefs (user_id) VALUES (?)`, userID); err != nil {
 		if !isDup(err) {
 			return err
 		}
@@ -192,22 +192,32 @@ func (d *DB) SavePrefs(userID, settings, plugins, clipboard, agent string) error
 			return err
 		}
 	}
+	if dbSchemas != "" {
+		if _, err := d.db.Exec(`UPDATE user_prefs SET db_schemas=? WHERE user_id=?`, dbSchemas, userID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
+// isDup 判断是否主键/唯一键冲突（SQLite "UNIQUE"，MySQL Error 1062）。
 func isDup(err error) bool {
-	return err != nil && (errors.Is(err, sql.ErrNoRows) == false) && (err.Error() != "")
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE") || strings.Contains(msg, "1062") || strings.Contains(msg, "Duplicate entry")
 }
 
-// Prefs 读取用户偏好，返回（settings, plugins, clipboard, agent）四段 JSON。
-func (d *DB) Prefs(userID string) (settings, plugins, clipboard, agent string, err error) {
-	row := d.db.QueryRow(`SELECT settings, plugins, clipboard, agent FROM user_prefs WHERE user_id=?`, userID)
-	var s, p, c, a sql.NullString
-	err = row.Scan(&s, &p, &c, &a)
+// Prefs 读取用户偏好，返回（settings, plugins, clipboard, agent, dbSchemas）JSON 段。
+func (d *DB) Prefs(userID string) (settings, plugins, clipboard, agent, dbSchemas string, err error) {
+	row := d.db.QueryRow(`SELECT settings, plugins, clipboard, agent, db_schemas FROM user_prefs WHERE user_id=?`, userID)
+	var s, p, c, a, dsc sql.NullString
+	err = row.Scan(&s, &p, &c, &a, &dsc)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", "", "", nil
+		return "", "", "", "", "", nil
 	}
-	return s.String, p.String, c.String, a.String, err
+	return s.String, p.String, c.String, a.String, dsc.String, err
 }
 
 // ---- shares ----

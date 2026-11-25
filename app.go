@@ -10,6 +10,7 @@ import (
 	"apitool/internal/platform"
 	"apitool/internal/share"
 	"apitool/internal/sniff"
+	"apitool/internal/serverclient"
 	"apitool/internal/store"
 	"apitool/internal/stress"
 	syncsrv "apitool/internal/sync"
@@ -49,7 +50,9 @@ type App struct {
 	*appcore.App // 业务核心：数据/文档/测试/插件/Agent 等全部导出方法
 
 	ctx            context.Context
-	store          *store.Store // 本地存储（托盘/剪贴板/抓包等桌面功能落盘用）
+	store          *store.Store             // 本地存储（托盘/剪贴板/抓包等桌面功能落盘用）
+	dual           *serverclient.DualStore  // 双模式存储（未登录=本地；登录=服务端+写穿镜像）
+	srvClient      *serverclient.Client     // 服务端客户端
 	dataFile       string
 	syncDir        string
 	sniffMgr       *sniff.Manager // MITM 抓包管理器（桌面专属）
@@ -80,9 +83,21 @@ func (a *App) startup(wailsApp *application.App) {
 	a.dataFile = filepath.Join(dataDir, "data.json")
 	a.syncDir = filepath.Join(dataDir, "syncserver")
 	a.store = store.New(a.dataFile, AppVersion, DefaultUpdateURL)
-	// 初始化业务核心（本地存储 + wailsrt 总线），Wails 绑定经方法提升生效
+	// 双模式存储：未登录直通本地；登录后经服务端 + 本地写穿镜像。
+	// 凭据文件位于数据目录（随应用迁移），启动时自动恢复会话。
+	a.srvClient = serverclient.New("")
+	a.dual = serverclient.NewDualStore(a.store, a.srvClient)
+	a.srvClient.SetOnChange(func(userID, username string) {
+		a.Emit("apitool:server-auth", map[string]interface{}{
+			"loggedIn": username != "", "userID": userID, "username": username,
+		})
+	})
+	if a.srvClient.RestoreCredentials(filepath.Join(dataDir, "server_session.json")) {
+		fmt.Printf("已恢复服务端会话：%s@%s\n", a.srvClient.Username(), a.srvClient.BaseURL())
+	}
+	// 初始化业务核心（双模式存储 + wailsrt 总线），Wails 绑定经方法提升生效
 	{
-		core, err := appcore.New(a.store, wailsrt.RuntimeImpl, appcore.HostInfo{Version: AppVersion})
+		core, err := appcore.New(a.dual, wailsrt.RuntimeImpl, appcore.HostInfo{Version: AppVersion})
 		if err != nil {
 			fmt.Printf("初始化业务核心失败: %v\n", err)
 			return
@@ -184,26 +199,26 @@ func (a *App) OpenInBrowser(url string) {
 
 // ExportDoc 导出文档（转发到 doc 包）
 func (a *App) ExportDoc(dirID string, apiID string, format string) (string, error) {
-	return doc.ExportDoc(a.ctx, a.store, dirID, apiID, format)
+	return doc.ExportDoc(a.ctx, a.dual, dirID, apiID, format)
 }
 
 // PreviewDocWatermark 生成带水印的文档 HTML 并用浏览器打开，供导出前核对水印效果
 func (a *App) PreviewDocWatermark(dirID string, apiID string) (string, error) {
-	return doc.PreviewWatermark(a.ctx, a.store, dirID, apiID)
+	return doc.PreviewWatermark(a.ctx, a.dual, dirID, apiID)
 }
 
 func (a *App) ImportDoc() (string, error) {
-	return doc.ImportDoc(a.ctx, a.store, "")
+	return doc.ImportDoc(a.ctx, a.dual, "")
 }
 
 // ShareDoc 生成 HTML 文档并用浏览器打开（转发到 doc 包）
 func (a *App) ShareDoc(dirID string, apiID string) (string, error) {
-	return doc.ShareDoc(a.ctx, a.store, dirID, apiID)
+	return doc.ShareDoc(a.ctx, a.dual, dirID, apiID)
 }
 
 // CopyDocMarkdown 复制 Markdown 文档到剪贴板（转发到 doc 包）
 func (a *App) CopyDocMarkdown(dirID string, apiID string) error {
-	return doc.CopyDocMarkdown(a.ctx, a.store, dirID, apiID)
+	return doc.CopyDocMarkdown(a.ctx, a.dual, dirID, apiID)
 }
 
 // UpdateInfo 升级服务返回的版本信息
@@ -721,12 +736,12 @@ func (a *App) ClearCapturedRequests() { capture.Clear() }
 
 // GenerateApiFromCaptured 将选中的捕获请求转换为接口定义并导入当前项目。
 func (a *App) GenerateApiFromCaptured(ids []string, projectID, dirID string) (int, error) {
-	return capture.GenerateApi(ids, projectID, dirID, a.store)
+	return capture.GenerateApi(ids, projectID, dirID, a.dual)
 }
 
 // ImportCapturedAsTestCases 将选中的捕获请求转换为测试用例，导入当前项目。
 func (a *App) ImportCapturedAsTestCases(ids []string) (int, error) {
-	return capture.ImportTestCases(ids, a.store)
+	return capture.ImportTestCases(ids, a.dual)
 }
 
 // ExportCapturedOpenAPI 将选中的捕获请求生成 OpenAPI 文档并弹出保存对话框。
@@ -757,22 +772,22 @@ func (a *App) ShareInfo() share.ShareServerInfo { return share.Info() }
 
 // BuildShareDoc 构建文档内容（不启动服务），供前端内嵌预览。
 func (a *App) BuildShareDoc(scope, projectID, dirID, format string) (string, error) {
-	return share.BuildDoc(a.store, scope, projectID, dirID, format)
+	return share.BuildDoc(a.dual, scope, projectID, dirID, format)
 }
 
 // RefreshShareDoc 重新生成并刷新当前分享文档内容。
 func (a *App) RefreshShareDoc(scope, projectID, dirID string) error {
-	return share.Refresh(a.store, scope, projectID, dirID)
+	return share.Refresh(a.dual, scope, projectID, dirID)
 }
 
 // OpenShareDoc 按 openType 内嵌预览 / 复制链接 / 打开分享文档。
 func (a *App) OpenShareDoc(scope, projectID, dirID, openType, format string) (string, error) {
-	return share.OpenDoc(a, a.store, scope, projectID, dirID, openType, format)
+	return share.OpenDoc(a, a.dual, scope, projectID, dirID, openType, format)
 }
 
 // ShareTestReport 分享测试报告（HTML 默认打开分享服务）。
 func (a *App) ShareTestReport(reportJSON, format, openType string) (string, error) {
-	return share.TestReport(a, a.store, reportJSON, format, openType)
+	return share.TestReport(a, a.dual, reportJSON, format, openType)
 }
 
 // ----------------------------------------------------------------------------
@@ -781,17 +796,17 @@ func (a *App) ShareTestReport(reportJSON, format, openType string) (string, erro
 
 // BuildSharedHTML 构建指定目录/接口的完整 HTML 网页源码（前端"网页代码"页）。
 func (a *App) BuildSharedHTML(dirID, apiID string) (string, error) {
-	return share.BuildHTMLByAPI(a.store, dirID, apiID)
+	return share.BuildHTMLByAPI(a.dual, dirID, apiID)
 }
 
 // BuildSharedTitle 返回指定目录/接口的分享文档标题。
 func (a *App) BuildSharedTitle(dirID, apiID string) (string, error) {
-	return share.BuildTitleByAPI(a.store, dirID, apiID)
+	return share.BuildTitleByAPI(a.dual, dirID, apiID)
 }
 
 // CreateShareLink 创建一条本地分享链接（应用退出后失效），返回可访问 URL。
 func (a *App) CreateShareLink(dirID, apiID, password string, expireMinutes int) (string, error) {
-	_, link, err := share.CreateShare(a.store, dirID, apiID, password, expireMinutes)
+	_, link, err := share.CreateShare(a.dual, dirID, apiID, password, expireMinutes)
 	return link, err
 }
 
@@ -811,7 +826,7 @@ func (a *App) StopShare(token string) error {
 
 // RunStressTest 对给定目标发起并发压测，返回含延迟分布与吞吐的报告。
 func (a *App) RunStressTest(targets []stress.StressTarget, config stress.StressConfig) (stress.StressReport, error) {
-	return stress.Run(targets, config, a.store, a)
+	return stress.Run(targets, config, a.dual, a)
 }
 
 // ExportStressReport 将压测报告（JSON）导出为 Markdown / HTML 文件，返回保存路径。

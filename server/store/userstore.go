@@ -26,6 +26,8 @@ type UserStore struct {
 	userID string
 	// dataDir 用户数据根目录（导出文件等），由服务端配置注入。
 	dataDir string
+	// cachedDBAnalysis 最近一次读/写的 DB 分析 JSON（增量保存）。
+	cachedDBAnalysis string
 }
 
 // NewUserStore 创建用户存储视图。
@@ -63,7 +65,7 @@ func (u *UserStore) GetData() model.AppData {
 			data.Projects = append(data.Projects, p)
 		}
 	}
-	settingsJSON, pluginsJSON, clipJSON, agentJSON, err := u.db.Prefs(u.userID)
+	settingsJSON, pluginsJSON, clipJSON, agentJSON, dbSchemasJSON, err := u.db.Prefs(u.userID)
 	if err == nil {
 		if settingsJSON != "" {
 			_ = json.Unmarshal([]byte(settingsJSON), &data.Settings)
@@ -76,6 +78,9 @@ func (u *UserStore) GetData() model.AppData {
 		}
 		if agentJSON != "" {
 			data.Agent = agentJSON
+		}
+		if dbSchemasJSON != "" {
+			u.cachedDBAnalysis = dbSchemasJSON
 		}
 	}
 	// 默认值兜底（与 internal/store 的兼容逻辑一致）。
@@ -99,7 +104,7 @@ func (u *UserStore) SaveData(data model.AppData) error {
 	settingsJSON, _ := json.Marshal(data.Settings)
 	pluginsJSON, _ := json.Marshal(data.Plugins)
 	clipJSON, _ := json.Marshal(data.Clipboard)
-	if err := u.db.SavePrefs(u.userID, string(settingsJSON), string(pluginsJSON), string(clipJSON), data.Agent); err != nil {
+	if err := u.db.SavePrefs(u.userID, string(settingsJSON), string(pluginsJSON), string(clipJSON), data.Agent, ""); err != nil {
 		return fmt.Errorf("保存用户设置失败: %w", err)
 	}
 	// 2) 项目 → 逐行 upsert（按当前行版本 +1 覆盖）
@@ -132,19 +137,21 @@ func (u *UserStore) SaveData(data model.AppData) error {
 
 // ---- 独立域转发（实现 storeapi.Store 其余方法）----
 
-func (u *UserStore) SaveAgentRaw(raw string) error { return u.db.SavePrefs(u.userID, "", "", "", raw) }
+func (u *UserStore) SaveAgentRaw(raw string) error {
+	return u.db.SavePrefs(u.userID, "", "", "", raw, "")
+}
 func (u *UserStore) LoadAgentRaw() string {
-	_, _, _, agent, err := u.db.Prefs(u.userID)
+	_, _, _, agent, _, err := u.db.Prefs(u.userID)
 	if err != nil {
 		return ""
 	}
 	return agent
 }
 func (u *UserStore) SaveClipboardRaw(raw string) error {
-	return u.db.SavePrefs(u.userID, "", "", raw, "")
+	return u.db.SavePrefs(u.userID, "", "", raw, "", "")
 }
 func (u *UserStore) LoadClipboardRaw() string {
-	_, _, clip, _, err := u.db.Prefs(u.userID)
+	_, _, clip, _, _, err := u.db.Prefs(u.userID)
 	if err != nil {
 		return ""
 	}
@@ -158,9 +165,30 @@ func (u *UserStore) SaveSkills(skills []db.AgentSkill) error {
 // 编译期确认实现完整接口。
 var _ storeapi.Store = (*UserStore)(nil)
 
-// LoadDBAnalysis / SaveDBAnalysis：数据库连接分析（服务端按用户存 user_prefs.agent，
-// 由 agent.Manager 自身的读写路径管理；这里返回空快照以满足接口）。
+// LoadDBAnalysis / SaveDBAnalysis：数据库连接分析（user_prefs.db_schemas JSON 列）。
 func (u *UserStore) LoadDBAnalysis() *db.DBAnalysisSnapshot {
-	return &db.DBAnalysisSnapshot{Schemas: map[string]string{}, Semantics: map[string]string{}, LastDB: map[string]string{}}
+	if u.cachedDBAnalysis == "" {
+		_, _, _, _, dsc, err := u.db.Prefs(u.userID)
+		if err == nil {
+			u.cachedDBAnalysis = dsc
+		}
+	}
+	if u.cachedDBAnalysis == "" {
+		return &db.DBAnalysisSnapshot{Schemas: map[string]string{}, Semantics: map[string]string{}, LastDB: map[string]string{}}
+	}
+	var snap db.DBAnalysisSnapshot
+	if json.Unmarshal([]byte(u.cachedDBAnalysis), &snap) != nil {
+		return &db.DBAnalysisSnapshot{Schemas: map[string]string{}, Semantics: map[string]string{}, LastDB: map[string]string{}}
+	}
+	return &snap
 }
-func (u *UserStore) SaveDBAnalysis(snap *db.DBAnalysisSnapshot) error { return nil }
+
+// SaveDBAnalysis 序列化快照并增量写 user_prefs.db_schemas。
+func (u *UserStore) SaveDBAnalysis(snap *db.DBAnalysisSnapshot) error {
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return err
+	}
+	u.cachedDBAnalysis = string(b)
+	return u.db.SavePrefs(u.userID, "", "", "", "", string(b))
+}
