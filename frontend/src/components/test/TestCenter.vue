@@ -6,7 +6,7 @@ import {
   GenerateReportSummary, CopyToClipboard,
   GetCapturedRequests, ImportCapturedAsTestCases, ImportApisAsTestCases,
 } from '../../../wailsjs/go/main/App'
-import { exportTestReport } from '../../download'
+import { exportTestReport, isDesktop } from '../../download'
 import {
   saveNow, currentProject, uid, projectApis,
   projectTestCases, projectTestPlans, projectReports,
@@ -145,9 +145,9 @@ function flushGenResult() {
 watch(genJobId, (now, old) => {
   if (old && !now) flushGenResult()
 })
-// 进入「用例导入」页时自动刷新捕获列表
+// 进入「用例导入」页时自动刷新捕获列表（捕获是桌面端能力，网页端无该方法）
 watch(tab, (now) => {
-  if (now === 'import') refreshCaptured()
+  if (now === 'import' && isDesktop()) refreshCaptured()
 })
 onMounted(flushGenResult)
 
@@ -602,7 +602,8 @@ async function runPressure() {
     <!-- ========== 用例导入 ========== -->
     <div v-show="tab === 'import'" class="tc-page">
       <el-tabs>
-        <el-tab-pane label="从浏览器捕获导入">
+        <!-- 捕获记录属于本机桌面进程，网页端不显示该页签 -->
+        <el-tab-pane v-if="isDesktop()" label="从浏览器捕获导入">
           <div class="toolbar">
             <el-button :loading="importing" @click="importSelectedCap" :disabled="!capSelected.length">导入选中（{{ capSelected.length }}）</el-button>
             <el-button link type="primary" @click="refreshCaptured">刷新捕获列表</el-button>
