@@ -52,6 +52,18 @@ const localMethods = {
   CreateShareLink: (dirID, apiID, password, expireMinutes) => createShare(dirID, apiID, password, expireMinutes),
   ListShares: () => listShares(),
   StopShare: (token) => stopShare(token),
+  // 预览分享文档：服务端渲染 HTML，新标签页以 blob 打开（桌面端写临时文件）
+  ShareDoc: async (dirID, apiID) => {
+    const html = await callRPC('ShareDocHTML', [dirID || '', apiID || ''])
+    const url = URL.createObjectURL(new Blob([html || ''], { type: 'text/html;charset=utf-8' }))
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+    return '分享文档预览'
+  },
+  // 内置同步服务作为分享后端：网页端没有该进程，返回未运行让对话框走服务端分享
+  SyncShareBackend: () => Promise.resolve({ url: '', token: '', running: false, publicUrl: '' }),
+  // 「按最新模板刷新本地链接」是桌面端内存分享的概念；网页端链接落库为发布时快照
+  RefreshShares: () => Promise.resolve(0),
   // 打开链接 / 预览：浏览器新标签页
   OpenInBrowser: (url) => { window.open(url, '_blank', 'noopener'); return Promise.resolve(null) },
   // 导出水印预览：服务端渲染 HTML，前端在新标签页以 blob 打开
@@ -305,15 +317,26 @@ function installRuntimeBridge() {
 }
 
 function writeClipboard(text) {
-  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text)
+  // 优先异步剪贴板 API；权限被拒（非用户手势触发/策略限制）时回退 execCommand，
+  // 否则「复制」按钮在部分浏览器/无 HTTPS 环境下会直接报错。
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).catch(() => legacyCopy(text))
+  }
+  return legacyCopy(text)
+}
+
+function legacyCopy(text) {
   return new Promise((resolve, reject) => {
     const ta = document.createElement('textarea')
     ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
     document.body.appendChild(ta)
     ta.select()
-    const ok = document.execCommand('copy')
+    let ok = false
+    try { ok = document.execCommand('copy') } catch (e) { ok = false }
     document.body.removeChild(ta)
-    ok ? resolve() : reject(new Error('复制失败'))
+    ok ? resolve() : reject(new Error('复制失败：浏览器不允许写入剪贴板'))
   })
 }
 
