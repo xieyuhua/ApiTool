@@ -165,7 +165,7 @@ go test ./internal/... ./server/... ./core/...
 
 | 层 | 位置 | 说明 |
 |---|---|---|
-| 业务核心 | `core/agent/` | 自 `internal/agent` 复制的**去桌面化**版本：`Host` 只保留 `Store/ReadData`，事件抽象为 `Emitter`（仅 `Emit`），无 `wailsrt`/`bus`/`plugins` 依赖 |
+| 业务核心 | `core/agent/` | 自 `internal/agent` 复制的**去桌面化**版本，分四层：基础层（`types/data/config/session/logs/mcp`）、`tools/`（内置工具+DB查询+表格导出）、`engine/`（对话编排+LLM）、`io/`（会话导出）。详见 [`core/agent/LAYERS.md`](./core/agent/LAYERS.md) |
 | 独立服务 | `agent/` | HTTP API（`/api/agent/*`）、SSE（`/api/agent/events`）、单令牌鉴权、内嵌 UI |
 | 入口 | `agent/cmd/agentd/main.go` | 唯一 `main`，构建产物 `dist/agentd-<os>-<arch>` |
 | 前端桥 | `frontend/src/agentStandaloneBridge.js` | 把 `window.go.main.App.*` → REST、`window.runtime.EventsOn*` → SSE；由服务端注入的 `__AGENT_STANDALONE__` 触发 |

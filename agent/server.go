@@ -11,6 +11,9 @@ import (
 	"time"
 
 	agentcore "apitool/core/agent"
+	agentengine "apitool/core/agent/engine"
+	agentio "apitool/core/agent/io"
+	agenttools "apitool/core/agent/tools"
 )
 
 // Server 独立 Agent 服务。
@@ -19,6 +22,8 @@ type Server struct {
 	rt      *Runtime
 	hub     *hub
 	core    *agentcore.Manager
+	engine  *agentengine.Engine
+	io      *agentio.Exporter
 	version string
 	mux     *http.ServeMux
 }
@@ -30,11 +35,17 @@ func New(cfg *Config, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 组合根：基础层（core）提供数据能力，tools 提供工具执行，
+	// engine 编排对话，io 负责导出。四层单向依赖，装配只发生在这里。
+	core := agentcore.NewManager(rt, rt)
+	tb := agenttools.New(core)
 	s := &Server{
 		cfg:     cfg,
 		rt:      rt,
 		hub:     h,
-		core:    agentcore.NewManager(rt, rt),
+		core:    core,
+		engine:  agentengine.New(core, tb),
+		io:      agentio.New(core),
 		version: version,
 		mux:     http.NewServeMux(),
 	}

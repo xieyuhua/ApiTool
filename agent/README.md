@@ -7,6 +7,9 @@
 > （来源提交：`4bd9bdd`）并去掉了桌面依赖（`wailsrt` 文件对话框、
 > `internal/plugins` 插件管理、`bus.Bus` 全量接口）。
 > 两份代码**各自演进**：这里修复的问题不会自动回流到 `internal/agent`。
+>
+> **分层结构见 [`core/agent/LAYERS.md`](../core/agent/LAYERS.md)**（四层职责、依赖方向、
+> 新增能力落点、表结构同步的设计说明）。
 
 ---
 

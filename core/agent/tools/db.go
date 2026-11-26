@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"crypto/tls"
@@ -365,7 +365,7 @@ func (m *mysqlSession) query(q string) (*DBRow, error) { return genericQuery(m.d
 func (m *mysqlSession) exec(q string) (int64, error)   { return genericExec(m.db, q) }
 func (p *pgSession) query(q string) (*DBRow, error)    { return genericQuery(p.db, q) }
 func (p *pgSession) exec(q string) (int64, error)      { return genericExec(p.db, q) }
-func (o *oraSession) query(q string) (*DBRow, error)    { return genericQuery(o.db, q) }
+func (o *oraSession) query(q string) (*DBRow, error)   { return genericQuery(o.db, q) }
 func (o *oraSession) exec(q string) (int64, error)     { return genericExec(o.db, q) }
 
 // switchSchema 把当前库/schema 切换到 database 指定的值。

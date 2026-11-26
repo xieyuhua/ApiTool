@@ -1,4 +1,4 @@
-package agent
+package io
 
 // 会话导出：把某个会话（含思考过程与工具调用明细）导出为自包含 HTML 或 PDF。
 //
@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"apitool/core/agent"
 	"apitool/internal/pdfprint"
 )
 
@@ -118,8 +119,8 @@ type ExportMeta struct {
 
 // BuildSessionHTML 生成指定会话（sessionID 为空时取当前会话）的 HTML 文档文本，不落盘。
 // 供前端预览/调试使用，导出请调用 ExportAgentSession。
-func (m *Manager) BuildSessionHTML(sessionID string) (string, error) {
-	s, meta, err := m.sessionExportContext(sessionID)
+func (e *Exporter) BuildSessionHTML(sessionID string) (string, error) {
+	s, meta, err := e.sessionExportContext(sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -129,8 +130,8 @@ func (m *Manager) BuildSessionHTML(sessionID string) (string, error) {
 // ExportAgentSession 把会话导出为文件内容（format: html / pdf）。
 // 与桌面端不同，独立服务无文件对话框：返回建议文件名与字节，由 HTTP 层
 // 以附件形式下发（见 agent/api_export.go）。
-func (m *Manager) ExportAgentSession(sessionID, format string) (string, []byte, error) {
-	s, meta, err := m.sessionExportContext(sessionID)
+func (e *Exporter) ExportSession(sessionID, format string) (string, []byte, error) {
+	s, meta, err := e.sessionExportContext(sessionID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -170,11 +171,11 @@ func htmlToPDFBytes(html string) ([]byte, error) {
 }
 
 // sessionExportContext 读取待导出的会话与其元信息。
-func (m *Manager) sessionExportContext(sessionID string) (AgentSession, ExportMeta, error) {
-	d := m.readAgentData()
-	var s *AgentSession
+func (e *Exporter) sessionExportContext(sessionID string) (agent.AgentSession, ExportMeta, error) {
+	d := e.r.ReadAgentData()
+	var s *agent.AgentSession
 	if sessionID == "" {
-		s = d.activeSession()
+		s = d.ActiveSessionPtr()
 	} else {
 		for i := range d.Sessions {
 			if d.Sessions[i].ID == sessionID {
@@ -184,7 +185,7 @@ func (m *Manager) sessionExportContext(sessionID string) (AgentSession, ExportMe
 		}
 	}
 	if s == nil {
-		return AgentSession{}, ExportMeta{}, fmt.Errorf("会话不存在")
+		return agent.AgentSession{}, ExportMeta{}, fmt.Errorf("会话不存在")
 	}
 	meta := ExportMeta{
 		Title:      s.Title,
@@ -194,7 +195,7 @@ func (m *Manager) sessionExportContext(sessionID string) (AgentSession, ExportMe
 	if meta.Title == "" {
 		meta.Title = "未命名会话"
 	}
-	if model := strings.TrimSpace(m.host.ReadData().Settings.AIModel); model != "" {
+	if model := strings.TrimSpace(e.r.AIModel()); model != "" {
 		meta.Model = model
 	}
 	for _, u := range d.Users {
@@ -207,7 +208,7 @@ func (m *Manager) sessionExportContext(sessionID string) (AgentSession, ExportMe
 }
 
 // buildSessionHTML 组装完整、自包含的 HTML 文档。
-func buildSessionHTML(sess AgentSession, meta ExportMeta) string {
+func buildSessionHTML(sess agent.AgentSession, meta ExportMeta) string {
 	var sb strings.Builder
 	sb.WriteString(`<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -243,7 +244,7 @@ func buildSessionHTML(sess AgentSession, meta ExportMeta) string {
 }
 
 // sessionMetaLine 生成头部元信息行。
-func sessionMetaLine(sess AgentSession, meta ExportMeta) string {
+func sessionMetaLine(sess agent.AgentSession, meta ExportMeta) string {
 	var parts []string
 	if c := fmtTime(sess.CreatedAt); c != "" {
 		parts = append(parts, "创建于 "+c)
@@ -274,7 +275,7 @@ func statCard(n, label string) string {
 }
 
 // messageHTML 渲染单条消息：思考过程 + 工具调用明细 + 正文。
-func messageHTML(msg AgentMsg) string {
+func messageHTML(msg agent.AgentMsg) string {
 	isUser := msg.Role == "user"
 	who, avatar := "AI 助手", "ai"
 	if isUser {
@@ -302,7 +303,7 @@ func messageHTML(msg AgentMsg) string {
 }
 
 // thinkingHTML 渲染思考过程与工具/skill 调用明细（默认展开，保证 PDF 打印不丢内容）。
-func thinkingHTML(thinking string, steps []AgentStep) string {
+func thinkingHTML(thinking string, steps []agent.AgentStep) string {
 	var sb strings.Builder
 	tools := 0
 	for _, s := range steps {
@@ -339,7 +340,7 @@ func toolCountText(n int) string {
 }
 
 // stepHTML 渲染单个工具/skill 调用卡片。
-func stepHTML(s AgentStep) string {
+func stepHTML(s agent.AgentStep) string {
 	icon := map[string]string{"tool": "🔧", "skill": "✨", "plan": "📋"}[s.Type]
 	if icon == "" {
 		icon = "🔧"

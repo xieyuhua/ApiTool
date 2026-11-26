@@ -11,7 +11,7 @@ import (
 
 // handleSessionHTML 返回会话 HTML 源码（供前端预览）。
 func (s *Server) handleSessionHTML(w http.ResponseWriter, r *http.Request) {
-	html, err := s.core.BuildSessionHTML(r.PathValue("id"))
+	html, err := s.io.BuildSessionHTML(r.PathValue("id"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -25,7 +25,7 @@ func (s *Server) handleSessionExport(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "html"
 	}
-	name, data, err := s.core.ExportAgentSession(r.PathValue("id"), format)
+	name, data, err := s.io.ExportSession(r.PathValue("id"), format)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

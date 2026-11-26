@@ -1,6 +1,7 @@
-package agent
+package tools
 
 import (
+	"apitool/core/agent"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,14 +23,14 @@ import (
 const builtinServerID = "builtin"
 
 // collectBuiltinTools 根据开关收集当前启用的内置工具定义。
-func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPTool {
-	mk := func(name, d string, props map[string]interface{}, required []string) MCPTool {
+func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []agent.MCPTool {
+	mk := func(name, d string, props map[string]interface{}, required []string) agent.MCPTool {
 		schema := map[string]interface{}{"type": "object", "properties": props}
 		if len(required) > 0 {
 			schema["required"] = required
 		}
 		b, _ := json.Marshal(schema)
-		return MCPTool{Name: name, Description: d, Server: builtinServerID, ServerName: "内置", InputSchema: b}
+		return agent.MCPTool{Name: name, Description: d, Server: builtinServerID, ServerName: "内置", InputSchema: b}
 	}
 	// 各工具默认参数 schema（与名称一一对应）
 	schemas := map[string]struct {
@@ -77,12 +78,12 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 			"command": map[string]interface{}{"type": "string", "description": "要执行的 shell 命令字符串，例如 \"ls -la\" 或 \"git status\""},
 		}, []string{"command"}},
 		"db_schema": {map[string]interface{}{
-			"connId": map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接（如 mysql-1 / pg-1 / ora-1）。可省略，省略时自动使用当前激活的分析连接"},
+			"connId":   map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接（如 mysql-1 / pg-1 / ora-1）。可省略，省略时自动使用当前激活的分析连接"},
 			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）。可省略，省略时自动使用当前激活连接 / 第一个 db 连接对应的默认库或已同步库"},
 			"tables":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "要同步的表名列表；留空则同步该库全部表。建议仅在需要某几张表时才指定，以减少返回长度"},
 		}, []string{"connId", "database"}},
 		"db_query": {map[string]interface{}{
-			"connId":  map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接。可省略，省略时自动使用当前激活的分析连接"},
+			"connId":   map[string]interface{}{"type": "string", "description": "数据库连接 ID；来自「插件 / 数据库连接」中已配置的数据库连接。可省略，省略时自动使用当前激活的分析连接"},
 			"database": map[string]interface{}{"type": "string", "description": "库名 / 服务名（Oracle 为服务名或 SID）。可省略，省略时自动补全"},
 			"sql":      map[string]interface{}{"type": "string", "description": "要执行的只读查询语句，必须以 SELECT 或 WITH 开头，禁止 INSERT/UPDATE/DELETE/DDL 等任何写操作；尽量使用明确的列名与 LIMIT，避免 SELECT * 与全表扫描"},
 			"limit":    map[string]interface{}{"type": "number", "description": "返回行数上限，默认 200；如结果过大请适当调小或补充 WHERE 条件"},
@@ -94,8 +95,8 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 			"dir":    map[string]interface{}{"type": "string", "description": "可选，导出目录绝对路径。省略则存到应用数据目录下的 exports 子目录。"},
 		}, []string{"data"}},
 	}
-	var out []MCPTool
-	for _, t := range BuiltinToolMeta() {
+	var out []agent.MCPTool
+	for _, t := range agent.BuiltinToolMeta() {
 		if !enabled[t.Name] {
 			continue
 		}
@@ -110,7 +111,7 @@ func collectBuiltinTools(enabled map[string]bool, desc map[string]string) []MCPT
 }
 
 // execBuiltinTool 本地执行内置工具。fileLimit 为文件读取最大字符数。
-func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, fileLimit int) (string, error) {
+func (t *Toolbox) execBuiltinTool(name string, args map[string]interface{}, fileLimit int) (string, error) {
 	switch name {
 	case "read_file":
 		return builtinReadFile(args, fileLimit)
@@ -137,11 +138,11 @@ func (m *Manager) execBuiltinTool(name string, args map[string]interface{}, file
 	case "run_command":
 		return builtinRunCommand(args)
 	case "db_schema":
-		return builtinDBSchema(m, args)
+		return builtinDBSchema(t, args)
 	case "db_query":
-		return builtinDBQuery(m, args)
+		return builtinDBQuery(t, args)
 	case "export_table":
-		return builtinExportTable(m, args)
+		return builtinExportTable(t, args)
 	default:
 		return "", fmt.Errorf("未知内置工具: %s", name)
 	}
@@ -154,7 +155,7 @@ const ExportDirName = "exports"
 // builtinExportTable 把表格数据导出为文件。
 // data 支持 Markdown 表格、CSV 文本、JSON 二维/对象数组，
 // format 支持 xlsx（默认）/ csv / html / md。
-func builtinExportTable(m *Manager, args map[string]interface{}) (string, error) {
+func builtinExportTable(t *Toolbox, args map[string]interface{}) (string, error) {
 	title, _ := args["title"].(string)
 	format, _ := args["format"].(string)
 	dirArg, _ := args["dir"].(string)
@@ -175,8 +176,8 @@ func builtinExportTable(m *Manager, args map[string]interface{}) (string, error)
 	dir := strings.TrimSpace(dirArg)
 	if dir == "" {
 		base := ""
-		if m != nil && m.host != nil && m.host.Store() != nil {
-			base = m.host.Store().Dir()
+		if t != nil && t.ctx != nil {
+			base = t.ctx.StoreDir()
 		}
 		if base == "" {
 			base, _ = os.Getwd()
@@ -237,11 +238,11 @@ func tableDataArg(args map[string]interface{}) string {
 }
 
 // findDBConn 从应用数据中按 connId 找到 db 分类的连接配置
-func findDBConn(m *Manager, connID string) (model.PluginConn, error) {
-	if m == nil || m.host == nil {
+func findDBConn(t *Toolbox, connID string) (model.PluginConn, error) {
+	if t == nil || t.ctx == nil {
 		return model.PluginConn{}, fmt.Errorf("agent 未正确初始化")
 	}
-	for _, c := range m.host.ReadData().Plugins.Connections {
+	for _, c := range t.ctx.ReadData().Plugins.Connections {
 		if c.ID == connID {
 			if c.Category != "" && c.Category != "db" {
 				return model.PluginConn{}, fmt.Errorf("连接 %s 类型为 %s，不是数据库(db)连接", connID, c.Category)
@@ -283,13 +284,13 @@ func connLabel(c model.PluginConn) string {
 // 之所以不取「第一个」：连接顺序取决于插入顺序，多连接并存时「第一个」可能
 // 完全不是用户想要的那个（曾导致用户选中 MySQL 却实际连到 Oracle），
 // 静默挑一个会直接产生错误结果。宁可让模型明确指定。
-func resolveActiveDBConn(m *Manager) (connID, database string) {
-	cfg := m.LoadAgentData().Config
+func resolveActiveDBConn(t *Toolbox) (connID, database string) {
+	cfg := t.ctx.AgentConfig()
 	if cfg.ActiveDBConn != "" {
 		connID = cfg.ActiveDBConn
 	} else {
 		var dbConns []model.PluginConn
-		for _, c := range m.host.Store().GetData().Plugins.Connections {
+		for _, c := range t.ctx.ReadData().Plugins.Connections {
 			if c.Category == "db" {
 				dbConns = append(dbConns, c)
 			}
@@ -323,7 +324,7 @@ func resolveActiveDBConn(m *Manager) (connID, database string) {
 		}
 	}
 	if database == "" {
-		if c, err := findDBConn(m, connID); err == nil {
+		if c, err := findDBConn(t, connID); err == nil {
 			database = c.Database
 		}
 	}
@@ -331,7 +332,11 @@ func resolveActiveDBConn(m *Manager) (connID, database string) {
 }
 
 // syncedDBList 返回该连接下已同步过表结构的库列表，供错误提示告知用户可选哪些库。
-func syncedDBList(cfg AgentConfig, connID string) []string {
+//
+// 来源有两条：DBLastDB（用户上次在界面里选中的库）与 DBSchemas（实际同步过快照的库）。
+// 合并二者是因为「刚选库还没同步」时也应允许直接查询，否则用户会先被拒一次。
+// 结果去重且保留原始大小写（库名在部分数据库里大小写敏感）。
+func syncedDBList(cfg agent.AgentConfig, connID string) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(db string) {
@@ -364,21 +369,27 @@ func syncedDBList(cfg AgentConfig, connID string) []string {
 //   - MySQL/PG 的默认库也未必是用户实际要分析的那个库。
 //
 // 该列表同时用于提示词注入与错误提示，确保模型与用户看到的库是同一套。
-func (m *Manager) syncedDBsOfConn(connID string) []string {
-	if m == nil {
+func (t *Toolbox) syncedDBsOfConn(connID string) []string {
+	if t == nil {
 		return nil
 	}
-	cfg := m.LoadAgentData().Config
+	cfg := t.ctx.AgentConfig()
 	return syncedDBList(cfg, connID)
 }
 
-// dbSemantic 读取用户在「插件 / 数据库连接」中维护的字段/表语义。
+// dbSemantic 读取用户在「数据连接管理」中维护的字段/表语义。
+//
+// 与数据库自带列注释是两套并存的信息：
+//   - Comment（DBSyncedColumn.Comment）同步时从库里取回，通常为空或很简短；
+//   - 这里的语义由用户手写，承载业务口径（例如「状态：1 待审 2 通过」）。
+//
 // key = connId|database|table|column（全小写）；column 为空时查表级语义（key 不含 column 段）。
-func dbSemantic(m *Manager, connID, database, table, column string) string {
-	if m == nil {
+// 表级语义用于说明整张表的业务含义，字段级用于解释单个列，生成 SQL 时都会注入提示词。
+func dbSemantic(t *Toolbox, connID, database, table, column string) string {
+	if t == nil {
 		return ""
 	}
-	cfg := m.LoadAgentData().Config
+	cfg := t.ctx.AgentConfig()
 	sem := cfg.DBSemantics
 	if len(sem) == 0 {
 		return ""
@@ -405,12 +416,22 @@ func dbSchemaKey(connID, database, table string) string {
 
 // builtinDBSchema 返回用户在「插件 / 数据库连接」中同步配置的表结构（而非实时查库）。
 // 这样大模型只能基于你提供的表与字段来生成 SQL，避免引用未同步/不存在的表或字段。
-func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
+// builtinDBSchema 返回已同步的表结构（库/表/字段名/类型/可空/默认值/注释）。
+//
+// 只读本地快照，不连数据库 —— 这是刻意设计：
+//  1. 生产库往往不允许随时连；离线快照保证断网也能问答；
+//  2. 同步是用户显式动作，快照即「用户认可的结构范围」，模型不会看到意外出现的表；
+//  3. 结构里叠加了用户维护的表级/字段级语义（见 dbSemantic），
+//     把业务口径一并交给模型，它才能写出符合实际含义的 SQL。
+//
+// 因此本工具不返回「数据库里真实存在的全部表」，只返回已同步的那部分；
+// 模型应当严格基于返回的字段写 SQL，不得臆测未列出的表或列。
+func builtinDBSchema(t *Toolbox, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
 	database, _ := args["database"].(string)
 	if connID == "" || database == "" {
 		// 未显式指定时自动解析：优先激活连接，否则第一个 db 连接，并自动补全 database
-		ac, ad := resolveActiveDBConn(m)
+		ac, ad := resolveActiveDBConn(t)
 		if connID == "" {
 			connID = ac
 		}
@@ -422,10 +443,10 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("缺少 connId 或 database 参数（当前未配置任何数据库连接，请先在「插件 / 数据库连接」中添加一个 db 类型连接并同步表结构）")
 	}
 	// 校验连接是否存在（明确给出但不存在的 connId 直接报错，避免误导）
-	if _, cerr := findDBConn(m, connID); cerr != nil {
+	if _, cerr := findDBConn(t, connID); cerr != nil {
 		return "", cerr
 	}
-	cfg := m.LoadAgentData().Config
+	cfg := t.ctx.AgentConfig()
 	if len(cfg.DBSchemas) == 0 {
 		return "尚未同步任何表结构。请在「插件 / 数据库连接」中打开该连接、选择数据库并执行「同步表结构」后，再使用本工具。", nil
 	}
@@ -440,7 +461,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 	}
 	type selT struct {
 		key   string
-		table DBSyncedTable
+		table agent.DBSyncedTable
 	}
 	var picked []selT
 	if len(want) == 0 {
@@ -473,7 +494,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 		}
 		sb.WriteString("\n")
 		// 叠加用户在「插件 / 数据库连接」中维护的表级语义
-		if tsem := dbSemantic(m, connID, database, s.Table, ""); tsem != "" {
+		if tsem := dbSemantic(t, connID, database, s.Table, ""); tsem != "" {
 			sb.WriteString(fmt.Sprintf("> 表语义：%s\n\n", tsem))
 		}
 		if len(s.Columns) == 0 {
@@ -487,7 +508,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 					cmt = "—"
 				}
 				// 叠加用户在「插件 / 数据库连接」中维护的字段语义（优先于数据库自带注释）
-				if sem := dbSemantic(m, connID, database, s.Table, c.Name); sem != "" {
+				if sem := dbSemantic(t, connID, database, s.Table, c.Name); sem != "" {
 					if cmt == "" || cmt == "—" {
 						cmt = sem
 					} else {
@@ -508,7 +529,7 @@ func builtinDBSchema(m *Manager, args map[string]interface{}) (string, error) {
 //  1. 该连接下有别的库已同步表 → 直接列出那些库，让用户/模型知道该用哪个 database；
 //     （典型场景：Oracle 的连接配置里填的是服务名，与已同步的 schema 对不上）
 //  2. 该连接一个库都没同步 → 提示去连接管理里同步。
-func exampleSyncedTables(cfg AgentConfig, connID, database string) string {
+func exampleSyncedTables(cfg agent.AgentConfig, connID, database string) string {
 	// 当前库下已同步的表
 	var names []string
 	for _, v := range cfg.DBSchemas {
@@ -549,8 +570,12 @@ func containsFold(list []string, s string) bool {
 	return false
 }
 
-// syncedTableSet 返回该连接该库下已同步表名（小写）的集合，用于 db_query 校验
-func syncedTableSet(cfg AgentConfig, connID, database string) map[string]bool {
+// syncedTableSet 返回该连接该库下已同步表名（小写）的集合，用于 db_query 校验。
+//
+// 以小写为键是因为不同数据库对标识符大小写处理不一致
+// （MySQL 视配置而定、PostgreSQL 默认折叠小写、Oracle 默认大写），
+// 校验时统一按小写比对，避免「表明明同步过却报未同步」。
+func syncedTableSet(cfg agent.AgentConfig, connID, database string) map[string]bool {
 	set := map[string]bool{}
 	for _, v := range cfg.DBSchemas {
 		if strings.EqualFold(v.ConnID, connID) && strings.EqualFold(v.Database, database) {
@@ -564,9 +589,15 @@ func syncedTableSet(cfg AgentConfig, connID, database string) map[string]bool {
 var sqlTableRe = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([^\s,()]+)`)
 
 // validateSyncedTables 校验 SQL 引用的表是否全部落在已同步集合内。
+//
+// 为什么要拦：模型只见过提示词里注入的已同步表结构，若它凭空写出别的表名，
+// 大概率是臆测或串了连接（典型现象是拿 MySQL 的表名去查 Oracle）。
+// 与其让数据库返回一句晦涩的「表不存在」，不如在本地直接指出哪些表不可用，
+// 并把已同步的表列出来，模型下一轮就能自我修正。
+//
 // 允许 information_schema / pg_catalog 等系统视图（部分诊断需要）；
 // 派生表 (SELECT ...) 因紧跟左括号，正则不会捕获，故不会误判。
-func validateSyncedTables(sql string, synced map[string]bool, connID, database string, cfg AgentConfig) error {
+func validateSyncedTables(sql string, synced map[string]bool, connID, database string, cfg agent.AgentConfig) error {
 	allowed := map[string]bool{"information_schema": true, "pg_catalog": true, "pg_toast": true}
 	var bad []string
 	for _, mt := range sqlTableRe.FindAllStringSubmatch(sql, -1) {
@@ -601,13 +632,13 @@ func validateSyncedTables(sql string, synced map[string]bool, connID, database s
 }
 
 // builtinDBQuery 在连接上执行只读 SELECT 并返回结果（限制行数）
-func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
+func builtinDBQuery(t *Toolbox, args map[string]interface{}) (string, error) {
 	connID, _ := args["connId"].(string)
 	database, _ := args["database"].(string)
 	sql, _ := args["sql"].(string)
 	if connID == "" || database == "" {
 		// 未显式指定时自动解析：优先激活连接，否则第一个 db 连接，并自动补全 database
-		ac, ad := resolveActiveDBConn(m)
+		ac, ad := resolveActiveDBConn(t)
 		if connID == "" {
 			connID = ac
 		}
@@ -624,12 +655,12 @@ func builtinDBQuery(m *Manager, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("仅允许 SELECT / WITH 查询，禁止写操作")
 	}
 	// 校验：SQL 只能引用你已同步配置的表，禁止臆测/越权访问未同步表
-	cfg := m.LoadAgentData().Config
+	cfg := t.ctx.AgentConfig()
 	synced := syncedTableSet(cfg, connID, database)
 	if err := validateSyncedTables(sql, synced, connID, database, cfg); err != nil {
 		return "", err
 	}
-	conn, err := findDBConn(m, connID)
+	conn, err := findDBConn(t, connID)
 	if err != nil {
 		return "", err
 	}
@@ -872,9 +903,9 @@ func builtinRunCommand(args map[string]interface{}) (string, error) {
 // ============================ 辅助：搜索结果解析 ============================
 
 type ddgResult struct {
-	title  string
+	title   string
 	snippet string
-	url    string
+	url     string
 }
 
 func parseDuckDuckGo(html string, limit int) []ddgResult {

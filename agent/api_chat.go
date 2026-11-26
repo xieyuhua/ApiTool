@@ -28,7 +28,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			args.Timeout = st.TimeoutSec
 		}
 	}
-	writeOK(w, s.core.RunAgent(args))
+	writeOK(w, s.engine.RunAgent(args))
 }
 
 // handlePolish AI 润色输入文本。
@@ -49,7 +49,7 @@ func (s *Server) handlePolish(w http.ResponseWriter, r *http.Request) {
 			args.Timeout = st.TimeoutSec
 		}
 	}
-	out, err := s.core.PolishText(args)
+	out, err := s.engine.PolishText(args)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
