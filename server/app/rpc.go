@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
+	"time"
 
 	"apitool/internal/appcore"
 )
@@ -132,6 +134,13 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if callErr != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": callErr.Error()})
 		return
+	}
+	// 多端同步：保存成功后通知同一用户的其它端（clientId 由前端携带，用于过滤自己）
+	if name == "SaveData" {
+		clientID := strings.TrimSpace(r.Header.Get("X-Client-Id"))
+		s.hub.pushUserEvent(uid, "apitool:data-changed", []interface{}{
+			map[string]interface{}{"clientId": clientID, "at": time.Now().UnixMilli()},
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
 }

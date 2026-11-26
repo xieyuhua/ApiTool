@@ -56,8 +56,24 @@ function apiBaseURL() {
 // authHeaders 构造请求头：始终 JSON；有 accessToken 时附带 Bearer。
 // 网页端（同源）主要靠 HttpOnly Cookie，Bearer 冗余无害；
 // App 端（跨域）Cookie 不发送，必须走 Bearer。auth.js 为动态导入避免循环依赖。
+// clientId：本端（标签页/App 实例）的稳定标识，服务端用它区分"是谁保存的"，
+// 避免把自己的保存通知又推回给自己。
+const CLIENT_ID_KEY = 'apitool_client_id'
+function clientId() {
+  try {
+    let v = localStorage.getItem(CLIENT_ID_KEY)
+    if (!v) {
+      v = 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10)
+      localStorage.setItem(CLIENT_ID_KEY, v)
+    }
+    return v
+  } catch (e) { return '' }
+}
+export { clientId }
+
 async function authHeaders() {
   const h = { 'Content-Type': 'application/json' }
+  if (clientId()) h['X-Client-Id'] = clientId()
   try {
     const mod = await import('./auth')
     const tok = mod.getAccessToken && mod.getAccessToken()

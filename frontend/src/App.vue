@@ -1,7 +1,7 @@
 <script setup>
 const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知构建'
 import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
-import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject, saveConflict, forceSaveNow, pullRemote, dismissConflict } from './store'
+import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject, saveConflict, forceSaveNow, pullRemote, dismissConflict, remoteChanged, initRemoteChangeListener, reloadStore } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -54,6 +54,7 @@ function openTabCtx(tab, ev) {
 function closeTabCtx() { tabCtx.visible = false }
 
 onMounted(() => {
+  initRemoteChangeListener()
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
   initStore()
@@ -136,6 +137,12 @@ function stopResize() {
 }
 onBeforeUnmount(stopResize)
 
+// 刷新远端数据并清除提示
+async function refreshRemote() {
+  remoteChanged.value = 0
+  await reloadStore()
+}
+
 const api = computed(() => currentApi())
 const navs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
@@ -152,6 +159,13 @@ const navs = [
 
 <template>
   <div class="shell">
+    <!-- 多端同步提示：其它设备保存了数据 -->
+    <div v-if="remoteChanged" class="remote-tip">
+      <span>🔄 数据已被其他设备更新</span>
+      <el-button size="small" text type="primary" @click="refreshRemote">立即刷新</el-button>
+      <span class="rt-close" @click="remoteChanged = 0">✕</span>
+    </div>
+
     <div class="navbar">
       <div class="logo">Ap</div>
       <div v-for="n in navs" :key="n.key" class="nav-item" :class="{ active: store.view === n.key }"
@@ -351,4 +365,11 @@ const navs = [
   margin-top: 8px; padding: 8px 10px; background: var(--surface-2);
   border-radius: 6px; color: #f53f3f; font-size: 12px; word-break: break-all;
 }
+.remote-tip {
+  display: flex; align-items: center; gap: 10px; justify-content: center;
+  padding: 6px 14px; font-size: 13px;
+  background: #fff7e6; color: #d46b08; border-bottom: 1px solid #ffe7ba;
+}
+.remote-tip .rt-close { cursor: pointer; opacity: .6; padding: 0 4px; }
+.remote-tip .rt-close:hover { opacity: 1; }
 </style>

@@ -85,7 +85,7 @@ export const store = reactive({
 if (typeof window !== 'undefined') {
   try {
     Object.defineProperty(window, '__store_dbg__', {
-      get: () => ({ loaded: store.loaded, user: store.user, server: store.serverInfo, view: store.view, saveRev: store.saveRev }),
+      get: () => ({ loaded: store.loaded, user: store.user, server: store.serverInfo, view: store.view, saveRev: store.saveRev, remoteChanged: remoteChanged.value }),
       configurable: true,
     })
   } catch (e) { /* ignore */ }
@@ -316,6 +316,36 @@ export async function clearTestData(scope = 'all') {
   const removed = await ClearTestData(store.data.currentProjectId || '', scope)
   await reloadStore() // 重新从后端加载并整体替换 store.data，确保 UI 立即刷新
   return removed
+}
+
+// 多端同步状态：最近一次"其它端保存"的时间（UI 可据此提示刷新）
+export const remoteChanged = ref(0)
+let _remoteListenerReady = false
+
+// initRemoteChangeListener 监听服务端推送的数据变更（同一用户的其它端保存）。
+// 只做提示，不自动覆盖本地（避免打断正在编辑的用户）。
+export function initRemoteChangeListener() {
+  if (_remoteListenerReady || typeof window === 'undefined') return
+  const attach = () => {
+    const rt = window.runtime
+    if (!rt || typeof rt.EventsOnMultiple !== 'function') return false
+    _remoteListenerReady = true
+    rt.EventsOnMultiple('apitool:data-changed', (d) => {
+      let self = ''
+      try { self = localStorage.getItem('apitool_client_id') || '' } catch (e) { /* ignore */ }
+      const from = d && d.clientId ? String(d.clientId) : ''
+      if (from && self && from === self) return // 自己发起的保存：忽略
+      remoteChanged.value = Date.now()
+    }, -1)
+    return true
+  }
+  if (attach()) return
+  // 桥接层（httpBridge / wailsV3Bridge）可能晚于组件挂载：
+  // 轮询等待就绪（最多约 5 秒），避免监听丢失。
+  let tries = 0
+  const timer = setInterval(() => {
+    if (attach() || ++tries > 100) clearInterval(timer)
+  }, 50)
 }
 
 let saveTimer = null
