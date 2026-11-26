@@ -1,7 +1,9 @@
 package appcore
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"apitool/internal/bus"
@@ -228,6 +230,19 @@ func (a *App) DefaultDocSign() string { return doc.DefaultSignTemplate() }
 // RenderTestReportContent 渲染测试报告（网页/App 端下载用）。
 func (a *App) RenderTestReportContent(reportJSON, format string) (string, []byte, error) {
 	return a.Engine.RenderTestReport(reportJSON, format)
+}
+
+// RenderTestReportHTML 渲染测试报告 HTML 并返回标题（服务端分享报告用）。
+func (a *App) RenderTestReportHTML(reportJSON string) (string, string, error) {
+	var r model.TestReport
+	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
+		return "", "", fmt.Errorf("报告解析失败: %v", err)
+	}
+	title := strings.TrimSpace(r.PlanName)
+	if title == "" {
+		title = "测试报告"
+	}
+	return title, doc.BuildTestReportHTML(r), nil
 }
 
 // RenderStressReportContent 渲染压测报告（网页/App 端下载用）。

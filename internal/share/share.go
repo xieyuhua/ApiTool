@@ -259,6 +259,34 @@ func CreateShare(s storeapi.Store, dirID, apiID, password string, expireMinutes 
 	return token, info.Public + "/s/" + token, nil
 }
 
+// CreateReportShare 分享测试报告 HTML，返回 (token, link)。
+// 与 ShareTestReport（写临时文件/打开浏览器）不同，本方法只发布链接。
+func CreateReportShare(title, html, password string, expireMinutes int) (string, string, error) {
+	if strings.TrimSpace(html) == "" {
+		return "", "", fmt.Errorf("报告内容为空")
+	}
+	token := util.GenID()
+	item := &ShareItem{
+		Token:       token,
+		Title:       title,
+		HTML:        html,
+		Password:    password,
+		HasPassword: strings.TrimSpace(password) != "",
+		CreatedAt:   time.Now().Unix(),
+	}
+	if expireMinutes > 0 {
+		item.ExpireAt = time.Now().Add(time.Duration(expireMinutes) * time.Minute).Unix()
+	}
+	shareMu.Lock()
+	shareItems[token] = item
+	shareMu.Unlock()
+	if err := Start(""); err != nil {
+		return "", "", err
+	}
+	info := Info()
+	return token, info.Public + "/s/" + token, nil
+}
+
 // ListShares 返回当前所有分享链接的视图（不含 HTML 与明文密码）。
 func ListShares() []ShareItemView {
 	shareMu.Lock()

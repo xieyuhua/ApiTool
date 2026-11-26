@@ -20,12 +20,14 @@ import (
 )
 
 // handleShareCreate 创建分享链接（需登录，且对当前项目有编辑以上权限）。
-// PUT/POST /api/share，body: {dirId, apiId, password, expireMinutes}
+// POST /api/share，body: {dirId, apiId, password, expireMinutes} 或
+// {reportJSON, password, expireMinutes}（分享测试报告）。
 func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 	uid := userIDOf(r.Context())
 	var req struct {
 		DirID         string `json:"dirId"`
 		APIID         string `json:"apiId"`
+		ReportJSON    string `json:"reportJSON"`
 		Password      string `json:"password"`
 		ExpireMinutes int    `json:"expireMinutes"`
 	}
@@ -38,7 +40,11 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 	var projectID string
 	_, err := s.sessions.withLock(uid, usernameOf(r.Context()), func(core *appcore.App) (interface{}, error) {
 		var e error
-		title, html, e = core.ShareDocContent(req.DirID, req.APIID)
+		if strings.TrimSpace(req.ReportJSON) != "" {
+			title, html, e = core.RenderTestReportHTML(req.ReportJSON)
+		} else {
+			title, html, e = core.ShareDocContent(req.DirID, req.APIID)
+		}
 		if e != nil {
 			return nil, e
 		}

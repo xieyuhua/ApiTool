@@ -60,6 +60,8 @@ const localMethods = {
     setTimeout(() => URL.revokeObjectURL(url), 60000)
     return '分享文档预览'
   },
+  // 测试报告分享：服务端渲染报告 HTML 后落库，返回可访问链接
+  ShareReportLink: (reportJSON, password, expireMinutes) => shareTestReport(reportJSON, password, expireMinutes),
   // 内置同步服务作为分享后端：网页端没有该进程，返回未运行让对话框走服务端分享
   SyncShareBackend: () => Promise.resolve({ url: '', token: '', running: false, publicUrl: '' }),
   // 「按最新模板刷新本地链接」是桌面端内存分享的概念；网页端链接落库为发布时快照
@@ -91,6 +93,21 @@ async function createShare(dirID, apiID, password, expireMinutes) {
   if (!res.ok || (d && d.ok === false)) throw new Error((d && d.error) || ('分享失败 HTTP ' + res.status))
   const token = (d && d.result && d.result.token) || ''
   // 拼绝对地址，便于复制给他人
+  return (window.location.origin || base) + '/s/' + token
+}
+
+// shareTestReport 分享测试报告（服务端落库版，对应 ShareReportLink）。
+async function shareTestReport(reportJSON, password, expireMinutes) {
+  const base = apiBaseURL()
+  const res = await fetch(base + '/api/share', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: await authHeaders(),
+    body: JSON.stringify({ reportJSON: reportJSON || '', password: password || '', expireMinutes: Number(expireMinutes) || 0 }),
+  })
+  const d = await res.json().catch(() => null)
+  if (!res.ok || (d && d.ok === false)) throw new Error((d && d.error) || ('分享报告失败 HTTP ' + res.status))
+  const token = (d && d.result && d.result.token) || ''
   return (window.location.origin || base) + '/s/' + token
 }
 

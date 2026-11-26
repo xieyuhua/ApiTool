@@ -790,6 +790,17 @@ func (a *App) ShareTestReport(reportJSON, format, openType string) (string, erro
 	return share.TestReport(a, a.dual, reportJSON, format, openType)
 }
 
+// ShareReportLink 生成测试报告分享链接（供前端「分享测试报告」对话框使用）。
+// 参数与前端契约一致：(reportJSON, password, expireMinutes)，返回可访问 URL。
+func (a *App) ShareReportLink(reportJSON, password string, expireMinutes int) (string, error) {
+	title, html, err := a.RenderTestReportHTML(reportJSON)
+	if err != nil {
+		return "", err
+	}
+	_, link, err := share.CreateReportShare(title, html, password, expireMinutes)
+	return link, err
+}
+
 // ----------------------------------------------------------------------------
 // 多分享链接绑定（实现在 internal/share），对齐前端 ShareDialog 契约
 // ----------------------------------------------------------------------------

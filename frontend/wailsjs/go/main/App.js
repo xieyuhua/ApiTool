@@ -626,6 +626,10 @@ export function ShareTestReport(arg1, arg2, arg3) {
   return window['go']['main']['App']['ShareTestReport'](arg1, arg2, arg3);
 }
 
+export function ShareReportLink(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ShareReportLink'](arg1, arg2, arg3);
+}
+
 export function ShowClipboardWindow() {
   return window['go']['main']['App']['ShowClipboardWindow']();
 }

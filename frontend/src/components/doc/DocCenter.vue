@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocMarkdown, ImportDoc, ShareTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
+import { CopyDocMarkdown, ImportDoc, ShareReportLink, CopyToClipboard } from '../../../wailsjs/go/main/App'
 import { exportDoc, exportTestReport } from '../../download'
 import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab, currentProject } from '../../store'
 import ShareDialog from './ShareDialog.vue'
@@ -137,7 +137,7 @@ function openShareReport(r) {
 async function doShareReport() {
   shareLoading.value = true
   try {
-    const link = await ShareTestReport(reportShareTarget.value, sharePassword.value, shareExpire.value)
+    const link = await ShareReportLink(reportShareTarget.value, sharePassword.value, shareExpire.value)
     shareLink.value = link
     ElMessage.success('分享链接已生成')
   } catch (e) {

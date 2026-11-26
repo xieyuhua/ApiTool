@@ -329,6 +329,8 @@ export function ShareServerRunning():Promise<boolean>;
 
 export function ShareTestReport(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function ShareReportLink(arg1:string,arg2:string,arg3:number):Promise<string>;
+
 export function ShowClipboardWindow():Promise<void>;
 
 export function SniffCAPEM():Promise<string>;
