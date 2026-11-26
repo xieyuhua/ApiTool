@@ -18,6 +18,12 @@ vet.txt
 # ������ʱ����/���Բ���
 _tmp_out/
 
+# 独立 Agent 服务（agentd）：构建产物、运行数据、拷贝进来的前端资源
+/dist/
+agent-data/
+agent/webui/dist/*
+!agent/webui/dist/.gitkeep
+
 # Capacitor / Android 构建产物与本地配置
 frontend/android/.gradle/
 frontend/android/app/build/

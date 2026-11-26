@@ -9,7 +9,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 桌面外壳 | [Wails v2](https://wails.io/)（Go + webview，前端以 `window.go` 注入绑定） |
+| 桌面外壳 | [Wails v3](https://v3.wails.io/)（Go + webview，前端以 `window.go` 注入绑定） |
 | 后端 | 纯 Go（模块名 `apitool`，Go 1.26） |
 | 前端 | Vue 3 + Vite（`frontend/`） |
 | 本地存储 | SQLite（modernc.org/sqlite，纯 Go 无 CGO）/ 可选 MySQL / 旧版 JSON 回退 |
@@ -29,7 +29,9 @@ apitool/
 ├── tray.go          # 系统托盘菜单（剪贴板历史入口等）
 ├── wails.json       # Wails 构建配置（前端产物、绑定生成）
 ├── internal/        # 业务逻辑（与 UI 框架解耦，可独立测试/复用）
-├── server/          # 可独立部署的云同步 / 分享服务器（./server/cmd）
+├── server/          # 主服务端：多用户账号 + 项目共享（go build -tags serveronly）
+├── core/agent/      # 独立 Agent 服务的业务核心（去桌面化，自 internal/agent 复制）
+├── agent/           # 独立 Agent 服务 agentd：HTTP API + 内嵌 UI + 单令牌鉴权
 └── frontend/        # Vue 前端（wailsjs/ 为自动生成的绑定桩）
 ```
 
@@ -66,12 +68,17 @@ apitool/
 
 ## 三、运行时形态
 
-程序有两种运行形态，由 `main.go` 的子命令决定：
+程序有三种运行形态：
 
 1. **桌面应用（默认）**：`wails build` / `wails dev` 启动，`App` 作为 Wails 绑定根，
    前端通过 `window.go.<pkg>.<Method>` 调用 Go 方法，后端经 `bus` 向前端推送事件。
-2. **云同步 / 分享服务器**：`go build -o apitool-server ./server/cmd` 后独立运行，
-   不依赖前端，对外暴露 `/api/*` 与 `/s/*` 路由（见 README「部署云分享服务器」）。
+2. **主服务端（多用户）**：`go build -tags serveronly .`，多租户账号 + 项目共享，
+   对外暴露 `/api/*`、`/rpc/*`、`/events`、`/s/*`（见 [DEPLOY.md](./DEPLOY.md)）。
+3. **独立 Agent 服务（单租户）**：`./build-agent.sh` 后运行 `dist/agentd-<os>-<arch>`，
+   只有 AI Agent 能力，自带网页界面与单令牌鉴权（见 [agent/README.md](./agent/README.md)）。
+
+后两种与桌面端共用 `internal/` 的业务模型，但**互不依赖**：独立 Agent 服务的业务核心
+位于 `core/agent/`（自 `internal/agent` 复制的去桌面化版本），两者各自演进。
 
 ---
 
@@ -123,7 +130,7 @@ apitool/
 
 ### 环境
 - Go 1.26+（与 `go.mod` 一致；旧文档写的 1.21 已过时）
-- Node.js 18+，Wails v2 CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Node.js 18+，Wails v3 CLI：`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`
 
 ### 常用命令
 ```bash
@@ -131,18 +138,44 @@ apitool/
 wails build            # 产物 build/bin/apitool(.exe)
 wails dev              # 热更新 + Vite，可访问 http://localhost:34115 调试前端
 
-# 云服务器
-go build -o build/bin/apitool-server ./server/cmd
+# 主服务端（多用户）
+go build -tags serveronly -o build/bin/apitool-server.exe .
 ./apitool-server -addr :8080 -data apitool-server-data
+
+# 独立 Agent 服务（6 平台，产物在 dist/）
+./build-agent.sh
+./dist/agentd-linux-amd64 -addr :8090 -data ./agent-data -token <随机串>
 
 # 校验
 go build -mod=vendor ./...
 go vet  ./...
+go test ./internal/... ./server/... ./core/...
 ```
 
 ### 绑定生成
 前端 `frontend/wailsjs/` 由 Wails 从 `app.go` 中 `App` 的公开方法自动生成；
 修改 `App` 暴露的方法后须重新 `wails build`/`wails dev` 以刷新桩代码。
+
+### 独立 Agent 服务（agentd）
+
+```bash
+./build-agent.sh              # 前端构建 + 拷贝到 agent/webui/dist + 6 平台交叉编译
+./dist/agentd-linux-amd64 -addr :8090 -data ./agent-data -token <随机串>
+```
+
+| 层 | 位置 | 说明 |
+|---|---|---|
+| 业务核心 | `core/agent/` | 自 `internal/agent` 复制的**去桌面化**版本：`Host` 只保留 `Store/ReadData`，事件抽象为 `Emitter`（仅 `Emit`），无 `wailsrt`/`bus`/`plugins` 依赖 |
+| 独立服务 | `agent/` | HTTP API（`/api/agent/*`）、SSE（`/api/agent/events`）、单令牌鉴权、内嵌 UI |
+| 入口 | `agent/cmd/agentd/main.go` | 唯一 `main`，构建产物 `dist/agentd-<os>-<arch>` |
+| 前端桥 | `frontend/src/agentStandaloneBridge.js` | 把 `window.go.main.App.*` → REST、`window.runtime.EventsOn*` → SSE；由服务端注入的 `__AGENT_STANDALONE__` 触发 |
+
+**两份代码的关系**：`internal/agent`（桌面端/主服务端使用）与 `core/agent`（独立服务使用）
+各自演进，互不影响。修改其中一处不会自动同步到另一处。
+
+**为什么需要 `-tags purego`**：本 module 的 `internal/bus` 间接引用 `wailsrt`，
+后者 import Wails v3 的 `application` 包，其 `buildguard` 在无 CGO 时要求该标签。
+新服务本身不 import Wails，但同 module 交叉编译时这个标签仍必须带上（`build-agent.sh` 已处理）。
 
 ---
 

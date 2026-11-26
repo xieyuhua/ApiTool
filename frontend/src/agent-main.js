@@ -18,14 +18,18 @@ import './style.css'
 import './agent-mobile.css'
 import { installWebBridge } from './httpBridge'
 import { installV3BridgeWhenReady } from './wailsV3Bridge'
+import { installStandaloneBridge } from './agentStandaloneBridge'
 import { store, initAgentWebStore, applyScheme } from './store'
 import AgentChat from './components/agent/AgentChat.vue'
 
-// 桌面端（Wails v3）：把 v3 API 映射回 window.go / window.runtime；
-// 局域网网页：安装 HTTP/SSE 兼容桥端。
-// v3 的 runtime.js 可能晚于本文件注入，因此先等待其就绪再决定安装哪一套桥，
-// 之后才能安全地调用后端（initAgentWebStore 依赖 window.go）。
+// 桥接三选一：
+//   1) 独立 Agent 服务（agentd）：服务端在 HTML 注入 __AGENT_STANDALONE__，
+//      用 REST + SSE 桥，不依赖 Wails 运行时；
+//   2) 桌面端（Wails v3）：把 v3 API 映射回 window.go / window.runtime；
+//   3) 主服务端网页：HTTP/SSE 兼容桥。
+// v3 的 runtime.js 可能晚于本文件注入，因此先等待其就绪再决定。
 const bridgeReady = installV3BridgeWhenReady().then((v3Ready) => {
+  if (installStandaloneBridge()) return
   if (!v3Ready) installWebBridge()
 })
 // 标记为网页端：移动端样式（agent-mobile.css）以 body.web-agent 限定作用域

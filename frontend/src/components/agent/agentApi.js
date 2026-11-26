@@ -38,12 +38,13 @@ export function hasBridge() {
   return !!(window.go && window.go.main && window.go.main.App && window.go.main.App.RunAgent)
 }
 
-// 是否运行在局域网网页端（httpBridge 已装上 HTTP/SSE 兼容桥）。
+// 是否运行在网页端（而非桌面 Wails 窗口）。
 //
 // 判据说明：桌面端由 Wails 注入 window.go + window.runtime，installWebBridge()
 // 检测到这两个对象会直接 return false 且**不会**设置 __WEBUI__；
-// 只有走 agent.html（局域网网页入口）时才会装桥并打上该标记。
-// 因此它是「桌面 / 网页」的唯一可靠判据，UI 上所有桌面专属入口都应据此隐藏。
+// 局域网网页入口（agent.html）会装 HTTP/SSE 桥并打上该标记；
+// 独立 Agent 服务（agentd）由服务端注入 __AGENT_STANDALONE__。
+// UI 上所有「桌面专属」入口都据此隐藏。
 export function isWebUI() {
-  return typeof window !== 'undefined' && !!window.__WEBUI__
+  return typeof window !== 'undefined' && (!!window.__WEBUI__ || !!window.__AGENT_STANDALONE__)
 }
