@@ -146,13 +146,14 @@ async function refreshRemote() {
 }
 
 const api = computed(() => currentApi())
-// 导航项：网络抓包依赖系统代理与 CA 安装，仅桌面端可用（网页/App 端隐藏）。
+// 导航项：网络抓包依赖系统代理与 CA 安装；请求捕获依赖本机进程内的捕获服务
+// （捕获记录属于"这台机器"，多用户共享会串数据）——两者仅桌面端可用。
 const allNavs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
   { key: 'templates', label: '文档模板', icon: '📐' },
   { key: 'testing', label: '测试中心', icon: '🧪' },
-  { key: 'capture', label: '请求捕获', icon: '🌐' },
+  { key: 'capture', label: '请求捕获', icon: '🌐', desktopOnly: true },
   { key: 'mitm', label: '网络抓包', icon: '🕵', desktopOnly: true },
   { key: 'tools', label: '工具', icon: '🔧' },
   { key: 'agent', label: 'AI Agent', icon: '🤖' },
