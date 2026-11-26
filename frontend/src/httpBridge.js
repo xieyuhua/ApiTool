@@ -30,6 +30,68 @@ export function installWebBridge() {
 // ---------------------------------------------------------------- window.go
 // wailsjs/go/main/App.js 里的每个方法最终都调用 window.go.main.App.X(args...)
 // 用 Proxy 懒生成任意方法，方法名即 RPC 路径 /rpc/{Method}
+// 浏览器本地可实现的 Wails 方法：同名覆写，不走 HTTP RPC。
+// 桌面端这些方法依赖系统剪贴板/文件对话框；网页端浏览器都有等价能力。
+const localMethods = {
+  // 剪贴板：用 navigator.clipboard（非安全上下文回退 execCommand）
+  CopyToClipboard: (text) => writeClipboard(String(text ?? '')),
+  SetClipboardText: (text) => writeClipboard(String(text ?? '')),
+  ClipboardSetText: (text) => writeClipboard(String(text ?? '')),
+  GetClipboardText: () => readClipboard(),
+  // 文档 Markdown：服务端渲染后由浏览器写入剪贴板
+  CopyDocMarkdown: async (dirID, apiID) => {
+    const md = await callRPC('DocMarkdown', [dirID || '', apiID || ''])
+    return writeClipboard(md || '')
+  },
+  // 分享网页源码/标题：服务端渲染（结构跟随文档模板）
+  BuildSharedHTML: (dirID, apiID) => callRPC('ShareDocHTML', [dirID || '', apiID || '']),
+  BuildSharedTitle: (dirID, apiID) => callRPC('ShareDocTitle', [dirID || '', apiID || '']),
+  // 文档导入：浏览器选文件 → 内容上传服务端解析
+  ImportDoc: () => importDocViaBrowser(),
+  // 分享链接：网页端走服务端落库（桌面端是进程内内存态）
+  CreateShareLink: (dirID, apiID, password, expireMinutes) => createShare(dirID, apiID, password, expireMinutes),
+  ListShares: () => listShares(),
+  StopShare: (token) => stopShare(token),
+  // 打开链接 / 预览：浏览器新标签页
+  OpenInBrowser: (url) => { window.open(url, '_blank', 'noopener'); return Promise.resolve(null) },
+  // 桌面端独占但网页端可安全 no-op 的能力
+  NotifyUpdated: () => Promise.resolve(null),
+}
+
+// ---- 分享链接（服务端落库版）----
+async function createShare(dirID, apiID, password, expireMinutes) {
+  const base = apiBaseURL()
+  const res = await fetch(base + '/api/share', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: await authHeaders(),
+    body: JSON.stringify({ dirId: dirID || '', apiId: apiID || '', password: password || '', expireMinutes: Number(expireMinutes) || 0 }),
+  })
+  const d = await res.json().catch(() => null)
+  if (!res.ok || (d && d.ok === false)) throw new Error((d && d.error) || ('分享失败 HTTP ' + res.status))
+  const token = (d && d.result && d.result.token) || ''
+  // 拼绝对地址，便于复制给他人
+  return (window.location.origin || base) + '/s/' + token
+}
+
+async function listShares() {
+  const base = apiBaseURL()
+  const res = await fetch(base + '/api/share', { credentials: 'same-origin', headers: await authHeaders() })
+  if (!res.ok) return []
+  const d = await res.json().catch(() => null)
+  return (d && d.result) || []
+}
+
+async function stopShare(token) {
+  const base = apiBaseURL()
+  const res = await fetch(base + '/api/share/' + encodeURIComponent(token), {
+    method: 'DELETE', credentials: 'same-origin', headers: await authHeaders(),
+  })
+  const d = await res.json().catch(() => null)
+  if (!res.ok || (d && d.ok === false)) throw new Error((d && d.error) || ('停止分享失败 HTTP ' + res.status))
+  return null
+}
+
 function installGoBridge() {
   const cache = new Map()
   const make = (method) => (...args) => callRPC(method, args)
@@ -37,11 +99,34 @@ function installGoBridge() {
   const app = new Proxy({}, {
     get(_, prop) {
       if (typeof prop !== 'string') return undefined
+      if (Object.prototype.hasOwnProperty.call(localMethods, prop)) return localMethods[prop]
       if (!cache.has(prop)) cache.set(prop, make(prop))
       return cache.get(prop)
     },
   })
   window.go = { main: { App: app } }
+}
+
+// importDocViaBrowser 弹出浏览器文件选择框，把内容交给服务端解析导入。
+// 返回导入结果描述（与桌面端 ImportDoc 的返回语义一致）。
+function importDocViaBrowser() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,.yaml,.yml'
+    input.style.display = 'none'
+    input.onchange = async () => {
+      const f = input.files && input.files[0]
+      document.body.removeChild(input)
+      if (!f) { reject(new Error('User cancelled')); return }
+      try {
+        const text = await f.text()
+        resolve(await callRPC('ImportDocContent', [f.name, text]))
+      } catch (e) { reject(e) }
+    }
+    document.body.appendChild(input)
+    input.click()
+  })
 }
 
 // apiBase 解析服务端地址：显式注入（window.__API_BASE__）优先，

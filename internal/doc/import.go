@@ -34,7 +34,13 @@ func ImportDoc(ctx context.Context, s storeapi.Store, projectID string) (string,
 	if err != nil {
 		return "", fmt.Errorf("读取文件失败: %v", err)
 	}
-	doc, err := decodeDoc(raw)
+	return ImportDocContent(s, baseName(path), string(raw))
+}
+
+// ImportDocContent 从文档内容导入接口（网页端上传文件后走此路径，无需对话框）。
+// name 仅用于生成根目录名（如 "petstore.json" → 目录「导入-petstore.json」）。
+func ImportDocContent(s storeapi.Store, name string, content string) (string, error) {
+	doc, err := decodeDoc([]byte(content))
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +67,7 @@ func ImportDoc(ctx context.Context, s storeapi.Store, projectID string) (string,
 	}
 
 	// 外层根目录包裹，避免与现有数据混淆
-	rootName := fmt.Sprintf("导入-%s", baseName(path))
+	rootName := fmt.Sprintf("导入-%s", name)
 	root := model.Directory{ID: util.GenID(), Name: rootName, ParentID: "", Sort: 0}
 	// 一级目录指向 root
 	for i := range dirs {

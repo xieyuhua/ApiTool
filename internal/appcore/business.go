@@ -2,15 +2,16 @@ package appcore
 
 import (
 	"fmt"
+	"time"
 
 	"apitool/internal/bus"
 	"apitool/internal/capture"
 	"apitool/internal/doc"
 	"apitool/internal/jsonutil"
 	"apitool/internal/model"
+	"apitool/internal/store"
 	"apitool/internal/stress"
 	"apitool/internal/testing"
-	"apitool/internal/store"
 	"apitool/internal/wailsrt"
 )
 
@@ -122,6 +123,74 @@ func (a *App) PreviewDocTemplateHTML(layoutJSON string) (string, error) {
 	a.lock()
 	defer a.unlock()
 	return doc.PreviewTemplateHTML(a.data, layoutJSON)
+}
+
+// DocMarkdown 返回 Markdown 文档内容（网页端没有系统剪贴板，由浏览器复制）。
+func (a *App) DocMarkdown(dirID, apiID string) (string, error) {
+	name, data, err := a.RenderExportContent(dirID, apiID, "markdown")
+	if err != nil {
+		return "", err
+	}
+	_ = name
+	return string(data), nil
+}
+
+// ShareDocHTML 返回分享用 HTML 网页源码（供网页端"网页代码"页与分享链接）。
+// 结构跟随「文档模板」当前配置，水印按「分享文档加导出水印」开关。
+func (a *App) ShareDocHTML(dirID, apiID string) (string, error) {
+	_, html, err := a.shareDocContent(dirID, apiID)
+	return html, err
+}
+
+// ShareDocTitle 返回分享文档标题。
+func (a *App) ShareDocTitle(dirID, apiID string) (string, error) {
+	title, _, err := a.shareDocContent(dirID, apiID)
+	return title, err
+}
+
+// ShareDocContent 返回分享标题与 HTML（服务端创建分享链接时落库用）。
+func (a *App) ShareDocContent(dirID, apiID string) (string, string, error) {
+	return a.shareDocContent(dirID, apiID)
+}
+
+// CurrentProjectID 返回当前活动项目 ID（服务端用于校验分享权限）。
+func (a *App) CurrentProjectID() string {
+	a.lock()
+	defer a.unlock()
+	data := a.data.GetData()
+	if idx := store.ActiveProjectIndex(data); idx >= 0 {
+		return data.Projects[idx].ID
+	}
+	return ""
+}
+
+// shareDocContent 计算范围内的分享标题与 HTML（与 internal/share 的语义一致）。
+func (a *App) shareDocContent(dirID, apiID string) (string, string, error) {
+	a.lock()
+	defer a.unlock()
+	data := a.data.GetData()
+	title, dirs, apis := doc.CollectScope(data, dirID, apiID)
+	if len(apis) == 0 {
+		return "", "", fmt.Errorf("所选范围内没有接口")
+	}
+	proj := model.Project{}
+	if idx := store.ActiveProjectIndex(data); idx >= 0 {
+		proj = data.Projects[idx]
+	}
+	layout := doc.EnrichDocLayout(doc.EffectiveDocLayout(data, proj), proj.Environments, proj.Common)
+	var wm model.DocWatermark
+	if data.Settings.ShareDocWatermark {
+		wm = doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
+	}
+	return title, doc.BuildHTMLForExportWithLayout(title, dirID, dirs, apis, proj.Common, wm, layout), nil
+}
+
+// ImportDocContent 从上传的文档内容导入接口（OpenAPI3/Swagger2/Postman）。
+// 网页端无法弹文件对话框，由浏览器读取文件后把内容传上来。
+func (a *App) ImportDocContent(name, content string) (string, error) {
+	a.lock()
+	defer a.unlock()
+	return doc.ImportDocContent(a.data, name, content)
 }
 
 // DocPresets 返回预置文档模板列表。

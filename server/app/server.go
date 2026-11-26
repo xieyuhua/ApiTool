@@ -110,6 +110,12 @@ func (s *Server) buildRoutes() {
 		s.serveSSE(w, r, userIDOf(r.Context()))
 	})))
 
+	// 分享（网页端落库版；桌面端分享服务仍是进程内内存态）
+	m.Handle("GET /api/share", s.requireAuth(http.HandlerFunc(s.handleShareList)))
+	m.Handle("POST /api/share", s.requireAuth(http.HandlerFunc(s.handleShareCreate)))
+	m.Handle("DELETE /api/share/{token}", s.requireAuth(http.HandlerFunc(s.handleShareDelete)))
+	m.HandleFunc("GET /s/{token}", s.handleShareView)
+
 	// 导出下载（网页/App 端替代文件对话框）
 	m.Handle("GET /export/doc", s.requireAuth(http.HandlerFunc(s.handleExport)))
 	m.Handle("GET /export/test-report", s.requireAuth(http.HandlerFunc(s.handleExport)))

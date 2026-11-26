@@ -20,6 +20,12 @@ func (s *Server) mountStatic(m *http.ServeMux) {
 	fileServer := http.FileServer(http.FS(sub))
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// /s/{token} 由 shares.go 的精确模式处理；ServeMux 的 "/" 是兜底，
+		// 这里显式避让，避免未匹配的分享链接被 SPA 回退成首页。
+		if strings.HasPrefix(path, "/s/") {
+			http.NotFound(w, r)
+			return
+		}
 		switch {
 		case strings.HasPrefix(path, "/assets/"):
 			// 构建产物带内容哈希，长缓存
