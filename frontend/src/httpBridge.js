@@ -58,13 +58,15 @@ function apiBaseURL() {
 // App 端（跨域）Cookie 不发送，必须走 Bearer。auth.js 为动态导入避免循环依赖。
 // clientId：本端（标签页/App 实例）的稳定标识，服务端用它区分"是谁保存的"，
 // 避免把自己的保存通知又推回给自己。
+// 用 sessionStorage（按标签页隔离）：localStorage 在同浏览器多标签间共享，
+// 会导致同一浏览器的第二个标签页把另一标签的保存误判为"自己发的"而丢失提醒。
 const CLIENT_ID_KEY = 'apitool_client_id'
 function clientId() {
   try {
-    let v = localStorage.getItem(CLIENT_ID_KEY)
+    let v = sessionStorage.getItem(CLIENT_ID_KEY)
     if (!v) {
       v = 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10)
-      localStorage.setItem(CLIENT_ID_KEY, v)
+      sessionStorage.setItem(CLIENT_ID_KEY, v)
     }
     return v
   } catch (e) { return '' }
@@ -136,8 +138,20 @@ function installRuntimeBridge() {
     }
   }
 
+  // 未登录不建立 SSE：/events 需鉴权，登录前连接只会产生 401 报错噪声。
+  // 登录成功（auth.js 写入 refreshToken）后由下次重试自动接上，无需显式通知。
+  let authWait = null
+  function hasAuthHint() {
+    try { return !!localStorage.getItem('apitool_refresh') } catch (e) { return false }
+  }
+
   function connect() {
     if (closed) return
+    if (!hasAuthHint()) {
+      // 未登录：低频轮询等待登录，登录后自然接上
+      if (!authWait) authWait = setTimeout(() => { authWait = null; connect() }, 5000)
+      return
+    }
     const base = apiBaseURL()
     es = new EventSource(base + '/events', { withCredentials: true })
     es.onmessage = (e) => {
@@ -149,8 +163,9 @@ function installRuntimeBridge() {
       // EventSource 自带重连；连接彻底失败时兜底重建。
       // 401（登录过期）时 EventSource 不暴露状态码，重建失败同样走此分支；
       // 由 RPC 层的 401 → refresh 流程恢复 Cookie 后这里自然重连成功。
+      // 已登出（无 refreshToken）时不再重连，避免持续 401。
       if (es) { es.close(); es = null }
-      if (!closed) setTimeout(connect, 3000)
+      if (!closed) setTimeout(connect, hasAuthHint() ? 3000 : 5000)
     }
   }
   connect()

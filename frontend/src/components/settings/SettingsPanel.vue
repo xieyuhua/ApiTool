@@ -6,6 +6,7 @@ import { store, saveNow, scheduleAutoSync, checkUpdate, setTheme, setAccent, set
 import CloudSync from './CloudSync.vue'
 import TeamPanel from '../auth/TeamPanel.vue'
 import ServerSync from './ServerSync.vue'
+import { isDesktop } from '../../download'
 
 const dataPath = ref('')
 const defaultPrompt = ref('')   // 内置默认提示词（来自后端，避免前后端文案漂移）
@@ -21,11 +22,14 @@ const checking = ref(false)
 const updateResult = ref(null)
 
 onMounted(async () => {
-  try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
-  try {
-    syncRunning.value = await SyncServerRunning()
-    if (syncRunning.value) syncURL.value = await SyncServerURL()
-  } catch { /* ignore */ }
+  // 本地数据路径与内置同步服务均为桌面端专属（网页端由服务端承载）
+  if (isDesktop()) {
+    try { dataPath.value = await GetDataFilePath() } catch { /* ignore */ }
+    try {
+      syncRunning.value = await SyncServerRunning()
+      if (syncRunning.value) syncURL.value = await SyncServerURL()
+    } catch { /* ignore */ }
+  }
   try { defaultPrompt.value = await DefaultTestCasePrompt() } catch { /* ignore */ }
 })
 
@@ -98,8 +102,8 @@ async function toggleSync() {
     <div class="panel-page" style="max-width:760px; margin:0 auto; width:100%">
       <h2 style="margin:6px 0 16px">⚙ 设置</h2>
 
-      <!-- 2.0 桌面端：服务端同步（登录/登出，本地/服务端双模式） -->
-      <div class="card">
+      <!-- 2.0 桌面端专属：服务端同步（网页端已直接登录服务端，无需此卡） -->
+      <div v-if="isDesktop()" class="card">
         <div class="card-title">服务端同步（团队协作）</div>
         <ServerSync />
       </div>
@@ -219,7 +223,7 @@ async function toggleSync() {
         <el-button type="primary" @click="cloudVisible = true">☁ 云同步 / 多端共享</el-button>
       </div>
 
-      <div class="card">
+      <div v-if="isDesktop()" class="card">
         <div class="card-title">内置同步服务（工具与服务一起部署，可选）</div>
         <div style="font-size:13px; color:#4e5969; margin-bottom:12px">
           启动后本工具同时作为同步服务器。下面填写的是<b>监听地址</b>（绑定用，如
@@ -304,7 +308,7 @@ async function toggleSync() {
 }</div>
       </div>
 
-      <div class="card">
+      <div v-if="isDesktop()" class="card">
         <div class="card-title">剪贴板记录</div>
         <el-form label-width="120px" label-position="left">
           <el-form-item label="自动监听">
@@ -319,11 +323,17 @@ async function toggleSync() {
         </el-form>
       </div>
 
-      <div class="card">
+      <div v-if="isDesktop()" class="card">
         <div class="card-title">数据存储</div>
         <div style="font-size:13px; color:#4e5969">
           所有接口信息（含最近一次请求与响应）自动保存在本地：<br>
           <code style="font-size:12px; color:var(--primary)">{{ dataPath }}</code>
+        </div>
+      </div>
+      <div v-else class="card">
+        <div class="card-title">数据存储</div>
+        <div style="font-size:13px; color:#4e5969">
+          所有接口信息（含最近一次请求与响应）保存在服务端，可在任意设备登录同一账号继续编辑。
         </div>
       </div>
 

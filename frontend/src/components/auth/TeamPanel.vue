@@ -104,10 +104,24 @@ async function grantShare() {
   const d = await r.json()
   if (d && d.ok === false) { ElMessage.error(d.error); return }
   ElMessage.success('已授权团队访问「' + p.name + '」（' + roleLabel[shareRole.value] + '）')
+  await loadShares()
 }
 
 const readOnly = computed(() => store.serverInfo && !canEditProject())
 
+// 已共享的团队列表（展示当前项目的授权情况，避免"授权成功但看不到"）
+async function loadShares() {
+  const p = currentProject()
+  if (!p) { shareList.value = []; return }
+  try {
+    const r = await fetch(apiBase() + '/api/projects/' + p.id, { headers: authHeaders() })
+    const d = await r.json()
+    shareList.value = (d && d.result && d.result.shares) || []
+  } catch (e) { shareList.value = [] }
+}
+
+// 切换 tab 到「项目共享」时刷新授权列表
+watch(tab, (v) => { if (v === 'share') loadShares() })
 
 onMounted(() => {
   if (store.user) { loadTeams(); loadProjects() }
@@ -159,7 +173,7 @@ onMounted(() => {
       </div>
       <div v-if="members.length" class="member-list">
         <div v-for="m in members" :key="m.userId" class="member-row">
-          <span class="m-name">{{ m.userId }}</span>
+          <span class="m-name">{{ m.username || m.userId }}</span>
           <el-tag size="small" :type="m.role === 'admin' ? 'danger' : m.role === 'editor' ? 'primary' : 'info'">
             {{ roleLabel[m.role] }}
           </el-tag>
@@ -183,6 +197,13 @@ onMounted(() => {
         <el-button size="small" type="primary" @click="grantShare">授权</el-button>
       </div>
       <div v-else class="empty-tip">先在「团队」页创建团队，再把当前项目共享给它。</div>
+      <div class="share-list" v-if="shareList.length">
+        <div class="sl-title">当前项目已共享给：</div>
+        <div v-for="s in shareList" :key="s.teamId" class="share-row">
+          <span class="m-name">{{ s.username || s.teamId }}</span>
+          <el-tag size="small" :type="s.role === 'editor' ? 'primary' : 'info'">{{ roleLabel[s.role] || s.role }}</el-tag>
+        </div>
+      </div>
       <div class="proj-list" v-if="projects.length">
         <div v-for="p in projects" :key="p.id" class="proj-row">
           <span class="p-name">{{ p.name }}</span>
@@ -211,6 +232,9 @@ onMounted(() => {
 .member-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; font-size: 13px; }
 .m-name { flex: 1; }
 .proj-list { border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+.share-list { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+.sl-title { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.share-row { display: flex; align-items: center; gap: 10px; padding: 4px 2px; font-size: 13px; }
 .proj-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; font-size: 13px; }
 .p-name { flex: 1; }
 .p-ver { color: var(--text-muted); font-size: 12px; }

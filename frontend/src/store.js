@@ -294,12 +294,20 @@ export function currentProject() {
   return p || store.data.projects[0]
 }
 
+// applyProjectRoles 用服务端下发的项目列表刷新角色表（登录与刷新启动共用）。
+// projects 元素形如 {id, role}；缺失的 id 不删除旧值。
+export function applyProjectRoles(projects) {
+  if (!Array.isArray(projects)) return
+  for (const p of projects) {
+    if (p && p.id) store.projectRoles[p.id] = p.role || 'viewer'
+  }
+}
+
 // currentProjectRole 当前项目在服务端的共享角色。
 // 本地模式（无服务端）恒为 admin。
-// 服务端模式：角色表由登录时服务端下发（/api/me 的 projects[].role）；
-// 表中没有的项目（新建项目 / 角色尚未同步）按 admin 处理——
-// 真正的权限由服务端强制（viewer 的写请求会被 403 拒绝），
-// 前端默认只读会导致新用户完全无法保存。
+// 服务端模式：角色表由登录 / 启动探测时服务端下发（/api/me 的 projects[].role）；
+// 表中没有的项目（新建项目尚未同步角色）按 admin 处理——真正的权限由服务端强制
+// （viewer 的写请求会被 403 拒绝），前端默认只读会导致新用户完全无法保存。
 export function currentProjectRole() {
   if (!store.serverInfo) return 'admin'
   return store.projectRoles[store.data.currentProjectId] || 'admin'
@@ -332,7 +340,8 @@ export function initRemoteChangeListener() {
     _remoteListenerReady = true
     rt.EventsOnMultiple('apitool:data-changed', (d) => {
       let self = ''
-      try { self = localStorage.getItem('apitool_client_id') || '' } catch (e) { /* ignore */ }
+      // 与 httpBridge 一致用 sessionStorage：同浏览器不同标签页各自独立
+      try { self = sessionStorage.getItem('apitool_client_id') || '' } catch (e) { /* ignore */ }
       const from = d && d.clientId ? String(d.clientId) : ''
       if (from && self && from === self) return // 自己发起的保存：忽略
       remoteChanged.value = Date.now()
@@ -631,15 +640,21 @@ export async function initStore() {
       if (health) {
         store.serverInfo = health
         serverMode = true
-        try {
-          const res = await fetch(mod.apiBase() + '/api/me', { credentials: 'same-origin' })
-          if (res.ok) {
-            const d = await res.json()
-            if (d && d.ok) {
-              store.user = { id: d.result.user.id, username: d.result.user.username, server: health.version }
+        // 只有本机存过 refreshToken 才探测登录态：首次访问/已登出时直接进登录页，
+        // 避免明知未登录还打一次 /api/me 产生 401 报错噪声。
+        if (mod.getRefreshToken && mod.getRefreshToken()) {
+          try {
+            const res = await fetch(mod.apiBase() + '/api/me', { credentials: 'same-origin' })
+            if (res.ok) {
+              const d = await res.json()
+              if (d && d.ok) {
+                store.user = { id: d.result.user.id, username: d.result.user.username, server: health.version }
+                // 刷新页面后同样要恢复项目角色，否则 viewer 会被前端误判为可编辑
+                applyProjectRoles(d.result.projects)
+              }
             }
-          }
-        } catch (e) { /* 未登录 */ }
+          } catch (e) { /* 未登录 */ }
+        }
       }
     } catch (e) { /* 服务端不可达：保持本地/预览模式 */ }
   }
@@ -661,7 +676,8 @@ export async function initStore() {
   }
   store.loading = false
   store.loaded = true
-  if (ok) {
+  // 服务端模式下未登录时不拉版本号：会话级 RPC 需要鉴权，否则启动即刷 401。
+  if (ok && (!serverMode || store.user)) {
     try { store.appVersion = await GetVersion() } catch {}
   }
   // 轻量持久化监听：仅观察修订计数器（O(1)，不再深度遍历整个 store.data），
@@ -1298,6 +1314,10 @@ export async function clipImageURL(item) {
 // 从 Go 端拉取最新历史并写入 store（图片以相对路径存储，前端拼接 base 显示）
 export async function loadClipItems() {
   if (!hasGoBridge()) return
+  // 剪贴板采集是桌面端能力：网页/App 端（httpBridge）没有该系统接口，直接跳过
+  if (window.__WEBUI__) return
+  // 服务端模式未登录：会话级 RPC 会被拒（401），剪贴板历史登录后再拉
+  if (store.serverInfo && !store.user) return
   try {
     const items = await GetClipItems()
     store.data.clipboard.history = Array.isArray(items) ? items : []

@@ -1,6 +1,6 @@
 <script setup>
 const buildStamp = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '未知构建'
-import { onMounted, computed, ref, reactive, onBeforeUnmount } from 'vue'
+import { onMounted, computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
 import { store, initStore, currentApi, saveNow, currentProject, envDialogVisible, commonDialogVisible, openEnvDialog, openCommonDialog, initGenListener, initClipboardMonitor, openApiInTab, switchTab, closeTab, closeCurrentTab, closeOtherTabs, closeAllTabs, setSubTab, canEditProject, saveConflict, forceSaveNow, pullRemote, dismissConflict, remoteChanged, initRemoteChangeListener, reloadStore } from './store'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { RunTestCases, CloseClipboardWindow } from '../wailsjs/go/main/App'
@@ -57,8 +57,10 @@ onMounted(() => {
   initRemoteChangeListener()
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
-  initStore()
-  initClipboardMonitor()
+  // 剪贴板历史需登录后拉取：服务端模式下未登录时跳过，避免启动即 401。
+  initStore().finally(() => {
+    if (!store.serverInfo || store.user) initClipboardMonitor()
+  })
   // 系统托盘「运行全部测试」：执行当前项目全部用例
   EventsOn('apitool:tray-run-tests', async () => {
     try {
@@ -144,17 +146,27 @@ async function refreshRemote() {
 }
 
 const api = computed(() => currentApi())
-const navs = [
+// 导航项：网络抓包依赖系统代理与 CA 安装，仅桌面端可用（网页/App 端隐藏）。
+const allNavs = [
   { key: 'workspace', label: '接口调试', icon: '⚡' },
   { key: 'docs', label: '文档中心', icon: '📄' },
   { key: 'templates', label: '文档模板', icon: '📐' },
   { key: 'testing', label: '测试中心', icon: '🧪' },
   { key: 'capture', label: '请求捕获', icon: '🌐' },
-  { key: 'mitm', label: '网络抓包', icon: '🕵' },
+  { key: 'mitm', label: '网络抓包', icon: '🕵', desktopOnly: true },
   { key: 'tools', label: '工具', icon: '🔧' },
   { key: 'agent', label: 'AI Agent', icon: '🤖' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ]
+const navs = computed(() => {
+  const desktop = typeof window !== 'undefined' && !!window.__WAILS_V3__
+  return allNavs.filter(n => desktop || !n.desktopOnly)
+})
+
+// 视图被裁剪（如网页端停留在 mitm）时回退到工作台
+watch(navs, (list) => {
+  if (!list.some(n => n.key === store.view)) store.view = 'workspace'
+}, { immediate: true })
 </script>
 
 <template>
@@ -267,7 +279,7 @@ const navs = [
   </el-dialog>
 
   <!-- 前端构建时间戳：确认当前运行的是哪次构建（改完需 wails build 才会生效） -->
-  <div class="build-badge" :title="'客户端版本 ' + (store.appVersion || '-') + '；前端构建时间 ' + buildStamp">
+  <div class="build-badge" :title="'客户端版本 ' + (store.appVersion || (store.serverInfo && store.serverInfo.version) || '-') + '；前端构建时间 ' + buildStamp">
     {{ buildStamp.slice(5) }}
   </div>
 

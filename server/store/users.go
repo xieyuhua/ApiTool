@@ -187,9 +187,10 @@ func (d *DB) RemoveTeamMember(teamID, userID string) error {
 	return err
 }
 
-// TeamMembers 返回团队成员。
+// TeamMembers 返回团队成员（联表带出用户名，供前端展示）。
 func (d *DB) TeamMembers(teamID string) ([]MemberRow, error) {
-	rows, err := d.db.Query(`SELECT team_id, user_id, role FROM team_members WHERE team_id=?`, teamID)
+	rows, err := d.db.Query(`SELECT m.team_id, m.user_id, m.role, u.username FROM team_members m
+		LEFT JOIN users u ON u.id=m.user_id WHERE m.team_id=?`, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +198,11 @@ func (d *DB) TeamMembers(teamID string) ([]MemberRow, error) {
 	var out []MemberRow
 	for rows.Next() {
 		var m MemberRow
-		if err := rows.Scan(&m.TeamID, &m.UserID, &m.Role); err != nil {
+		var uname sql.NullString
+		if err := rows.Scan(&m.TeamID, &m.UserID, &m.Role, &uname); err != nil {
 			return nil, err
 		}
+		m.Username = uname.String
 		out = append(out, m)
 	}
 	return out, rows.Err()

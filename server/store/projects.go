@@ -162,6 +162,27 @@ func (d *DB) RevokeProject(projectID, teamID string) error {
 	return err
 }
 
+// ProjectGrants 返回项目的团队授权列表（带团队名，供前端展示已共享给谁）。
+func (d *DB) ProjectGrants(projectID string) ([]MemberRow, error) {
+	rows, err := d.db.Query(`SELECT pm.project_id, pm.team_id, pm.role, t.name FROM project_members pm
+		LEFT JOIN teams t ON t.id=pm.team_id WHERE pm.project_id=?`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []MemberRow
+	for rows.Next() {
+		var m MemberRow
+		var tname sql.NullString
+		if err := rows.Scan(&m.ProjectID, &m.TeamID, &m.Role, &tname); err != nil {
+			return nil, err
+		}
+		m.Username = tname.String // 复用该字段承载团队名
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // ---- user_prefs ----
 
 // SavePrefs 保存用户偏好（JSON 列，空串表示不变）。

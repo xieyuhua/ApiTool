@@ -44,7 +44,8 @@ type MemberRow struct {
 	TeamID    string `json:"teamId,omitempty"`
 	ProjectID string `json:"projectId,omitempty"`
 	UserID    string `json:"userId"`
-	Role      string `json:"role"` // admin | editor | viewer
+	Username  string `json:"username,omitempty"` // 成员列表展示用（TeamMembers 联表填充）
+	Role      string `json:"role"`               // admin | editor | viewer
 }
 
 // ProjectRow 项目（data 为 model.Project 整包 JSON）。

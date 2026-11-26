@@ -234,9 +234,11 @@ func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "读取项目失败")
 		return
 	}
+	grants, _ := s.db.ProjectGrants(id)
 	writeOK(w, map[string]interface{}{
 		"id": row.ID, "name": row.Name, "data": json.RawMessage(row.Data),
 		"version": row.Version, "role": role, "updatedAt": row.UpdatedAt,
+		"shares": grants,
 	})
 }
 

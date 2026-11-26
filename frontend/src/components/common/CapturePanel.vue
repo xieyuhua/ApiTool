@@ -128,8 +128,8 @@ async function doImportAsCases() {
     const n = await ImportCapturedAsTestCases(selected.value)
     await reloadStore()
     selected.value = []
-    ElMessage.success(`已导入 ${n} 条测试用例，前往「自动化测试」运行或压测`)
-    store.view = 'autotest'
+    ElMessage.success(`已导入 ${n} 条测试用例，前往「测试中心」运行或压测`)
+    store.view = 'testing'
   } catch (e) { ElMessage.error(String(e)) }
   finally { importing.value = false }
 }
