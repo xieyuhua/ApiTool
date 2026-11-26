@@ -466,8 +466,10 @@ export async function saveNow() {
       store.view = 'login'
       return
     }
-    // 409 → 版本冲突（服务端模式）：记录状态，UI 弹冲突对话框
-    if (/已有更新版本|409|冲突/.test(String(e && e.message || e))) {
+    // 409 → 版本冲突（服务端模式）：记录状态，UI 弹冲突对话框。
+    // 服务端有两种措辞：「已有更新版本（你基于 v..）」与「数据已过期（服务端为 v..）」，
+    // 都必须命中，否则冲突会静默失败、用户以为保存成功。
+    if (/已有更新版本|数据已过期|请刷新后重试|409|冲突/.test(String(e && e.message || e))) {
       saveConflict.value = { error: String(e && e.message || e), time: Date.now() }
       return
     }

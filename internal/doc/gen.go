@@ -238,6 +238,20 @@ func renderDoc(s storeapi.Store, dirID, apiID, format string) (docPayload, error
 // PreviewWatermark 按当前水印配置渲染 HTML 文档并在浏览器打开，返回临时文件路径。
 // 与 PDF 导出共用同一套 HTML 水印层，用于导出前核对水印效果。
 func PreviewWatermark(ctx context.Context, s storeapi.Store, dirID string, apiID string) (string, error) {
+	html, err := PreviewWatermarkHTML(s, dirID, apiID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(os.TempDir(), "apitool-watermark-preview-"+SanitizeFilename("watermark")+".html")
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	wailsrt.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
+	return path, nil
+}
+
+// PreviewWatermarkHTML 渲染带水印的文档 HTML（网页端直接在新标签页打开）。
+func PreviewWatermarkHTML(s storeapi.Store, dirID string, apiID string) (string, error) {
 	scope, err := loadDocScope(s, dirID, apiID)
 	if err != nil {
 		return "", err
@@ -245,13 +259,7 @@ func PreviewWatermark(ctx context.Context, s storeapi.Store, dirID string, apiID
 	if !WatermarkActive(scope.Watermark) {
 		return "", fmt.Errorf("水印未启用：请先在「导出水印」中开启并填写水印文字")
 	}
-	html := BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout)
-	path := filepath.Join(os.TempDir(), "apitool-watermark-preview-"+SanitizeFilename(scope.Title)+".html")
-	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
-		return "", err
-	}
-	wailsrt.BrowserOpenURL(ctx, "file:///"+filepath.ToSlash(path))
-	return path, nil
+	return BuildHTMLForExportWithLayout(scope.Title, scope.RootID, scope.Dirs, scope.Apis, scope.Common, scope.Watermark, scope.Layout), nil
 }
 
 // PreviewHTML 生成完整文档 HTML（含所选范围内的全部接口），供前端弹窗预览。

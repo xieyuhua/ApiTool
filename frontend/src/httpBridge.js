@@ -54,6 +54,14 @@ const localMethods = {
   StopShare: (token) => stopShare(token),
   // 打开链接 / 预览：浏览器新标签页
   OpenInBrowser: (url) => { window.open(url, '_blank', 'noopener'); return Promise.resolve(null) },
+  // 导出水印预览：服务端渲染 HTML，前端在新标签页以 blob 打开
+  PreviewDocWatermark: async (dirID, apiID) => {
+    const html = await callRPC('PreviewWatermarkHTML', [dirID || '', apiID || ''])
+    const url = URL.createObjectURL(new Blob([html || ''], { type: 'text/html;charset=utf-8' }))
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+    return '水印预览'
+  },
   // 桌面端独占但网页端可安全 no-op 的能力
   NotifyUpdated: () => Promise.resolve(null),
 }

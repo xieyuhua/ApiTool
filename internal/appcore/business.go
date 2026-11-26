@@ -193,6 +193,14 @@ func (a *App) ImportDocContent(name, content string) (string, error) {
 	return doc.ImportDocContent(a.data, name, content)
 }
 
+// PreviewWatermarkHTML 返回带水印的文档预览 HTML（网页端在新标签页打开，
+// 桌面端仍走 PreviewDocWatermark 的临时文件 + 系统浏览器）。
+func (a *App) PreviewWatermarkHTML(dirID, apiID string) (string, error) {
+	a.lock()
+	defer a.unlock()
+	return doc.PreviewWatermarkHTML(a.data, dirID, apiID)
+}
+
 // DocPresets 返回预置文档模板列表。
 func (a *App) DocPresets() []doc.DocPreset { return doc.DocPresetList() }
 
