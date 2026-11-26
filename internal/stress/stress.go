@@ -324,6 +324,25 @@ func stressHTML(r StressReport) string {
 }
 
 // ExportReport 将压测报告（JSON）导出为 Markdown / HTML 文件，返回保存路径（通过 bus.Bus 弹窗）。
+// RenderReport 渲染压测报告为（文件名, 字节），不弹对话框、不落盘。
+func RenderReport(reportJSON string, format string) (string, []byte, error) {
+	var r StressReport
+	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
+		return "", nil, fmt.Errorf("报告解析失败: %v", err)
+	}
+	var content, ext string
+	switch format {
+	case "html":
+		content, ext = stressHTML(r), ".html"
+	case "markdown", "":
+		content, ext = stressMarkdown(r), ".md"
+	default:
+		return "", nil, fmt.Errorf("不支持的格式: %s", format)
+	}
+	name := "stress-report-" + time.Now().Format("20060102-150405") + ext
+	return name, []byte(content), nil
+}
+
 func ExportReport(reportJSON string, format string, b bus.Bus) (string, error) {
 	var r StressReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {

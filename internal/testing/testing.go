@@ -934,6 +934,70 @@ func (e *Engine) BuildReportHTMLContent(reportJSON string) (string, error) {
 
 // ExportTestReport 将测试报告导出为 Markdown / HTML / Word / PDF 文件，返回保存路径。
 // Word / PDF 会按「文档中心 → 导出水印」配置加水印；PDF 由本机 Chromium 内核浏览器无头打印生成。
+// RenderTestReport 渲染测试报告为（文件名, 字节），不弹对话框、不落盘。
+// 供网页/App 端下载与桌面端对话框导出共用。
+func (e *Engine) RenderTestReport(reportJSON string, format string) (string, []byte, error) {
+	var r model.TestReport
+	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {
+		return "", nil, fmt.Errorf("报告解析失败: %v", err)
+	}
+	ext := ".md"
+	switch format {
+	case "html":
+		ext = ".html"
+	case "word", "docx":
+		ext = ".docx"
+	case "pdf":
+		ext = ".pdf"
+	case "markdown", "":
+	default:
+		return "", nil, fmt.Errorf("不支持的格式: %s（可选 markdown / html / word / pdf）", format)
+	}
+	name := doc.ExportFileName("test-report-"+r.PlanName, ext)
+	// 水印格式（pdf/word）：展开占位符
+	if format == "pdf" || format == "word" || format == "docx" {
+		data := e.host.ReadData()
+		proj := model.Project{}
+		if idx := store.ActiveProjectIndex(data); idx >= 0 {
+			proj = data.Projects[idx]
+		}
+		wm := doc.ExpandWatermark(doc.NormalizeWatermark(data.Settings.Watermark), proj.Name, time.Now())
+		cover := doc.EffectiveDocLayout(data, proj).Cover
+		if format == "pdf" {
+			tmp, err := os.CreateTemp("", "apitool-report-*.pdf")
+			if err != nil {
+				return "", nil, err
+			}
+			tmpPath := tmp.Name()
+			_ = tmp.Close()
+			defer func() { _ = os.Remove(tmpPath) }()
+			if err := doc.WriteHTMLToPDF(doc.BuildTestReportHTMLForExportWithCover(r, wm, cover), tmpPath); err != nil {
+				return "", nil, err
+			}
+			b, err := os.ReadFile(tmpPath)
+			if err != nil {
+				return "", nil, err
+			}
+			return name, b, nil
+		}
+		b, err := doc.BuildTestReportDOCXWithCover(r, wm, cover)
+		if err != nil {
+			return "", nil, err
+		}
+		return name, b, nil
+	}
+	var content string
+	if format == "html" {
+		content = doc.BuildTestReportHTML(r)
+	} else {
+		content = doc.BuildTestReportMarkdown(r)
+	}
+	if len(content) > 20<<20 {
+		content = content[:20<<20]
+	}
+	return name, []byte(content), nil
+}
+
 func (e *Engine) ExportTestReport(reportJSON string, format string) (string, error) {
 	var r model.TestReport
 	if err := json.Unmarshal([]byte(reportJSON), &r); err != nil {

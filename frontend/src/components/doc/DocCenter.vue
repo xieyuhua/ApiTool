@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ExportDoc, CopyDocMarkdown, ImportDoc, ShareTestReport, ExportTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
+import { CopyDocMarkdown, ImportDoc, ShareTestReport, CopyToClipboard } from '../../../wailsjs/go/main/App'
+import { exportDoc, exportTestReport } from '../../download'
 import { store, buildDirTree, saveNow, reloadStore, projectApis, projectDirs, projectReports, openApiInTab, setSubTab, currentProject } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 
@@ -38,8 +39,8 @@ async function doExport(format) {
   busy.value = true
   try {
     await saveNow()
-    const path = await ExportDoc(scopeDirId.value, '', format)
-    if (path) ElMessage.success('已导出：' + path)
+    const r = await exportDoc({ dirId: scopeDirId.value, format })
+    if (r.value) ElMessage.success(r.kind === 'file' ? '已下载：' + r.value : '已导出：' + r.value)
   } catch (e) {
     ElMessage.error(String(e))
   } finally { busy.value = false }
@@ -153,8 +154,8 @@ async function copyLink() {
 }
 async function exportReport(r, format) {
   try {
-    const path = await ExportTestReport(JSON.stringify(r), format)
-    if (path) ElMessage.success('已导出：' + path)
+    const res = await exportTestReport({ reportJSON: JSON.stringify(r), format })
+    if (res.value) ElMessage.success(res.kind === 'file' ? '已下载：' + res.value : '已导出：' + res.value)
   } catch (e) { ElMessage.error(String(e)) }
 }
 

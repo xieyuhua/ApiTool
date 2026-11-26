@@ -2,7 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  BuildSharedHTML, BuildSharedTitle, ExportDoc, ShareDoc,
+  BuildSharedHTML, BuildSharedTitle, ShareDoc,
   CreateShareLink, ListShares, StopShare, OpenInBrowser, CopyToClipboard,
   SyncShareBackend, RefreshShares,
 } from '../../../wailsjs/go/main/App'
@@ -73,8 +73,8 @@ async function copyCode() {
 }
 async function exportFile() {
   try {
-    const path = await ExportDoc(props.dirId, props.apiId, 'html')
-    if (path) ElMessage.success('已导出：' + path)
+    const r = await exportDoc({ dirId: props.dirId, apiId: props.apiId, format: 'html' })
+    if (r.value) ElMessage.success(r.kind === 'file' ? '已下载：' + r.value : '已导出：' + r.value)
   } catch (e) { ElMessage.error(String(e)) }
 }
 async function preview() {

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore, openApiInTab, closeTabsByApi, requestSave } from '../../store'
+import { store, buildTree, addDir, addApi, removeDir, removeApi, uid, normalizeApi, currentProject, switchProject, addProject, removeProject, saveNow, savedApiSnapshots, logStore, openApiInTab, closeTabsByApi, requestSaveForce } from '../../store'
 import { parseCli, FORMATS } from '../../cli'
 import { CopyToClipboard } from '../../../wailsjs/go/main/App'
 import LogPanel from './LogPanel.vue'
@@ -40,7 +40,7 @@ function confirmNewApi() {
     applyParsedToApi(api, cliParsed.value)
     if (newApiName.value.trim()) api.name = newApiName.value.trim()
     newApiVisible.value = false
-    requestSave()
+    requestSaveForce()
     return
   }
   const raw = newApiUrl.value.trim()
@@ -63,7 +63,7 @@ function confirmNewApi() {
   }
   if (newApiName.value.trim()) api.name = newApiName.value.trim()
   newApiVisible.value = false
-  requestSave()
+  requestSaveForce()
 }
 
 function applyParsedToApi(api, p) {
@@ -281,7 +281,7 @@ async function rename(node) {
       const a = p.apis.find(x => x.id === node.id)
       if (a) a.name = value
     }
-    requestSave()
+    requestSaveForce()
   } catch { /* 取消 */ }
 }
 
@@ -291,7 +291,7 @@ async function del(node) {
       node.type === 'dir' ? '删除目录会同时删除其下所有子目录和接口，确定删除？' : '确定删除该接口？',
       '删除确认', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     node.type === 'dir' ? removeDir(node.id) : removeApi(node.id)
-    requestSave()
+    requestSaveForce()
     ElMessage.success('已删除')
   } catch { /* 取消 */ }
 }
@@ -304,7 +304,7 @@ function duplicate(node) {
   copy.name = a.name + ' 副本'
   currentProject().apis.push(copy)
   openApiInTab(copy.id, { newTab: true })
-  requestSave()
+  requestSaveForce()
 }
 
 function handleCmd(cmd, node) {

@@ -3,9 +3,10 @@ import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GenerateTestCasesAsync, RunTestPlan, RunTestCases,
-  GenerateReportSummary, ExportTestReport, CopyToClipboard,
+  GenerateReportSummary, CopyToClipboard,
   GetCapturedRequests, ImportCapturedAsTestCases, ImportApisAsTestCases,
 } from '../../../wailsjs/go/main/App'
+import { exportTestReport } from '../../download'
 import {
   saveNow, currentProject, uid, projectApis,
   projectTestCases, projectTestPlans, projectReports,
@@ -333,8 +334,8 @@ async function genSummary() {
 async function exportReport(fmt) {
   if (!viewingReport.value) return
   try {
-    const path = await ExportTestReport(JSON.stringify(viewingReport.value), fmt)
-    if (path) ElMessage.success('已导出：' + path)
+    const r = await exportTestReport({ reportJSON: JSON.stringify(viewingReport.value), format: fmt })
+    if (r.value) ElMessage.success(r.kind === 'file' ? '已下载：' + r.value : '已导出：' + r.value)
   } catch (e) {
     ElMessage.error(String(e))
   }

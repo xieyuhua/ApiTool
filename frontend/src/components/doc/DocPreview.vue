@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ExportDoc, CopyDocMarkdown } from '../../../wailsjs/go/main/App'
+import { CopyDocMarkdown } from '../../../wailsjs/go/main/App'
+import { exportDoc } from '../../download'
 import { saveNow, currentProject, savedApiSnapshots } from '../../store'
 import ShareDialog from './ShareDialog.vue'
 
@@ -17,8 +18,8 @@ async function doExport(format) {
   busy.value = true
   try {
     await saveNow()
-    const path = await ExportDoc('', props.api.id, format)
-    if (path) ElMessage.success('已导出：' + path)
+    const r = await exportDoc({ dirId: '', apiId: props.api.id, format })
+    if (r.value) ElMessage.success(r.kind === 'file' ? '已下载：' + r.value : '已导出：' + r.value)
   } catch (e) {
     ElMessage.error(String(e))
   } finally { busy.value = false }

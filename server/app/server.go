@@ -110,6 +110,12 @@ func (s *Server) buildRoutes() {
 		s.serveSSE(w, r, userIDOf(r.Context()))
 	})))
 
+	// 导出下载（网页/App 端替代文件对话框）
+	m.Handle("GET /export/doc", s.requireAuth(http.HandlerFunc(s.handleExport)))
+	m.Handle("GET /export/test-report", s.requireAuth(http.HandlerFunc(s.handleExport)))
+	m.Handle("GET /export/stress-report", s.requireAuth(http.HandlerFunc(s.handleExport)))
+	m.Handle("GET /export/captured-openapi", s.requireAuth(http.HandlerFunc(s.handleExport)))
+
 	// 静态资源与 SPA（网页端主应用；登录态由前端处理，无需服务端门禁）
 	s.mountStatic(m)
 

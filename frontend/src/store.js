@@ -295,10 +295,14 @@ export function currentProject() {
 }
 
 // currentProjectRole 当前项目在服务端的共享角色。
-// 本地模式（无服务端）恒为 admin；服务端模式未在表中的项目视为 viewer（保守）。
+// 本地模式（无服务端）恒为 admin。
+// 服务端模式：角色表由登录时服务端下发（/api/me 的 projects[].role）；
+// 表中没有的项目（新建项目 / 角色尚未同步）按 admin 处理——
+// 真正的权限由服务端强制（viewer 的写请求会被 403 拒绝），
+// 前端默认只读会导致新用户完全无法保存。
 export function currentProjectRole() {
   if (!store.serverInfo) return 'admin'
-  return store.projectRoles[store.data.currentProjectId] || 'viewer'
+  return store.projectRoles[store.data.currentProjectId] || 'admin'
 }
 
 // canEditProject 当前项目是否可编辑。
@@ -357,6 +361,17 @@ function scheduleSave() {
 export function requestSave() {
   store.saveRev++
   scheduleSave()
+  scheduleAutoSync()
+}
+
+// requestSaveForce 结构性变更（增删接口/目录、重命名、导入等）强制落盘：
+// 不受调试脏标记抑制——否则用户只在调试面板里点过一下，
+// 后续新建的接口就永远不保存（网页端尤其严重）。
+export function requestSaveForce() {
+  store.saveRev++
+  clearDebugDirty()
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveNow, 300)
   scheduleAutoSync()
 }
 

@@ -6,6 +6,7 @@ import {
   ClearCapturedRequests, GenerateApiFromCaptured, ExportCapturedOpenAPI,
   BuildCapturedOpenAPI, CopyToClipboard, ImportCapturedAsTestCases,
 } from '../../../wailsjs/go/main/App'
+import { exportCapturedOpenAPI } from '../../download'
 import { store, saveNow, reloadStore } from '../../store'
 import { FORMATS } from '../../cli'
 
@@ -136,8 +137,8 @@ async function doImportAsCases() {
 async function doExport() {
   if (!selected.value.length) { ElMessage.warning('请先勾选要导出的捕获记录'); return }
   try {
-    const path = await ExportCapturedOpenAPI(selected.value, '浏览器捕获接口')
-    if (path) ElMessage.success('已导出：' + path)
+    const r = await exportCapturedOpenAPI({ ids: selected.value, title: '浏览器捕获接口' })
+    if (r.value) ElMessage.success(r.kind === 'file' ? '已下载：' + r.value : '已导出：' + r.value)
   } catch (e) { ElMessage.error(String(e)) }
 }
 

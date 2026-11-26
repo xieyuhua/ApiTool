@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"apitool/internal/bus"
+	"apitool/internal/capture"
 	"apitool/internal/doc"
 	"apitool/internal/jsonutil"
 	"apitool/internal/model"
@@ -146,6 +147,21 @@ func (a *App) DefaultDocBusinessCodes() []model.DocCode { return doc.DefaultBusi
 
 // DefaultDocSign 返回加密与验签默认内容。
 func (a *App) DefaultDocSign() string { return doc.DefaultSignTemplate() }
+
+// RenderTestReportContent 渲染测试报告（网页/App 端下载用）。
+func (a *App) RenderTestReportContent(reportJSON, format string) (string, []byte, error) {
+	return a.Engine.RenderTestReport(reportJSON, format)
+}
+
+// RenderStressReportContent 渲染压测报告（网页/App 端下载用）。
+func (a *App) RenderStressReportContent(reportJSON, format string) (string, []byte, error) {
+	return stress.RenderReport(reportJSON, format)
+}
+
+// ExportCapturedOpenAPI 将选中的捕获记录生成 OpenAPI 文档并返回（供下载）。
+func (a *App) RenderCapturedOpenAPI(ids []string, title string) (string, error) {
+	return capture.BuildOpenAPI(ids, title)
+}
 
 // ---- 压测 ----
 
